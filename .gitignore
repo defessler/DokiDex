@@ -19,3 +19,6 @@ tmp/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Claude Code harness artifacts
+.claude/
