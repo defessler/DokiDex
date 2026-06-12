@@ -1,0 +1,41 @@
+# llama-swap config — one OpenAI-compatible endpoint on :8080,
+# swaps the right llama-server per requested model name.
+# llama.cpp build b9616 (CUDA 13.3), llama-swap v224.
+
+healthCheckTimeout: 900   # coder-big pages ~60GB from disk on first load
+logLevel: info
+
+models:
+  # Model A — daily driver, fully on GPU.
+  # Weights ~17.7GB (UD-Q4_K_XL) + ~6.4GB KV (q8, 128k) + overhead ≈ ~26GB VRAM.
+  "coder-fast":
+    cmd: |
+      D:\Projects\DokiCode\serving\llama.cpp\llama-server.exe
+      -m D:\Projects\DokiCode\models\Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
+      --port ${PORT}
+      -ngl 99
+      -c 131072
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --cache-reuse 256
+      --jinja
+
+  # Model B — heavy hitter. gpt-oss-120b (5.1B active), experts of the first
+  # 24 layers (of 36) kept in system RAM. GPU ≈ ~27GB, RAM ≈ ~40GB.
+  # Tune --n-cpu-moe DOWN (more experts on GPU = faster) until VRAM ~30GB.
+  "coder-big":
+    cmd: |
+      D:\Projects\DokiCode\serving\llama.cpp\llama-server.exe
+      -m D:\Projects\DokiCode\models\gpt-oss-120b-mxfp4-00001-of-00003.gguf
+      --port ${PORT}
+      -ngl 99
+      --n-cpu-moe 22
+      -c 131072
+      -b 2048
+      -ub 2048
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --cache-reuse 256
+      --jinja
