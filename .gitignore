@@ -22,3 +22,7 @@ desktop.ini
 
 # Claude Code harness artifacts
 .claude/
+
+# .NET build artifacts
+[Bb]in/
+[Oo]bj/
