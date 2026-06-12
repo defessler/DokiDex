@@ -1,0 +1,5 @@
+{
+  "name": "t1-reverse-flag",
+  "kind": "feature",
+  "prompt": "Add a --reverse flag to the console app: `dotnet run --project src/App -- --reverse <text>` must print the text reversed (e.g. 'hello' -> 'olleh'). Add at least one unit test covering the new behavior. Run dotnet test and make sure everything passes."
+}

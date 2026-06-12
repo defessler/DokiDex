@@ -1,0 +1,18 @@
+{"ts":"2026-06-12T16:20:52","harness":"crush","model":"coder-fast","task":"t2-slugify-bug","pass":false,"seconds":0.2,"note":"CHECK: tests failed"}
+{"ts":"2026-06-12T16:21:38","harness":"crush","model":"coder-fast","task":"t2-slugify-bug","pass":false,"seconds":0.2,"note":"CHECK: tests failed"}
+{"ts":"2026-06-12T16:29:29","harness":"crush","model":"coder-fast","task":"t2-slugify-bug","pass":true,"seconds":18.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:29:41","harness":"crush","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":0.1,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-12T16:30:03","harness":"crush","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":0.0,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-12T16:31:39","harness":"crush","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":69.0,"note":"CHECK: no test added for reverse"}
+{"ts":"2026-06-12T16:32:19","harness":"opencode","model":"coder-fast","task":"t2-slugify-bug","pass":true,"seconds":12.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:32:31","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":0.0,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-12T16:32:45","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":0.0,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-12T16:33:51","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":35.7,"note":"CHECK: no test added for reverse"}
+{"ts":"2026-06-12T16:36:09","harness":"crush","model":"coder-big","task":"t2-slugify-bug","pass":true,"seconds":120.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:38:08","harness":"crush","model":"coder-big","task":"t1-reverse-flag","pass":false,"seconds":110.8,"note":"CHECK: no test added for reverse"}
+{"ts":"2026-06-12T16:40:32","harness":"crush","model":"coder-big","task":"t1-reverse-flag","pass":true,"seconds":120.7,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:42:27","harness":"opencode","model":"coder-big","task":"t1-reverse-flag","pass":true,"seconds":103.1,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:43:48","harness":"opencode","model":"coder-big","task":"t2-slugify-bug","pass":true,"seconds":67.7,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:44:50","harness":"crush","model":"coder-fast","task":"t1-reverse-flag","pass":true,"seconds":53.7,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:45:02","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":3.3,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-12T16:45:58","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":true,"seconds":41.4,"note":"CHECK: PASS"}

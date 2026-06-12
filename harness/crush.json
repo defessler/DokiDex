@@ -1,0 +1,29 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "local": {
+      "name": "DokiCode local (llama-swap)",
+      "type": "openai-compat",
+      "base_url": "http://127.0.0.1:8080/v1/",
+      "api_key": "dummy",
+      "models": [
+        {
+          "id": "coder-fast",
+          "name": "Qwen3-Coder-30B-A3B (GPU, fast)",
+          "context_window": 131072,
+          "default_max_tokens": 8192
+        },
+        {
+          "id": "coder-big",
+          "name": "gpt-oss-120b (MoE offload, quality)",
+          "context_window": 131072,
+          "default_max_tokens": 8192
+        }
+      ]
+    }
+  },
+  "models": {
+    "large": { "model": "coder-fast", "provider": "local" },
+    "small": { "model": "coder-fast", "provider": "local" }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DokiCode local (llama-swap)",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1"
+      },
+      "models": {
+        "coder-fast": {
+          "name": "Qwen3-Coder-30B-A3B (GPU, fast)",
+          "limit": { "context": 131072, "output": 8192 }
+        },
+        "coder-big": {
+          "name": "gpt-oss-120b (MoE offload, quality)",
+          "limit": { "context": 131072, "output": 8192 }
+        }
+      }
+    }
+  },
+  "model": "local/coder-fast"
+}
