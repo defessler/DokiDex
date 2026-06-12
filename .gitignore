@@ -1,0 +1,21 @@
+# Model weights — huge binaries, never in git
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# llama.cpp / tool binaries dropped into the repo
+serving/llama.cpp/
+*.exe
+*.dll
+
+# Logs, scratch, scorecards-in-progress
+*.log
+tmp/
+.scratch/
+
+# Editor/OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
