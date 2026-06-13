@@ -3,7 +3,7 @@
 # Each run: fresh copy of sandbox-seed -> task inject -> headless harness run
 # -> objective check -> append to results.jsonl.
 param(
-    [Parameter(Mandatory)][ValidateSet("crush", "opencode")][string]$Harness,
+    [Parameter(Mandatory)][ValidateSet("crush", "opencode", "claw")][string]$Harness,
     [Parameter(Mandatory)][string]$Model,
     [Parameter(Mandatory)][string]$Task,
     [int]$TimeoutSec = 540,
@@ -42,10 +42,41 @@ if ($Harness -eq "crush") {
     # '--' terminates flag parsing: prompt text containing --tokens must not
     # be eaten by the CLI parser (Start-Process joins args UNQUOTED).
     $argList = @("run", "-q", "-m", "local/$Model", "--", $taskDef.prompt)
-} else {
+} elseif ($Harness -eq "opencode") {
     # Native exe, NOT the npm .cmd shim: cmd.exe would interpret <, >, & in prompts.
     $exe = "$env:APPDATA\npm\node_modules\opencode-ai\bin\opencode.exe"
     $argList = @("run", "-m", "local/$Model", "--", $taskDef.prompt)
+} else {
+    # Claw Code - clean-room Rust reimpl of the Claude Code harness, via the
+    # codetwentyfive/claw-code-local fork that wires in OpenAI-compatible providers.
+    # Build with evals\build-claw.ps1 (needs Rust); override path with $env:CLAW_EXE.
+    $exe = if ($env:CLAW_EXE) {
+        $env:CLAW_EXE
+    } elseif (Test-Path "$env:LOCALAPPDATA\claw-code-local\rust\target\release\claw.exe") {
+        "$env:LOCALAPPDATA\claw-code-local\rust\target\release\claw.exe"
+    } elseif (Get-Command claw -ErrorAction SilentlyContinue) {
+        (Get-Command claw).Source
+    } else {
+        throw 'claw.exe not found - run evals\build-claw.ps1 first (or set $env:CLAW_EXE)'
+    }
+
+    # claw reads CLAUDE.md, not AGENTS.md. Mirror the seed's conventions so the
+    # bake-off stays apples-to-apples (same rules, different harness).
+    $agentsFile = Join-Path $work "AGENTS.md"
+    if (Test-Path $agentsFile) { Copy-Item $agentsFile (Join-Path $work "CLAUDE.md") -Force }
+
+    # Provider routing (api/src/providers/mod.rs detect_provider_kind): with no
+    # Anthropic auth present and OPENAI_API_KEY set, a non-claude/grok model name
+    # routes to the OpenAI-compatible client -> our llama-swap endpoint.
+    $env:OPENAI_BASE_URL = "http://127.0.0.1:8080/v1"
+    $env:OPENAI_API_KEY = "dummy"
+    $savedAnthropic = $env:ANTHROPIC_API_KEY
+    Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
+
+    # 'prompt' = non-interactive one-shot; '--' guards dash-leading prompt text;
+    # danger-full-access auto-runs tools (safe: throwaway workspace, like the
+    # other harnesses in headless mode).
+    $argList = @("--model", $Model, "--permission-mode", "danger-full-access", "prompt", "--", $taskDef.prompt)
 }
 
 # CRITICAL: crush/opencode 'run' accept piped stdin; a never-closing pipe hangs
@@ -59,6 +90,7 @@ $p = Start-Process -FilePath $exe -ArgumentList $argList -WorkingDirectory $work
 $timedOut = -not $p.WaitForExit($TimeoutSec * 1000)
 if ($timedOut) { $p.Kill($true) }
 $seconds = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
+if ($Harness -eq "claw" -and $savedAnthropic) { $env:ANTHROPIC_API_KEY = $savedAnthropic }
 
 # Objective check (isolated process so check's exit code is clean)
 $pass = $false; $note = "timeout"

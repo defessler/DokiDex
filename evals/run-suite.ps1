@@ -1,7 +1,7 @@
 # Run the full golden-task suite for one harness × model and write a scorecard.
 # Usage: .\run-suite.ps1 -Harness crush -Model coder-fast
 param(
-    [Parameter(Mandatory)][ValidateSet("crush", "opencode")][string]$Harness,
+    [Parameter(Mandatory)][ValidateSet("crush", "opencode", "claw")][string]$Harness,
     [Parameter(Mandatory)][string]$Model,
     [int]$TimeoutSec = 540
 )

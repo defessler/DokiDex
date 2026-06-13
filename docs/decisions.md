@@ -48,3 +48,44 @@
 - TDD suggested a 7B FIM model, but at 32GB VRAM the **3B Q8** (~3GB) is the better pick: it coexists with the agent model and FIM latency favors smaller. Quality at 3B for fill-in-the-middle is excellent (292 tok/s, correct completions).
 - **Coexistence solved with `coder-fast-lite`** (coder-fast at 64k ctx, ~21GB) instead of a tinier FIM model: 64k is plenty of agent context, and 21GB + 6.6GB FIM = ~27.6GB fits with margin. Full-128k coder-fast (30GB) cannot run alongside FIM.
 - FIM served on a **dedicated `:8012`** rather than a llama-swap group — keeps autocomplete always-on and independent of which agent model is swapped in.
+
+## 2026-06-13 — Harness watchlist: Claw Code wired in as a third eval challenger
+
+Added **`claw`** as a `-Harness` option in `run-eval.ps1` / `run-suite.ps1` so
+Claw Code can be bake-off'd against Crush/OpenCode on the same 11-task suite.
+**Status: evaluating, not adopted** — Crush stays the daily driver until claw
+beats the 91% scorecard with zero tool-call flakes on our local models.
+
+Why it cleared the bar to even get wired in (vs. OpenClaw, which is a
+personal-assistant/chat gateway, not a coding harness, and was rejected):
+
+- **Pure-Rust `claw.exe`, no Node** — the `codetwentyfive/claw-code-local` fork
+  of `ultraworkers/claw-code-parity` (a clean-room Claude Code harness reimpl).
+  Matches Crush's Windows-native, no-runtime advantage.
+- **Drives the local endpoint** — with `OPENAI_API_KEY` set and no Anthropic
+  auth, `detect_provider_kind()` routes a non-claude/grok model name to the
+  OpenAI-compatible client → llama-swap (`rust/crates/api/src/providers/mod.rs`).
+- **Headless one-shot**: `claw --model <m> --permission-mode danger-full-access
+  prompt -- "<task>"`. Default permission mode is already danger-full-access
+  (auto-executes tools) — same posture as headless crush/opencode `run`; safe
+  only on the throwaway eval workspaces.
+- **MCP / LSP / 3 permission modes / 19 gated tools** on paper (README parity).
+
+Runner integration details (`run-eval.ps1` claw branch):
+- Mirrors the seed's `AGENTS.md` → `CLAUDE.md` per run, since claw reads
+  CLAUDE.md — keeps conventions identical across harnesses (fair bake-off).
+- Sets `OPENAI_BASE_URL`/`OPENAI_API_KEY`, clears `ANTHROPIC_API_KEY` for the
+  child (restored after) so routing can't fall back to Anthropic. Assumes no
+  saved `claw login` OAuth token on the machine.
+- Exe resolution: `$env:CLAW_EXE` → `%LOCALAPPDATA%\claw-code-local\…\claw.exe`
+  → `claw` on PATH.
+
+**Prerequisite to run it:** the binary must be built from source — no prebuilt
+Windows release exists for any claw-code repo, and Rust isn't installed here yet.
+`evals\build-claw.ps1` clones + `cargo build`s it (needs rustup; the
+`stable-x86_64-pc-windows-gnu` toolchain avoids the VS C++ build-tools
+dependency). Scorecard is pending that build.
+
+Caveats on the radar: ~3-month-old project, fragmented fork namespace
+(`instructkr/claw-code` vs the parity reimpl vs this local fork), inflated
+star/fork metrics. Per our philosophy: watch, measure, don't switch on hype.
