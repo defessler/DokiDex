@@ -25,6 +25,7 @@ These pages are meant to be read in order, like chapters. Each one is short.
 | 5 | [Why It's Built This Way](5-why-its-built-this-way.md) | The interesting choices — two brains, one search engine, a "driving test" for the robot. |
 | 6 | [Glossary](6-glossary.md) | Every nerdy word (VRAM, MoE, quant, MCP, FIM…) explained like you're five. |
 | 7 | [Quick Start — How Do I Use It?](7-quick-start.md) | The actual commands: turn on the brain, talk to the agent, autocomplete, and the eval suite. |
+| 8 | [Image & Video Generation](8-image-and-video.md) | Making local, unfiltered pictures and short videos on the same GPU. |
 
 > 🚀 **Just want to run it, not read about it?** Skip straight to the [Quick Start](7-quick-start.md).
 

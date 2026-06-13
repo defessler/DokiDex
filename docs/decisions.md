@@ -121,3 +121,26 @@ matches claw's parser. Runner support stays in for one-command re-tests
 (Correction: a single initial smoke test wrongly implied claw couldn't execute
 tools at all; the suite corrected that to 45% — exactly why we never judge on
 one sample.)
+
+## 2026-06-13 — Media generation: local image + video, fully headless
+
+Added a fully-local, unrestricted image + video capability + a one-command installer
+(`setup.ps1 -Media`). Tool: **SwarmUI** (friendly UI on the ComfyUI engine); the
+ComfyUI backend is provisioned **100% headlessly** via the `InstallConfirmWS`
+WebSocket (no GUI wizard). Runs as the `doki up media` GPU-exclusive mode on `:7801`.
+
+Verified live (2026-06-13):
+- **Image — Z-Image Turbo** (uncensored, arch `z-image`): coherent photoreal 1024²
+  in **54s** first call (incl. auto encoder/VAE download), ~seconds after.
+- **Video — Wan 2.1 1.3B** (uncensored): coherent 832×480 16fps 1.56s clip in **25s**.
+
+Reliability finding → default model choice: **Wan 2.1 14B** at 832×480×25f maxes the
+32GB card (~700MB free → VAE-tiling/offload thrash, 20+ min/clip; had to hard-kill
+ComfyUI to recover). So the **reliable default is Wan 1.3B** (~22GB headroom,
+~25s/clip); 14B + the Lightx2v 4-step LoRA are a `-Models full` quality opt-in (keep
+res/frames modest). Image default: Z-Image Turbo.
+
+Unrestricted: SwarmUI/ComfyUI apply no content filter and the base models are
+uncensored; nothing leaves the machine. Only hard limits are legal (no CSAM; no
+non-consensual real-person sexual content). Media is GPU-exclusive with the LLM on
+32GB — `doki` enforces the mutual exclusion. Docs: `docs/wiki/8-image-and-video.md`.
