@@ -1,0 +1,5 @@
+{
+  "name": "t11-stats-flag",
+  "kind": "feature",
+  "prompt": "Add a --stats flag to the console app: `dotnet run --project src/App -- --stats <text>` must print exactly two lines: `words=<N>` (word count of the text, reuse StringUtils.WordCount) and `chars=<M>` (character count of the joined argument text). Add the flag to the usage message. Existing flags must keep working. Run dotnet test and make sure everything passes."
+}

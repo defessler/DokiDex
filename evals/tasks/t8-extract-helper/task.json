@@ -1,0 +1,5 @@
+{
+  "name": "t8-extract-helper",
+  "kind": "refactor",
+  "prompt": "src/App/ReportFormatter.cs duplicates the exact same normalization logic in FormatHeader and FormatFooter. Refactor: extract the shared normalization into a single private helper method used by both public methods. Public behavior must not change at all. Run dotnet test and make sure everything still passes."
+}

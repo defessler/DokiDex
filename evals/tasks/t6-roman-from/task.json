@@ -1,0 +1,5 @@
+{
+  "name": "t6-roman-from",
+  "kind": "tdd-feature",
+  "prompt": "The test suite contains tests for a RomanNumeral.FromRoman method that has not been implemented yet, so the build currently fails. Implement FromRoman in src/App/RomanNumeral.cs so the whole test suite passes: it must parse valid Roman numerals for 1..3999 including subtractive forms (IV, IX, XL, XC, CD, CM), and throw ArgumentException for null, empty, or strings containing invalid characters."
+}

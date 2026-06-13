@@ -16,3 +16,14 @@
 {"ts":"2026-06-12T16:44:50","harness":"crush","model":"coder-fast","task":"t1-reverse-flag","pass":true,"seconds":53.7,"note":"CHECK: PASS"}
 {"ts":"2026-06-12T16:45:02","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":false,"seconds":3.3,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
 {"ts":"2026-06-12T16:45:58","harness":"opencode","model":"coder-fast","task":"t1-reverse-flag","pass":true,"seconds":41.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:54:43","harness":"crush","model":"coder-fast","task":"t1-reverse-flag","pass":true,"seconds":37.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:54:56","harness":"crush","model":"coder-fast","task":"t10-wordcount-whitespace","pass":true,"seconds":11.2,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:55:19","harness":"crush","model":"coder-fast","task":"t11-stats-flag","pass":true,"seconds":19.5,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:55:32","harness":"crush","model":"coder-fast","task":"t2-slugify-bug","pass":true,"seconds":11.0,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:55:53","harness":"crush","model":"coder-fast","task":"t3-kelvin","pass":true,"seconds":19.6,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:56:37","harness":"crush","model":"coder-fast","task":"t4-csv-quotes","pass":true,"seconds":42.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:56:59","harness":"crush","model":"coder-fast","task":"t5-inventory-bug","pass":true,"seconds":20.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:57:39","harness":"crush","model":"coder-fast","task":"t6-roman-from","pass":true,"seconds":38.2,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:58:29","harness":"crush","model":"coder-fast","task":"t7-wordcount-flag","pass":true,"seconds":45.3,"note":"CHECK: PASS"}
+{"ts":"2026-06-12T16:59:15","harness":"crush","model":"coder-fast","task":"t8-extract-helper","pass":false,"seconds":45.2,"note":"CHECK: tests (incl. hidden) failed ΓÇö behavior changed"}
+{"ts":"2026-06-12T16:59:32","harness":"crush","model":"coder-fast","task":"t9-arch-doc","pass":true,"seconds":14.6,"note":"CHECK: PASS"}

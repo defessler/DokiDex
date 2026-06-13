@@ -1,0 +1,5 @@
+{
+  "name": "t7-wordcount-flag",
+  "kind": "feature",
+  "prompt": "Add a --wordcount flag to the console app: `dotnet run --project src/App -- --wordcount <text>` must print just the number of words in the text (reuse the existing StringUtils.WordCount). The existing --slug flag and plain echo behavior must keep working. Update the usage message. Run dotnet test and make sure everything passes."
+}

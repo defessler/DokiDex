@@ -1,0 +1,5 @@
+{
+  "name": "t9-arch-doc",
+  "kind": "comprehension",
+  "prompt": "Write a docs/ARCHITECTURE.md file (create the docs folder) that describes this codebase for a new contributor: the purpose of each public type in src/App (StringUtils, CsvParser, Inventory, TemperatureConverter, RomanNumeral, and the Program CLI with its flags), and how the tests are organized. Use markdown headings. At least 150 words."
+}

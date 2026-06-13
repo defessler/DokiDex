@@ -1,0 +1,5 @@
+{
+  "name": "t4-csv-quotes",
+  "kind": "feature",
+  "prompt": "Upgrade CsvParser.ParseLine (src/App/CsvParser.cs) to support double-quoted fields per RFC 4180: a field wrapped in double quotes may contain commas, and a doubled quote inside a quoted field is an escaped literal quote. Behavior for unquoted fields must not change. Update the doc comment, add unit tests for the new behavior, and make sure dotnet test passes."
+}

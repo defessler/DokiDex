@@ -39,3 +39,14 @@ Tuning history: `--n-cpu-moe 24` → 116 tok/s prefill, 15 tok/s decode @7.3k. G
 **Usage guidance:** coder-fast is the daily driver (fast everything). coder-big is opt-in for hard reasoning tasks; its first long-context turn is slow (~155 tok/s prefill ≈ ~3 min for a fresh 30k context), then cached turns are fine. Both models pass native tool-calling.
 
 **Phase 1 exit criteria: all met (2026-06-12).**
+
+## Phase 3 — golden-task baseline (2026-06-12)
+
+11-task suite (`evals/tasks/`), headless via Crush, all tasks pre-validated to fail unsolved.
+
+| Combo | Score | Notes |
+|---|---|---|
+| **Crush × coder-fast** | **10/11 (91%)** | Only t8-extract-helper failed: hidden tests caught a behavior change during refactor — the known weak spot (semantic preservation) for ~30B local models. Avg 27.8s/task. |
+
+Gate was ≥60% — **passed with margin**. Full detail: `docs/scorecards/2026-06-12-crush-coder-fast.md`.
+Tool-call reliability: 0 malformed tool calls observed across 19 headless agent runs today.

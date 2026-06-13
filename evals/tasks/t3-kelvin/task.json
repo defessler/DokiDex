@@ -1,0 +1,5 @@
+{
+  "name": "t3-kelvin",
+  "kind": "feature",
+  "prompt": "Extend TemperatureConverter (src/App/TemperatureConverter.cs) with CelsiusToKelvin and KelvinToCelsius methods (Kelvin = Celsius + 273.15). Add unit tests for both new methods. Run dotnet test and make sure everything passes."
+}

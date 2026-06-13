@@ -1,0 +1,5 @@
+{
+  "name": "t10-wordcount-whitespace",
+  "kind": "bugfix",
+  "prompt": "StringUtils.WordCount currently treats only spaces as word separators. Tabs and newlines must also separate words. Fix WordCount in src/App/StringUtils.cs and add unit tests covering tabs and newlines. Run dotnet test and make sure everything passes."
+}
