@@ -26,9 +26,11 @@ coding with `.\doki.ps1 up` (or `up coexist`).
   `setup.ps1 -Media` (no clicking through an install wizard).
 - **Image:** **Z-Image Turbo** — fast, photoreal, uncensored. A 1024×1024 image in a
   few seconds.
-- **Video:** **Wan 2.1 1.3B** — a ~1.5‑second clip in ~25 seconds, reliably. A bigger
-  **Wan 14B** is available via `setup.ps1 -Media -Models full` for higher quality, but
-  it's minutes‑per‑clip and tight on 32 GB VRAM — so 1.3B is the daily driver.
+- **Video:** **Wan 2.1 1.3B** — a ~1.5‑second clip in ~25 seconds, reliably (up to
+  832×480). **Wan 14B** (via `setup.ps1 -Media -Models full`) is visibly higher quality
+  and also reliable — but *only* at modest settings: **480×320, ~17 frames, 4 steps with
+  the Lightx2v LoRA (~90 s/clip)**. Push the resolution or frame count higher and it
+  thrashes the 32 GB card. So: **1.3B for fast, 14B‑small for quality.**
 
 ## "No filter" — and the one real limit
 

@@ -143,4 +143,9 @@ res/frames modest). Image default: Z-Image Turbo.
 Unrestricted: SwarmUI/ComfyUI apply no content filter and the base models are
 uncensored; nothing leaves the machine. Only hard limits are legal (no CSAM; no
 non-consensual real-person sexual content). Media is GPU-exclusive with the LLM on
-32GB — `doki` enforces the mutual exclusion. Docs: `docs/wiki/8-image-and-video.md`.
+32GB — `doki` enforces the mutual exclusion.
+
+Follow-up: **Wan 14B is reliable after all — at a VRAM-safe config.** 480×320 / 17
+frames / 4-step Lightx2v LoRA generates in **~87s** (verified) and is visibly higher
+quality than 1.3B. So the rule is res/frames, not the model: 1.3B for speed (≤832×480),
+14B-small for quality. Docs: `docs/wiki/8-image-and-video.md`.
