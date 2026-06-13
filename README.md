@@ -14,6 +14,7 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 .\doki.ps1 up coexist  #   + autocomplete → FIM on :8012
 .\doki.ps1 up media    # image + video    → SwarmUI on :7801
 .\doki.ps1 status      # what's running + health      .\doki.ps1 down
+.\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
 ```
 
 GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and the image/video server. The three things you launch yourself: the CLI (**Crush**), the chat app (**Chatbox**), and the editor (**llama.vscode**).
