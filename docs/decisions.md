@@ -89,3 +89,35 @@ dependency). Scorecard is pending that build.
 Caveats on the radar: ~3-month-old project, fragmented fork namespace
 (`instructkr/claw-code` vs the parity reimpl vs this local fork), inflated
 star/fork metrics. Per our philosophy: watch, measure, don't switch on hype.
+
+### Result (2026-06-13): 5/11 (45%) — flaky tool calls; Crush (91%) keeps the slot
+
+Built `claw.exe` (Rust 1.96 MSVC; ring/rustls compiled clean in ~32s) and ran the
+full suite → `docs/scorecards/2026-06-13-claw-coder-fast.md`.
+
+| Harness × coder-fast | Score |
+|---|---|
+| Crush | 10/11 (91%) |
+| **claw** | **5/11 (45%)** |
+
+Passed (real edits landed, so tool execution genuinely works): t1, t3, t6, t7, t10.
+Failed: t2/t4/t5/t11 (edited but wrong fix / broke build), t8 (1.1s no-op),
+t9 (no file written).
+
+Root cause = **tool-call flakiness**, not a hard break. claw sends proper OpenAI
+`tools` (`openai_compat.rs:664`), but its Claude-Code-derived prompt also elicits
+a *textual* `<function=…>` format from Qwen3-Coder that intermittently isn't
+executed — the call leaks through as content and no edit happens. Proven flaky:
+**t9 failed in the suite but PASSED on an identical re-run** (10.4s, file created),
+so the true rate is ~45–55% with run-to-run variance.
+
+That fails the precise criterion Crush won Phase 2 on — *zero flakes* — and a
+correctness gap on the harder bugfixes compounds it. **Verdict: not adopted;**
+Crush stays the daily driver. Worth a re-judge if the fork adds robust native
+`tool_calls` parsing for OpenAI endpoints, or against a model whose tool format
+matches claw's parser. Runner support stays in for one-command re-tests
+(`run-suite.ps1 -Harness claw -Model coder-fast`).
+
+(Correction: a single initial smoke test wrongly implied claw couldn't execute
+tools at all; the suite corrected that to 45% — exactly why we never judge on
+one sample.)

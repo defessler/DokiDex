@@ -27,3 +27,14 @@
 {"ts":"2026-06-12T16:58:29","harness":"crush","model":"coder-fast","task":"t7-wordcount-flag","pass":true,"seconds":45.3,"note":"CHECK: PASS"}
 {"ts":"2026-06-12T16:59:15","harness":"crush","model":"coder-fast","task":"t8-extract-helper","pass":false,"seconds":45.2,"note":"CHECK: tests (incl. hidden) failed ΓÇö behavior changed"}
 {"ts":"2026-06-12T16:59:32","harness":"crush","model":"coder-fast","task":"t9-arch-doc","pass":true,"seconds":14.6,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T01:53:33","harness":"claw","model":"coder-fast","task":"t1-reverse-flag","pass":true,"seconds":21.1,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T01:53:49","harness":"claw","model":"coder-fast","task":"t10-wordcount-whitespace","pass":true,"seconds":13.2,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T01:54:11","harness":"claw","model":"coder-fast","task":"t11-stats-flag","pass":false,"seconds":20.4,"note":"CHECK: build failed"}
+{"ts":"2026-06-13T01:54:31","harness":"claw","model":"coder-fast","task":"t2-slugify-bug","pass":false,"seconds":17.0,"note":"CHECK: tests failed"}
+{"ts":"2026-06-13T01:54:47","harness":"claw","model":"coder-fast","task":"t3-kelvin","pass":true,"seconds":13.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T01:55:29","harness":"claw","model":"coder-fast","task":"t4-csv-quotes","pass":false,"seconds":41.1,"note":"CHECK: tests (incl. hidden) failed"}
+{"ts":"2026-06-13T01:55:59","harness":"claw","model":"coder-fast","task":"t5-inventory-bug","pass":false,"seconds":27.2,"note":"CHECK: tests failed"}
+{"ts":"2026-06-13T01:56:14","harness":"claw","model":"coder-fast","task":"t6-roman-from","pass":true,"seconds":12.5,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T01:56:35","harness":"claw","model":"coder-fast","task":"t7-wordcount-flag","pass":true,"seconds":15.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T01:56:39","harness":"claw","model":"coder-fast","task":"t8-extract-helper","pass":false,"seconds":1.1,"note":"CHECK: tests (incl. hidden) failed — behavior changed"}
+{"ts":"2026-06-13T01:56:46","harness":"claw","model":"coder-fast","task":"t9-arch-doc","pass":false,"seconds":7.4,"note":"CHECK: docs/ARCHITECTURE.md not created"}
