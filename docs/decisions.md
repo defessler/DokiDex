@@ -173,3 +173,19 @@ The refresh *process* is now validated end-to-end: HF-verify → wire `coder-can
 delete the GGUF. Image/video: Wan 2.7 (MoE 27B/14B) and Flux.2 exist but are heavier
 than the current picks with no 32GB win, so not pursued. The incumbents ARE the most
 reliable available — confirmed by measurement, not vibes.
+
+### Candidate #2 (2026-06-13): Qwen3-Coder-Next-REAP-48B-A3B → rejected at smoke test
+
+Tried the incumbent's successor line (the most-likely-to-win candidate). Qwen3-Coder-Next
+is fittable on 32GB only as the **REAP-pruned 48B-A3B** (q4_k_m 27.6GB, ran at
+`--n-cpu-moe 10` to fit). It **loaded fine but failed the tool-call smoke test** — refused
+the provided tool and answered in plain text. REAP expert-pruning evidently damaged its
+tool-use; that's a hard disqualifier for an agentic harness, so no point running the full
+suite. No swap; GGUF deleted.
+
+**Refresh concluded — no 32GB upgrade exists.** Two best candidates beaten: Nemotron
+(clean tool-calls, but 45% correctness) and Qwen3-Coder-Next-REAP (broken tool-calls). The
+non-pruned Next is 80B (RAM-offload / coder-big tier, not a coder-fast replacement).
+**Qwen3-Coder-30B-A3B stays the daily driver** — purpose-built for agentic coding and the
+best 30B-class fit, now confirmed against the field. The refresh *process* is proven and
+repeatable; re-run it when a genuinely new ~30B agentic-coder GGUF appears.
