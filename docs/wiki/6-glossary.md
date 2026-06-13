@@ -1,6 +1,6 @@
 # 6. Glossary — every nerdy word, explained like you're five
 
-← [Why It's Built This Way](5-why-its-built-this-way.md) · [Home](Home.md)
+← [Why It's Built This Way](5-why-its-built-this-way.md) · [Home](Home.md) · Next: [Quick Start](7-quick-start.md) →
 
 ---
 
@@ -112,4 +112,4 @@ A system that snapshots your code so you can rewind to any earlier version. Doki
 
 That's the whole vocabulary. If a word shows up anywhere in the wiki and it's not here, it's probably explained right where it appears.
 
-← [Why It's Built This Way](5-why-its-built-this-way.md) · [Home](Home.md)
+← [Why It's Built This Way](5-why-its-built-this-way.md) · [Home](Home.md) · Next: [Quick Start](7-quick-start.md) →
