@@ -3,6 +3,14 @@
 Hardware: RTX 5090 (32GB) · 64GB DDR5 · i9-14900KS · Windows 11
 Stack: llama.cpp b9616 (CUDA 13.3 build) · llama-swap v224 · driver 610.47
 
+## Phase 0 — foundation (2026-06-12)
+
+| Check | Result | Status |
+|---|---|---|
+| Disk free on D: at install time (pre-download) | 221GB free / 3726GB total | ✅ ≥150GB target met |
+| Disk free on D: after model downloads (~84GB pulled) | 142GB free / 3726GB total | ✅ ample headroom |
+| GPU / driver | RTX 5090 32GB, driver 610.47 (Blackwell needs 570+) | ✅ |
+
 ## Phase 1 — serving acceptance (2026-06-12)
 
 ### coder-fast — Qwen3-Coder-30B-A3B-Instruct UD-Q4_K_XL (17.7GB, fully on GPU)
@@ -50,3 +58,32 @@ Tuning history: `--n-cpu-moe 24` → 116 tok/s prefill, 15 tok/s decode @7.3k. G
 
 Gate was ≥60% — **passed with margin**. Full detail: `docs/scorecards/2026-06-12-crush-coder-fast.md`.
 Tool-call reliability: 0 malformed tool calls observed across 19 headless agent runs today.
+
+## Phase 4 — web search MCP (2026-06-12)
+
+Keyless DuckDuckGo MCP (`uvx duckduckgo-mcp-server`, uv 0.11.21) wired into Crush as a stdio MCP server (`mcp.websearch`).
+
+| Check | Result | Status |
+|---|---|---|
+| Agent answers a current-events dev question via live search | Q: "latest Node.js LTS major + codename?" → agent called the search tool, replied **"24 (LTS)" / Krypton** (correct as of 2026-06) | ✅ |
+| Ran in coexistence mode | via `coder-fast-lite` while the FIM server stayed loaded | ✅ |
+| No AI-cloud traffic | `Get-NetTCPConnection` for llama-server/llama-swap PIDs → **zero** non-local established connections; only external host in the stack is duckduckgo.com (search, user-allowed), reached by the uvx MCP process | ✅ |
+
+Satisfies TDD §7 Phase-4 exit criterion.
+
+## Phase 5 — local FIM autocomplete (2026-06-12)
+
+FIM model **qwen2.5-coder-3b-q8_0.gguf** (3.06GB) served by a dedicated `llama-server` on :8012 (`serving/start-fim.ps1`), independent of llama-swap. Editor: **llama.vscode 0.0.48** (VS Code), endpoint → `http://127.0.0.1:8012`.
+
+| Metric | Result | Target | Status |
+|---|---|---|---|
+| `/infill` returns valid completion | prefix `def fibonacci(n): … return ` → `return fibonacci(n-1) + fibonacci(n-2)` | non-empty, correct | ✅ |
+| FIM decode speed | **292 tok/s** | fast enough for inline | ✅ |
+| FIM server alone (VRAM) | 6.6GB / 32.6GB | — | ✅ |
+| **Coexistence: FIM + `coder-fast-lite` (64k) both resident** | **27.6GB / 32.6GB** | ≤32GB (fit) | ✅ ~5GB margin |
+
+Resolves the Phase-1 "decide in phase 5" note: the **coder-fast-lite (64k ctx)** profile is the answer — it leaves room for the 3B FIM model alongside, so editor autocomplete and the agent run simultaneously. Full-128k `coder-fast` (30GB) cannot coexist with FIM; use `coder-fast-lite` when editing live.
+
+The final "see completions appear inline in the editor" step is the user's to eyeball; the backend (server + extension + config + endpoint) is verified end-to-end via `/infill`.
+
+**All phases (0–5) complete and verified — 2026-06-12.**

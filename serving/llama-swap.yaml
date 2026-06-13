@@ -21,6 +21,23 @@ models:
       --cache-reuse 256
       --jinja
 
+  # Model A-lite — coder-fast at 64k ctx for running ALONGSIDE the FIM
+  # autocomplete server (:8012, ~6.6GB). ~17.7GB weights + ~3GB KV ≈ ~21GB,
+  # so FIM + this ≈ ~28GB < 32GB. Point the harness here when editing with
+  # llama.vscode live. Full 128k coder-fast cannot coexist with FIM.
+  "coder-fast-lite":
+    cmd: |
+      D:\Projects\DokiCode\serving\llama.cpp\llama-server.exe
+      -m D:\Projects\DokiCode\models\Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
+      --port ${PORT}
+      -ngl 99
+      -c 65536
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --cache-reuse 256
+      --jinja
+
   # Model B — heavy hitter. gpt-oss-120b (5.1B active), experts of the first
   # 24 layers (of 36) kept in system RAM. GPU ≈ ~27GB, RAM ≈ ~40GB.
   # Tune --n-cpu-moe DOWN (more experts on GPU = faster) until VRAM ~30GB.

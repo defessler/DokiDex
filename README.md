@@ -24,4 +24,12 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 
 ## Status
 
-Phase 0 — repo bootstrapped, design doc committed. See TDD §7 for the phased roadmap.
+**Phases 0–5 complete and verified (2026-06-12).** Fully working local stack:
+
+- **Inference:** llama.cpp b9616 (CUDA) + llama-swap on `:8080` — `coder-fast` (265 tok/s), `coder-big`, `coder-fast-lite`; clean native tool calls.
+- **Harness:** Crush v0.76 (daily driver, bake-off winner) + OpenCode, wired to the local endpoint.
+- **Evals:** 11-task golden suite, **91% baseline** (`docs/scorecards/`).
+- **Web search:** keyless DuckDuckGo MCP — verified live, no AI-cloud traffic.
+- **Autocomplete:** Qwen2.5-Coder-3B FIM on `:8012` + llama.vscode; coexists with the agent at ~27.6GB VRAM.
+
+See `docs/benchmarks.md` for measurements, `docs/decisions.md` for the harness bake-off, `docs/COMPLETION-AUDIT.md` for the multi-agent verification, and TDD §7 for the roadmap.

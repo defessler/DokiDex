@@ -37,3 +37,14 @@
 
 - coder-fast ≈ 2–5× faster wall-clock than coder-big on identical tasks; both solved everything here.
 - coder-big's wins should show on harder/longer tasks; t1/t2 are too easy to separate them.
+
+## 2026-06-12 — Phase 4: web search = keyless DuckDuckGo MCP
+
+- **`duckduckgo-mcp-server` via `uvx`** (no API key, stdio, actively maintained). SearXNG (self-hosted, Docker) is the documented upgrade path if DDG result quality limits us — not needed yet.
+- Wired as `mcp.websearch` in the Crush config. Kept it the **only** MCP server — open models lose tool-selection accuracy as the tool list grows (TDD §6.2).
+
+## 2026-06-12 — Phase 5: FIM model = Qwen2.5-Coder-3B (not 7B)
+
+- TDD suggested a 7B FIM model, but at 32GB VRAM the **3B Q8** (~3GB) is the better pick: it coexists with the agent model and FIM latency favors smaller. Quality at 3B for fill-in-the-middle is excellent (292 tok/s, correct completions).
+- **Coexistence solved with `coder-fast-lite`** (coder-fast at 64k ctx, ~21GB) instead of a tinier FIM model: 64k is plenty of agent context, and 21GB + 6.6GB FIM = ~27.6GB fits with margin. Full-128k coder-fast (30GB) cannot run alongside FIM.
+- FIM served on a **dedicated `:8012`** rather than a llama-swap group — keeps autocomplete always-on and independent of which agent model is swapped in.

@@ -18,6 +18,12 @@
           "name": "gpt-oss-120b (MoE offload, quality)",
           "context_window": 131072,
           "default_max_tokens": 8192
+        },
+        {
+          "id": "coder-fast-lite",
+          "name": "Qwen3-Coder-30B-A3B @64k (coexists with FIM autocomplete)",
+          "context_window": 65536,
+          "default_max_tokens": 8192
         }
       ]
     }
@@ -25,5 +31,13 @@
   "models": {
     "large": { "model": "coder-fast", "provider": "local" },
     "small": { "model": "coder-fast", "provider": "local" }
+  },
+  "mcp": {
+    "websearch": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["duckduckgo-mcp-server"],
+      "timeout": 120
+    }
   }
 }
