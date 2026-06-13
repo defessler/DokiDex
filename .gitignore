@@ -14,6 +14,12 @@ serving/llama.cpp/
 tmp/
 .scratch/
 
+# doki control plane runtime (PID files + logs)
+.run/
+
+# Local media-gen install — SwarmUI + ComfyUI backend + image/video model weights
+media/
+
 # Editor/OS noise
 .vscode/
 .idea/

@@ -5,7 +5,9 @@
 # VRAM: FIM 3B Q8 ≈ ~4GB. The agent's coder-fast uses ~30GB at 128k ctx, so
 # running BOTH simultaneously requires coder-fast at reduced ctx (see docs).
 # Standalone (editor only), this leaves the GPU nearly empty.
-param([switch]$Detach)
+#
+# Usage:  .\start-fim.ps1 [-Detach] [-PidFile <p>] [-LogFile <l>]
+param([switch]$Detach, [string]$PidFile, [string]$LogFile)
 
 $server = Join-Path $PSScriptRoot "llama.cpp\llama-server.exe"
 $model  = Join-Path (Split-Path $PSScriptRoot) "models\qwen2.5-coder-3b-q8_0.gguf"
@@ -23,8 +25,11 @@ $argList = @(
 )
 
 if ($Detach) {
-    Start-Process -FilePath $server -ArgumentList $argList -WindowStyle Hidden
-    Write-Host "FIM server starting in background on http://127.0.0.1:8012 (/infill)"
+    $sp = @{ FilePath = $server; ArgumentList = $argList; WindowStyle = "Hidden"; PassThru = $true }
+    if ($LogFile) { $sp.RedirectStandardOutput = $LogFile; $sp.RedirectStandardError = "$LogFile.err" }
+    $p = Start-Process @sp
+    if ($PidFile) { Set-Content $PidFile $p.Id }
+    Write-Host "FIM server starting in background on http://127.0.0.1:8012 (/infill, pid $($p.Id))"
 } else {
     & $server @argList
 }
