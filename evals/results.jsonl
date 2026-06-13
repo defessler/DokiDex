@@ -38,3 +38,14 @@
 {"ts":"2026-06-13T01:56:35","harness":"claw","model":"coder-fast","task":"t7-wordcount-flag","pass":true,"seconds":15.9,"note":"CHECK: PASS"}
 {"ts":"2026-06-13T01:56:39","harness":"claw","model":"coder-fast","task":"t8-extract-helper","pass":false,"seconds":1.1,"note":"CHECK: tests (incl. hidden) failed — behavior changed"}
 {"ts":"2026-06-13T01:56:46","harness":"claw","model":"coder-fast","task":"t9-arch-doc","pass":false,"seconds":7.4,"note":"CHECK: docs/ARCHITECTURE.md not created"}
+{"ts":"2026-06-13T14:54:09","harness":"crush","model":"coder-candidate","task":"t1-reverse-flag","pass":false,"seconds":39.8,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-13T14:54:50","harness":"crush","model":"coder-candidate","task":"t10-wordcount-whitespace","pass":false,"seconds":39.2,"note":"CHECK: tests (incl. hidden) failed"}
+{"ts":"2026-06-13T14:55:30","harness":"crush","model":"coder-candidate","task":"t11-stats-flag","pass":true,"seconds":36.2,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T14:56:05","harness":"crush","model":"coder-candidate","task":"t2-slugify-bug","pass":false,"seconds":33.4,"note":"CHECK: tests failed"}
+{"ts":"2026-06-13T14:56:36","harness":"crush","model":"coder-candidate","task":"t3-kelvin","pass":false,"seconds":30.2,"note":"CHECK: tests (incl. hidden) failed"}
+{"ts":"2026-06-13T14:57:11","harness":"crush","model":"coder-candidate","task":"t4-csv-quotes","pass":false,"seconds":32.2,"note":"CHECK: tests (incl. hidden) failed"}
+{"ts":"2026-06-13T14:57:54","harness":"crush","model":"coder-candidate","task":"t5-inventory-bug","pass":true,"seconds":41.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T14:59:00","harness":"crush","model":"coder-candidate","task":"t6-roman-from","pass":true,"seconds":64.0,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T14:59:23","harness":"crush","model":"coder-candidate","task":"t7-wordcount-flag","pass":true,"seconds":19.6,"note":"CHECK: PASS"}
+{"ts":"2026-06-13T15:00:44","harness":"crush","model":"coder-candidate","task":"t8-extract-helper","pass":false,"seconds":79.5,"note":"CHECK: tests (incl. hidden) failed — behavior changed"}
+{"ts":"2026-06-13T15:01:04","harness":"crush","model":"coder-candidate","task":"t9-arch-doc","pass":true,"seconds":17.7,"note":"CHECK: PASS"}

@@ -149,3 +149,27 @@ Follow-up: **Wan 14B is reliable after all — at a VRAM-safe config.** 480×320
 frames / 4-step Lightx2v LoRA generates in **~87s** (verified) and is visibly higher
 quality than 1.3B. So the rule is res/frames, not the model: 1.3B for speed (≤832×480),
 14B-small for quality. Docs: `docs/wiki/8-image-and-video.md`.
+
+## 2026-06-13 — Model refresh: Nemotron-Cascade-2 eval'd → incumbent Qwen3-Coder retained
+
+First eval-gated coder refresh (per `workflow.md` cadence). HF-verification first:
+the listicle's "Qwen3.6-35B-A3B" **doesn't exist** (invented); the real fits-32GB,
+swap-compatible candidate is **Nemotron-Cascade-2-30B-A3B** (NVIDIA) — same 30B/3B-active
+class. Wired as `coder-candidate` (q4_k_m 22GB, 64k ctx), smoke-tested, run through the suite.
+
+| crush × model | tool-calls | decode | golden suite |
+|---|---|---|---|
+| coder-fast (Qwen3-Coder-30B) | clean | 265 tok/s | **10/11 (91%)** |
+| coder-candidate (Nemotron-Cascade-2) | clean | **320 tok/s** | **5/11 (45%)** |
+
+Nemotron is ~20% faster and tool-calls cleanly, but is much weaker at correct edits —
+it failed even simple tasks the incumbent passes (t1-reverse-flag, t2-slugify, t3-kelvin).
+It's a reasoning/competitive-programming tune, not an agentic-coding tune. **Verdict:
+no swap — Qwen3-Coder-30B stays the daily driver.** Scorecard:
+`docs/scorecards/2026-06-13-crush-coder-candidate.md`.
+
+The refresh *process* is now validated end-to-end: HF-verify → wire `coder-candidate`
+→ tool-call smoke → `run-suite` → compare → swap-only-on-win → (on loss) revert config +
+delete the GGUF. Image/video: Wan 2.7 (MoE 27B/14B) and Flux.2 exist but are heavier
+than the current picks with no 32GB win, so not pursued. The incumbents ARE the most
+reliable available — confirmed by measurement, not vibes.
