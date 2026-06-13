@@ -2,7 +2,7 @@
 
 Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot-class setup that runs entirely on my own hardware (RTX 5090 / 32GB VRAM, 64GB DDR5, Windows 11). No cloud AI services at runtime; web search allowed.
 
-**Design doc:** [docs/TDD.md](docs/TDD.md)
+**Design doc:** [docs/TDD.md](docs/TDD.md) · **Friendly ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md)
 
 ## Layout
 
