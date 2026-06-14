@@ -281,3 +281,35 @@ Blackwell, small enough to coexist with the coder.
   chatterbox-turbo` is a **gated** HF repo (403) → switched to the public **original** `chatterbox`
   model; and the cu128 requirements pin `protobuf 3.19.6` but `onnx` needs ≥3.20 (`builder`) →
   pin **protobuf 4.25.5** (the descript-audiotools <3.20 pin is over-strict; synth works at runtime).
+
+---
+
+## 2026-06-14 — Control panel + frontier-gap media kit (I2V, music, image-edit, upscale, STT)
+
+Two design workflows (control-panel stack judge; frontier-gap roadmap) → a unified plan, then
+built + **live-verified end-to-end (`doki verify` 13/13)**. Specs: `docs/control-panel-design.md`,
+`docs/frontier-roadmap.md`.
+
+- **Control panel = C# WPF (.NET 9) + CommunityToolkit.Mvvm**, a thin reactive face over
+  `doki status json` (enriched with a GPU gauge, pid, model menu, ui/vram). Chosen over PowerShell-WPF
+  (single-STA runspace tax) and a web stack (extra server/port) because the .NET SDK + WindowsDesktop
+  runtime were already on the box. Shipped on pure WPF + a ported VS-Code-dark theme (dropped the
+  WPF-UI dep to remove the one offline-restore risk). Grouped LLM/MEDIA cards, GPU trust-meter, mode
+  switcher with 32 GB-headroom + eviction confirm, live file-tailed logs, per-modality ⚡test, ghost
+  cards for not-installed services. Launch via `doki panel` / `control.bat`.
+- **Image-to-Video:** live testing **corrected the plan** — SwarmUI's *native* `videomodel` pipeline
+  animates the installed Wan 2.2 ti2v-5B with **no custom workflow** (the `videosteps`/`videocfg`/
+  `videoresolution` params are what make the I2V step fire). The hand-authored `WanI2V.json` was
+  deleted: `SwarmInputImage` nodes need editor-generated `custom_params` and `${initimage}` yields a
+  data-URL that `SwarmLoadImageB64`'s raw b64decode corrupts.
+- **Music:** ACE-Step **1.5** is **SwarmUI-native** (class `ace-step-1_5`; qwen ace15 TEs auto-download)
+  — NOT the v1 all-in-one I first HEAD-checked. XL base (quality) + turbo (fast). Verified 48 kHz MP3.
+- **Image-editing:** Qwen-Image-Edit-**2511** ships `fp8mixed` (~20 GB), not `fp8_e4m3fn` — HF-tree
+  verified. SwarmUI-native (class `qwen-image-edit-plus`): model + init image + instruction. Verified.
+- **Upscaler:** 4×-UltraSharp fires only via the Refiner-Upscale group (`refinermethod=PostApply` +
+  `refinercontrolpercentage=0` = pure upscale). Verified 512→1024.
+- **STT:** Parakeet via onnx-asr FastAPI on `:8005` (own venv, CPU EP), OpenAI `/v1/audio/transcriptions`,
+  `group=llm` so it coexists in agent mode. Live-debug fix: the route's `model` Form param shadowed the
+  module-level `model()` loader → aliased it. Verified a TTS→STT round-trip.
+- **VAE correction:** the Wan 2.2 5B uses `wan2.2_vae` (not `wan_2.1_vae` — that's the 1.3B floor's);
+  `setup.ps1` comment fixed.
