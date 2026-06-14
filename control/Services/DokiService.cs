@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Text.Json;
 using DokiCode.Control.Models;
 
@@ -29,6 +31,23 @@ public sealed class DokiService
     public void OpenUi(string url)
     {
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(8) };
+
+    // Warm-load a coder model into llama-swap by sending it a 1-token request — llama-swap
+    // hot-swaps to it. Fire-and-forget; the 2s status poll reflects the new loaded model.
+    public void WarmLoadModel(string model)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var body = new { model, messages = new[] { new { role = "user", content = "hi" } }, max_tokens = 1, temperature = 0 };
+                await Http.PostAsJsonAsync("http://127.0.0.1:8080/v1/chat/completions", body);
+            }
+            catch { }
+        });
     }
 
     public void RunVerifyConsole()

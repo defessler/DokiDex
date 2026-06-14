@@ -68,6 +68,19 @@
                        Foreground="{Binding HasUpdate, Converter={StaticResource WarnBrush}}"
                        Visibility="{Binding HasVersion, Converter={StaticResource BoolVis}}" TextTrimming="CharacterEllipsis"/>
 
+            <!-- model swap (llama-swap: warm-load a configured coder model) -->
+            <ItemsControl ItemsSource="{Binding ConfiguredModels}" Margin="17,7,0,0"
+                          Visibility="{Binding HasModelSwap, Converter={StaticResource BoolVis}}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Button Content="{Binding}" Style="{StaticResource IconBtn}" FontSize="10.5" ToolTip="warm-load this coder model"
+                          Command="{Binding DataContext.SwapModelCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                          CommandParameter="{Binding}"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <!-- actions -->
             <WrapPanel Margin="17,9,0,0">
               <Button Content="▶ start" Style="{StaticResource IconBtn}" Command="{Binding StartCommand}"

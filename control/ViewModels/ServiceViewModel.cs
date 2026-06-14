@@ -29,6 +29,7 @@ public partial class ServiceViewModel : ObservableObject
     [ObservableProperty][NotifyCanExecuteChangedFor(nameof(StartCommand))][NotifyCanExecuteChangedFor(nameof(RestartCommand))] private bool _installed;
     [ObservableProperty] private int? _pid;
     [ObservableProperty] private string? _model;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasModelSwap))] private List<string> _configuredModels = new();
     [ObservableProperty] private string _stateKind = "down";   // healthy|starting|degraded|down|notinstalled
     [ObservableProperty] private string _stateLabel = "";
     [ObservableProperty] private string _detail = "";
@@ -41,6 +42,7 @@ public partial class ServiceViewModel : ObservableObject
     [ObservableProperty][NotifyPropertyChangedFor(nameof(HasTestFile))] private string? _testFile;
 
     public bool HasUi => !string.IsNullOrEmpty(Ui);
+    public bool HasModelSwap => ConfiguredModels is { Count: > 1 };
     public bool HasTestResult => !string.IsNullOrEmpty(TestResult);
     public bool HasTestFile => !string.IsNullOrEmpty(TestFile);
     public bool HasVersion => !string.IsNullOrEmpty(Version) || (!string.IsNullOrEmpty(Update) && Update != "current");
@@ -52,6 +54,7 @@ public partial class ServiceViewModel : ObservableObject
     {
         Group = s.Group; Port = s.Port; Ui = s.Ui; VramGb = s.VramGb;
         Healthy = s.Healthy; Running = s.Running; Installed = s.Installed; Pid = s.Pid; Model = s.Model;
+        ConfiguredModels = s.ConfiguredModels ?? new();
 
         if (!s.Installed)
         {
@@ -80,6 +83,7 @@ public partial class ServiceViewModel : ObservableObject
     [RelayCommand] private void Stop() => _doki.StopService(Name);
     [RelayCommand(CanExecute = nameof(CanStart))] private void Restart() => _doki.RestartService(Name);
     [RelayCommand] private void OpenUi() { if (!string.IsNullOrEmpty(Ui)) _doki.OpenUi(Ui!); }
+    [RelayCommand] private void SwapModel(string? model) { if (!string.IsNullOrEmpty(model) && model != Model) _doki.WarmLoadModel(model!); }
     [RelayCommand] private void OpenTestFile() { if (!string.IsNullOrEmpty(TestFile)) _doki.OpenUi(TestFile!); }
 
     private bool CanTest => Healthy && !TestRunning;
