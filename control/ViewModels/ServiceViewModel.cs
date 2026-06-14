@@ -26,7 +26,7 @@ public partial class ServiceViewModel : ObservableObject
     [ObservableProperty] private int? _vramGb;
     [ObservableProperty][NotifyCanExecuteChangedFor(nameof(TestCommand))] private bool _healthy;
     [ObservableProperty] private bool _running;
-    [ObservableProperty] private bool _installed;
+    [ObservableProperty][NotifyCanExecuteChangedFor(nameof(StartCommand))][NotifyCanExecuteChangedFor(nameof(RestartCommand))] private bool _installed;
     [ObservableProperty] private int? _pid;
     [ObservableProperty] private string? _model;
     [ObservableProperty] private string _stateKind = "down";   // healthy|starting|degraded|down|notinstalled
@@ -47,8 +47,18 @@ public partial class ServiceViewModel : ObservableObject
         Group = s.Group; Port = s.Port; Ui = s.Ui; VramGb = s.VramGb;
         Healthy = s.Healthy; Running = s.Running; Installed = s.Installed; Pid = s.Pid; Model = s.Model;
 
-        if (!s.Installed) { StateKind = "notinstalled"; StateLabel = "not installed"; }
-        else if (s.Healthy) { StateKind = "healthy"; StateLabel = "healthy"; }
+        if (!s.Installed)
+        {
+            StateKind = "notinstalled"; StateLabel = "not installed";
+            Detail = Name switch
+            {
+                "tts" => "run  setup.ps1 -Tts",
+                "stt" => "run  setup.ps1 -Stt",
+                _     => "run  setup.ps1 -Media -Models full",
+            };
+            return;
+        }
+        if (s.Healthy) { StateKind = "healthy"; StateLabel = "healthy"; }
         else if (s.Running) { StateKind = "degraded"; StateLabel = "running · health failing"; }
         else { StateKind = "down"; StateLabel = "stopped"; }
 
@@ -59,9 +69,10 @@ public partial class ServiceViewModel : ObservableObject
         Detail = string.Join("   ·   ", bits);
     }
 
-    [RelayCommand] private void Start() => _doki.StartService(Name);
+    private bool CanStart => Installed;
+    [RelayCommand(CanExecute = nameof(CanStart))] private void Start() => _doki.StartService(Name);
     [RelayCommand] private void Stop() => _doki.StopService(Name);
-    [RelayCommand] private void Restart() => _doki.RestartService(Name);
+    [RelayCommand(CanExecute = nameof(CanStart))] private void Restart() => _doki.RestartService(Name);
     [RelayCommand] private void OpenUi() { if (!string.IsNullOrEmpty(Ui)) _doki.OpenUi(Ui!); }
     [RelayCommand] private void OpenTestFile() { if (!string.IsNullOrEmpty(TestFile)) _doki.OpenUi(TestFile!); }
 

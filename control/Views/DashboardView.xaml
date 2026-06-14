@@ -8,6 +8,18 @@
     <DataTemplate x:Key="ServiceCard" DataType="{x:Type vm:ServiceViewModel}">
       <Border Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource BorderBrush2}"
               BorderThickness="1" CornerRadius="6" Margin="0,0,12,12" Width="318">
+        <Border.Style>
+          <Style TargetType="Border">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding StateKind}" Value="notinstalled">
+                <Setter Property="Opacity" Value="0.5"/>
+              </DataTrigger>
+              <DataTrigger Binding="{Binding StateKind}" Value="crashed">
+                <Setter Property="BorderBrush" Value="{StaticResource DangerBrightBrush}"/>
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Border.Style>
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="3"/>

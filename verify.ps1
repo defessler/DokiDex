@@ -158,6 +158,22 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\acestep_v1.5_turbo.sa
     } catch { $results["music (ACE-Step)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 6e. Upscaler — 4x-UltraSharp via SwarmUI's Refiner Upscale. Live-verified: the upscale only
+#     fires when refinermethod + refinercontrolpercentage are set (control 0 = upscale, no refine).
+Write-Host "[verify] upscaler (4x-UltraSharp) ..."
+if (-not (Test-Path (Join-Path $swModels "upscale_models\4x-UltraSharp.pth"))) {
+    $results["upscaler (4x-UltraSharp)"] = "SKIP  (not installed; -Models full)"
+} else {
+    try {
+        $sidU = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $ub = @{ session_id = $sidU; images = 1; prompt = "a vintage pocket watch on linen, macro photo"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 512; height = 512; refinermethod = "PostApply"; refinercontrolpercentage = 0; refinerupscale = 2; refinerupscalemethod = "model-4x-UltraSharp.pth" } | ConvertTo-Json
+        $ur = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 200 -Body $ub
+        $utmp = Join-Path $env:TEMP "doki_upscale_verify.png"; Invoke-WebRequest "$base/$(@($ur.images)[0])" -OutFile $utmp -UseBasicParsing -TimeoutSec 60
+        Add-Type -AssemblyName System.Drawing; $uim = [System.Drawing.Image]::FromFile($utmp); $uw = $uim.Width; $uim.Dispose()
+        $results["upscaler (4x-UltraSharp)"] = if ($uw -ge 1024) { "PASS  ${uw}px (2x from 512)" } else { "FAIL  not upscaled (${uw}px)" }
+    } catch { $results["upscaler (4x-UltraSharp)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 7. Wan -> Foley (video WITH synced audio) via the WanFoley custom workflow
 Write-Host "[verify] Wan->Foley audio ..."
 $foleyModel = Join-Path $root "media\SwarmUI\dlbackend\comfy\ComfyUI\models\foley\hunyuanvideo_foley.safetensors"
