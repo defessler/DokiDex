@@ -8,15 +8,17 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 
 ```powershell
 .\setup.ps1            # one-time: prereqs + deploy configs (chat/code)
-.\setup.ps1 -Media     #   ...plus install image+video gen (SwarmUI + models, headless)
+.\setup.ps1 -Media -Models full   # image+video+music+edit quality kit (SwarmUI + models, headless)
 .\setup.ps1 -Tts       #   ...plus uncensored speech/TTS (Chatterbox + voice cloning, :8004)
+.\setup.ps1 -Stt       #   ...plus local speech-to-text (Parakeet via onnx-asr, :8005)
 
-.\doki.ps1 up          # chat + code + speech → llama-swap :8080 + TTS :8004
+.\doki.ps1 up          # chat + code + speech in/out → llama-swap :8080 + TTS :8004 + STT :8005
 .\doki.ps1 up coexist  #   + autocomplete → FIM on :8012
-.\doki.ps1 up media    # image + video    → SwarmUI on :7801
+.\doki.ps1 up media    # image + video + music + image-edit → SwarmUI on :7801
 .\doki.ps1 status      # what's running + health      .\doki.ps1 down
 .\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
-.\control.bat          # desktop window — live status, start/stop, verify, update checks
+.\doki.ps1 panel       # high-quality control panel (WPF): live status, GPU meter, logs, ⚡test
+.\control.bat          #   ...the same panel via double-click
 ```
 
 GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and the image/video server. The three things you launch yourself: the CLI (**Crush**), the chat app (**Chatbox**), and the editor (**llama.vscode**).
@@ -41,8 +43,10 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Code:** Crush (daily driver, bake-off winner) — OpenCode / Claw Code challengers
 - **Chat:** Chatbox → local endpoint · **Autocomplete:** small FIM model + llama.vscode
 - **Search:** keyless DuckDuckGo MCP
-- **Image + video + audio:** SwarmUI (ComfyUI) — Z-Image Turbo/Base + Wan 2.2 (5B) with synced Foley audio, unfiltered, headless. A 3B prompt-rewriter auto-expands lazy prompts (`<mpprompt:…>`)
+- **Image + video + audio:** SwarmUI (ComfyUI) — Z-Image Turbo/Base + Wan 2.2 (5B) text-to-video **and image-to-video** with synced Foley audio; **music** (ACE-Step 1.5), **instruction image-editing** (Qwen-Image-Edit), **4×-UltraSharp upscaling** — all unfiltered, headless. A 3B prompt-rewriter auto-expands lazy prompts (`<mpprompt:…>`)
 - **Speech (TTS):** Chatterbox on `:8004` — uncensored (watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning; coexists with the coder LLM
+- **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, coexists with the coder
+- **Control panel:** a native WPF cockpit (`doki panel`) over `doki status json` — grouped live service cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test
 
 ## Status
 
@@ -52,9 +56,11 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Code:** Crush v0.76, **91%** on the 11-task golden suite (`docs/scorecards/`). Claw Code bake-off'd → rejected (45%, flaky tool calls).
 - **Chat:** Chatbox → `:8080`. **Autocomplete:** Qwen2.5-Coder-3B FIM on `:8012` (live `/infill` verified).
 - **Web search:** keyless DuckDuckGo MCP — no AI-cloud traffic.
-- **Image + video + audio:** SwarmUI/ComfyUI installed 100% headlessly, `doki verify`-green (**8/8**). **Image:** Z-Image Turbo (1024² in seconds) + Z-Image Base (quality). **Video:** Wan 2.2 **TI2V-5B** (832×480 in ~55s, 13.8 GB) + Wan 2.1 1.3B floor — the A14B dual-expert overflows 32 GB and is kept for a future GGUF/block-swap path. **Audio:** HunyuanVideo-Foley adds synced 48 kHz sound via the one-click `WanFoley` workflow. **Simple prompts:** a 3B rewriter on `:8013` auto-expands `<mpprompt:…>` through MagicPrompt. All uncensored & verified live.
-- **Speech (TTS):** Chatterbox-TTS-Server on `:8004` (own cu128 venv) — uncensored (Perth watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning. Verified live (synth + clone); coexists with coder-fast at 30.6 GB (rides along in agent mode, no mode switch).
-- **Control plane:** `doki up/down/status/restart/logs` with agent / coexist / media profiles; one-command `setup.ps1`.
+- **Image + video + audio:** SwarmUI/ComfyUI installed 100% headlessly, `doki verify`-green. **Image:** Z-Image Turbo (1024² in seconds) + Z-Image Base + Chroma. **Video:** Wan 2.2 **TI2V-5B** text-to-video (832×480 in ~55s) **and image-to-video** (native `videomodel` — animate a still) + Wan 2.1 1.3B floor. **Music:** ACE-Step 1.5 (native audio model — 48 kHz stereo MP3 from style/bpm/duration). **Image-editing:** Qwen-Image-Edit-2511 (instruction edits + inpaint, e.g. red→green apple). **Upscaling:** 4×-UltraSharp (Refiner-Upscale). **Audio:** HunyuanVideo-Foley synced sound via the `WanFoley` workflow. **Simple prompts:** a 3B rewriter on `:8013` auto-expands `<mpprompt:…>`. All uncensored & verified live.
+- **Speech (TTS):** Chatterbox-TTS-Server on `:8004` (own cu128 venv) — uncensored (Perth watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning. Verified live; coexists with coder-fast at 30.6 GB.
+- **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, own venv. Verified live (TTS→STT round-trip); coexists with the coder in agent mode.
+- **Control panel:** native WPF cockpit (`doki panel` / `control.bat`) over `doki status json` — grouped live cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test. Built + launch-verified.
+- **Control plane:** `doki up/down/status/restart/logs/panel` + per-service `start/stop/restart` and `status json`; agent / coexist / media profiles; one-command `setup.ps1`.
 - **Model refresh (eval-gated):** Nemotron-Cascade-2 (45%) and Qwen3-Coder-Next-REAP (broken tool-calls) both lost — Qwen3-Coder-30B confirmed the best 32GB fit by measurement.
 
 See `docs/benchmarks.md` (measurements), `docs/decisions.md` (every call + the eval gates), `docs/streamlined-setup-design.md` (control plane + media), and TDD §7 (roadmap).
