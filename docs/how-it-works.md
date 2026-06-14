@@ -82,7 +82,7 @@ Each service starts **detached** via its `start-*.ps1` (a `Start-Process` writin
 | `logs <svc>` | tail a service log |
 | `verify` | full-stack live smoke test (every capability) — see §8 |
 | `doctor` | one-shot environment + install diagnostics |
-| `test` | control-panel unit tests (fast, no GPU) |
+| `test` | unit suite — installer + status-json + memory + control panel (fast, no GPU) |
 | `panel` | launch the WPF control panel |
 
 `status json` is the **single source of truth** the control panel consumes (§7) — it merges the
@@ -187,8 +187,10 @@ It **reads one source of truth** — `doki status json`, polled every 2 s — an
 every action (it never re-implements the control logic). It shows: service cards grouped into
 LLM/MEDIA bands (the idle band recessed so the 32 GB rule is *visible*), a GPU trust-meter, a mode
 switcher with 32 GB-headroom math + an eviction-confirm sheet, live file-tailed logs, a
-per-modality ⚡test, a coder model-swap, and update badges. It has **24 unit tests** (`doki test`)
-on its parsing + state logic. (Design: [control-panel-design.md](control-panel-design.md).)
+per-modality ⚡test, a coder model-swap, and update badges. It opens with a cinematic boot sequence,
+wears a premium void/cyan/gold theme, and **self-updates** from its own GitHub releases (`Services/Updater.cs`,
+applied in place on launch — distinct from the upstream SwarmUI/llama-swap badges). It has **41 unit
+tests** (`doki test`) on its parsing + state + auto-updater logic. (Design: [control-panel-design.md](control-panel-design.md).)
 
 ---
 
@@ -202,7 +204,7 @@ on its parsing + state logic. (Design: [control-panel-design.md](control-panel-d
 - **`doki doctor`** — environment + install diagnostics: GPU/driver/VRAM, disk, the toolchain,
   model inventory (multi-part-aware), the media kit, per-service installable+port state, memory +
   panel status.
-- **`doki test`** — the panel unit tests (fast, no GPU).
+- **`doki test`** — the fast no-GPU unit suite (installer helpers + status-json contract + memory store + control panel).
 
 ---
 

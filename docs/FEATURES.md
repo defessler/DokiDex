@@ -172,7 +172,7 @@ A docker-compose-style manager with **no Docker**, data-driven from a `$Services
 | `doki logs <service>` | Tail (`-Tail 40 -Wait`) a service's `.run/<name>.log`. |
 | `doki verify` | Full-stack live smoke test (delegates to `verify.ps1`). |
 | `doki doctor` | Environment + install diagnostics. |
-| `doki test` | Control-panel unit tests (fast, no GPU). |
+| `doki test` | Fast no-GPU unit suite — installer helpers + `status json` contract + memory store + control panel (incl. updater). |
 | `doki panel` | Launch the WPF control panel. |
 
 **Lifecycle internals:** PID-file process tracking · untracked-instance detection (reports already-up if a service was started outside doki but its health responds) · HTTP health probe + wait-for-health (≤120 s) · forced PID-tree kill on stop · auto-created `.run/` state dir for `.pid`/`.log` files.
@@ -185,12 +185,12 @@ A docker-compose-style manager with **no Docker**, data-driven from a `$Services
 
 ## Control panel (WPF cockpit) *(optional)*
 
-A single-process **WPF cockpit on .NET 9** (VS-Code-dark Fluent theme) — a reactive face over `doki status json` that never re-implements control logic. Launch via `control.bat` (double-click; builds Release on first run) or `doki panel`.
+A single-process **WPF cockpit on .NET 9** (premium void/cyan/gold theme; native splash + a cinematic boot sequence) — a reactive face over `doki status json` that never re-implements control logic. Launch via `control.bat` (double-click; first run builds Release **and** creates a console-free `DokiCode.lnk` launcher with the arc-reactor icon), the `DokiCode.lnk` shortcut thereafter, or `doki panel`.
 
 | Area | What it does |
 |---|---|
 | **Shell & polling** | Repo-root auto-discovery; 2-second background `doki status json` poll (skips overlapping ticks; "doki status unavailable" on null); three-zone shell (left rail / content / status strip) with Dashboard ↔ Logs nav. |
-| **Service cards** | Data-driven (zero UI per new service); grouped LLM (teal) / MEDIA (amber) bands with the inactive band recessed; state dot+label+detail (healthy/degraded/down/not-installed); degraded "starting" pulse; crashed red edge; ghost cards + setup hint for uninstalled services; per-service port + version/update badge. |
+| **Service cards** | Data-driven (zero UI per new service); grouped LLM (cyan) / MEDIA (gold) bands with the inactive band recessed; state dot+label+detail (healthy/degraded/down/not-installed); degraded "starting" pulse; crashed red edge; ghost cards + setup hint for uninstalled services; per-service port + version/update badge. |
 | **Per-service control** | Start / Stop / Restart (group-guarded by doki, gated on Installed) · Open web UI (when a `ui` URL exists). |
 | **Coder model-swap chips** | One chip per configured llama-swap model; click warm-loads it via a 1-token chat request so llama-swap hot-swaps (`coder-fast`/`coder-big`/`coder-fast-lite`). |
 | **Per-modality ⚡ test** | One-click smallest real gen per modality into a result tray with ✓/✕ + elapsed ms (disabled unless healthy). Covers chat (`:8080`), FIM infill (`:8012`), prompt-rewriter (`:8013`), TTS (`:8004`), and image (`:7801`). |
@@ -198,7 +198,10 @@ A single-process **WPF cockpit on .NET 9** (VS-Code-dark Fluent theme) — a rea
 | **GPU trust-meter** | Stacked 32 GB bar attributed to the active group; used/total GB, %, free, temp, watts, fan; low-headroom (<2 GB) + hot-temp (≥80°C) warnings; "GPU n/a" fallback when `nvidia-smi` is unavailable. *(Per-process VRAM is N/A on WDDM — honest aggregate.)* |
 | **Live logs** | Tails `.run/<name>.log[.err]` by byte-offset (1 s, handles rotation, caps 2500 lines, auto-scroll); per-service tabs + an "All" merge; regex/substring filter; pause toggle; stderr toggle; **content-based** severity coloring (not stream-based). |
 | **Global actions** | Check Updates (SwarmUI via git, llama-swap via GitHub release → card badges) · Verify stack (visible console) · Stop All. |
-| **Theme & tests** | Ported VS-Code-dark theme + value converters; **14 xUnit test methods** across 4 classes — status parsing (3), GPU view-model (3), service view-model (6), log classification (2) — which expand to ~24 cases via `InlineData` (`dotnet test control\DokiCode.Control.Tests`). |
+| **Cinematic boot + native splash** | A native `<SplashScreen>` PNG shows instantly, cross-fading into an animated **"THE SEAL IGNITES"** boot — a gold FF summoning hexagram = Iron Man arc-reactor faceplate → fires a cyan packet to a Star Trek LCARS rail populated from real `doki status json`. Skippable (key/click), reduced-motion aware; a curtain timer always opens the panel even if every probe fails. (`Views/BootWindow.xaml.cs`, shown first by `App.xaml.cs`.) |
+| **In-app self-updater** | Checks the panel's OWN GitHub releases (`defessler/DokiCode`); shows a "panel update available" banner, then downloads + PE-verifies + swaps the exe **in place** (copy-beside → same-volume rename-and-relaunch, no admin/installer), and auto-applies a staged update at next launch. Gated so it never runs under `dotnet run`. Distinct from the per-service "Check Updates" above. (`Services/Updater.cs`.) |
+| **Arc-reactor icon + `DokiCode.lnk`** | First-run `control.bat` / `doki panel` generates the multi-res arc-reactor app icon (`make-icon.ps1` → `assets/dokicode.ico`) and a console-free `DokiCode.lnk` shortcut to the WinExe (`make-shortcut.ps1`) — the day-to-day entry point. |
+| **Theme & tests** | Premium void/cyan/gold theme (`Themes/Palette.xaml`) + value converters; **21 xUnit test methods** across 5 classes — status parsing (3), GPU view-model (3), service view-model (6), log classification (2), updater (7) — which expand to **41 cases** via `InlineData` (`dotnet test control\DokiCode.Control.Tests`). |
 
 ---
 
@@ -208,7 +211,8 @@ A single-process **WPF cockpit on .NET 9** (VS-Code-dark Fluent theme) — a rea
 |---|---|---|
 | **`doki verify`** — full-stack smoke test | Cycles GPU modes (agent → coexist → media), runs live capability smokes with a real API call each, prints a PASS/SKIP/FAIL table, restores `agent` (the default resting state), and exits 0 only if zero failures. **15 result rows: 5 always run, 10 SKIP cleanly when a full-tier model is absent.** | `.\doki.ps1 verify` |
 | **`doki doctor`** — diagnostics | ok/warn/miss marks across: GPU hardware (nvidia-smi) · disk free (warn <20 GB) · toolchain (pwsh/dotnet/git required; python/uv/gh/crush/ffprobe optional) · LLM model inventory · media kit (lean + full) · per-service install+port · memory store · control-panel build. | `.\doki.ps1 doctor` |
-| **`doki test`** — unit tests | Runs the control panel's GPU-free data-layer unit tests (fast). | `.\doki.ps1 test` |
+| **`doki test`** — unit tests | Runs the fast no-GPU suite: installer-helper + `status json`-contract PowerShell tests (AST-extracted from the real scripts), the sqlite/FTS5 memory tests, and the control-panel xUnit incl. the auto-updater (~118 assertions total). | `.\doki.ps1 test` |
+| **Releases & auto-update** | Push a `v*` tag (`git tag v0.2.0 && git push origin v0.2.0`) → `.github/workflows/release.yml` builds a self-contained single-file `DokiCode-v0.2.0-win-x64.exe`, embeds the version, and publishes it as a GitHub release — the payload the panel's in-app updater downloads and swaps in place. `workflow_dispatch` builds/validates only. The exe must live inside a cloned repo (it shells `doki.ps1`). | `git tag v* && git push --tags` |
 
 **Always-run smokes (5):** chat/code (`:8080`, real completion), memory MCP (exercises the `memory_db` store/search core directly on a temp DB — the stdio MCP wrapper itself is exercised by Crush, not verify), autocomplete/FIM infill (`:8012`), image (Z-Image Turbo), video (Wan 2.1 1.3B).
 

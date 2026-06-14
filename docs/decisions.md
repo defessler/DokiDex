@@ -320,6 +320,7 @@ An adversarial multi-agent code audit (24 agents) themed *"trust real readiness,
 signals"* found **4 real bugs, all in `setup.ps1`'s fresh-install / failure paths**. Fixed all four,
 then scaffolded the project's first PowerShell test layer so they can't regress. Net: **81 unit
 assertions** across `doki test` (16 installer-helper + 41 status-json contract + 24 panel xUnit).
+  *(The panel xUnit later grew to **41 / ~118 total** — see the auto-updater entry below.)*
 
 - **PATH refresh (HIGH):** `Ensure-WinGet` never re-read PATH after a winget install, so a freshly
   installed python/git/dotnet wasn't found in the same run → `CommandNotFoundException` aborted setup
