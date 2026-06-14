@@ -346,3 +346,57 @@ assertions** across `doki test` (16 installer-helper + 41 status-json contract +
 - **Approach:** both PowerShell suites pull the *real* functions out of `setup.ps1`/`doki.ps1` by AST
   (by name) rather than duplicating logic — they exercise committed source and can't silently drift,
   and never run the install/switch bodies (no side effects).
+
+## 2026-06-14 — Premium launch experience + app-wide re-theme ("THE SEAL IGNITES")
+
+The console-flashing `control.bat` was replaced as the way to start the app, and the whole panel
+re-skinned to one aesthetic. Both the design and the review were run as multi-agent (ultracode)
+workflows: a 5-way **design judge-panel** (Iron Man/JARVIS · Star Trek/LCARS · FF summon ·
+Anthropic-minimal · a from-scratch fusion → 3 judges each → synthesis) picked the **fusion** concept
+(90/100); a separate **adversarial review** workflow then hardened the implementation.
+
+- **The concept:** a gold Final Fantasy summoning hexagram *is* the etched faceplate of an Iron Man
+  arc-reactor; on ignition it fires a cyan packet across the void to boot a Star Trek **LCARS
+  telemetry rail from REAL `doki status json`** (GPU, live services, loaded model). Seal → Power →
+  Instrument, one circuit. ~3.15s, skippable, zero-black-gap dissolve into the panel.
+- **The system (now app-wide):** ~70% deep **void** field; **ONE** light-emitting accent (reactor
+  cyan `#35E0F0` = live/active); **gold** `#E8C77A` as *etched structure that never glows* (sigil,
+  section gold, MEDIA group). Epic-as-restraint, the taste borrowed from Anthropic/OpenAI products.
+  Functional **amber/red are deliberately KEPT** in the dashboard — telling you a service is *down*
+  is the panel's job (the boot stays monochrome; the dashboard is where alarms live).
+- **Launch:** an arc-reactor **app icon** (`make-icon.ps1`, GDI+ multi-res `.ico`), a native
+  `<SplashScreen>` still shown *before* JIT (`make-splash.ps1`), and a **console-free `DokiCode.lnk`**
+  straight to the WinExe (`make-shortcut.ps1`, auto-created by `control.bat`/`doki panel`). `.lnk` is
+  machine-specific → gitignored.
+- **WPF calls that bit:** `AllowsTransparency=True` is load-bearing — WPF *ignores* `Window.Opacity`
+  without it, and the handoff cross-dissolve fades window opacity (trades ClearType for the dissolve,
+  fine for a 3s splash). The master storyboard is begun from code (no controllable-Seek trap); rows
+  reveal via `DataTrigger` (never animate a bound `Opacity`); the status probe is fired before pixels
+  move and a master curtain timer always opens MainWindow even if every probe fails. Review fixes:
+  cancel the pwsh probe + stop reveal timers at handoff (the one real leak); commit the required
+  icon/splash assets while gitignoring the heavy capture PNGs (a fresh-clone build break).
+
+## 2026-06-14 — Packaging + in-app auto-updater (mirrors D4Scanner, safety-hardened)
+
+The control panel is now published as a **self-contained single-file Windows exe** on `v*` tags
+(`.github/workflows/release.yml`) with an in-app updater (`control/Services/Updater.cs`), mirroring
+the owner's D4Scanner pattern. A combined ultracode review found the updater architecture sound but
+its **unhappy paths unsafe**; the 17 findings were fixed before any release tag.
+
+- **In-place, not versioned-rename:** DokiCode's exe has a stable path inside the cloned repo
+  (`RepoPaths` walks up to `doki.ps1`) and `DokiCode.lnk` points at it, so the update swaps the exe
+  **in place** (same name) rather than D4Scanner's versioned-sibling model, which would have orphaned
+  the shortcut and the repo walk.
+- **Safe-swap order (the key fix):** copy the staged bytes to a `.new` *beside* the running exe
+  (where the expensive, possibly **cross-volume** copy — exe on the repo drive, staging under
+  `%LocalAppData%` — can fail harmlessly), **verify** it's a complete PE (`MZ` + size; truncated
+  downloads are rejected at download via `Content-Length`), *then* same-volume renames
+  (running image → `.old`, `.new` → exe) that can't fail mid-stream. The running exe is **never left
+  missing**. The swap runs **off the UI thread** (the copy is tens of MB).
+- **Guards:** self-update is gated to a real apphost (never swaps `dotnet.exe` under `dotnet run`);
+  `FindStagedUpdate` picks the highest tag and staging is pruned; apply-on-launch falls through to the
+  normal boot if relaunch fails (never vanishes the app). **17 `UpdaterTests`** pin the swap
+  success/reject/sweep + `IsNewer`/`TagFromAssetFile` (41 panel tests total, was 24).
+- **Repo-coupling, stated honestly:** the released exe is the auto-update payload and must live inside
+  a cloned repo (the panel shells `doki.ps1`); standalone use elsewhere is unsupported — noted in the
+  release workflow. Cut a release with `git tag v0.2.0 && git push origin v0.2.0`.

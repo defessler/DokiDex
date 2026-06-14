@@ -18,10 +18,14 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 .\doki.ps1 status      # what's running + health      .\doki.ps1 down
 .\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
 .\doki.ps1 doctor      # environment + install diagnostics (GPU, disk, toolchain, models, services)
-.\doki.ps1 test        # unit tests — installer helpers + control panel (fast, no GPU)
-.\doki.ps1 panel       # high-quality control panel (WPF): live status, GPU meter, logs, ⚡test
-.\control.bat          #   ...the same panel via double-click
+.\doki.ps1 test        # unit tests — installer helpers + control panel + updater (fast, no GPU)
+.\doki.ps1 panel       # high-quality control panel (WPF): cinematic boot, live status, GPU meter, logs, ⚡test
+.\control.bat          #   ...first run: builds + creates a console-free DokiCode.lnk launcher (arc-reactor icon)
 ```
+
+After the first `control.bat`, just double-click **`DokiCode.lnk`** — no console window; it plays the
+boot sequence ("THE SEAL IGNITES") and opens the panel, which **auto-updates itself** from GitHub
+releases. Cut a release with `git tag v0.2.0 && git push origin v0.2.0` (builds a self-contained exe).
 
 GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and the image/video server. The three things you launch yourself: the CLI (**Crush**), the chat app (**Chatbox**), and the editor (**llama.vscode**).
 
@@ -61,7 +65,7 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Image + video + audio:** SwarmUI/ComfyUI installed 100% headlessly, `doki verify`-green (**15/15**, 2026-06-14). **Image:** Z-Image Turbo (1024² in seconds) + Z-Image Base + Chroma. **Video:** Wan 2.2 **TI2V-5B** text-to-video (832×480 in ~55s) **and image-to-video** (native `videomodel` — animate a still); **LTXV-2b** near-real-time fast video (97 frames in ~36s); + Wan 2.1 1.3B floor. **Music:** ACE-Step 1.5 (native audio model — 48 kHz stereo MP3 from style/bpm/duration). **Image-editing:** Qwen-Image-Edit-2511 (instruction edits + inpaint, e.g. red→green apple). **Upscaling:** 4×-UltraSharp (Refiner-Upscale). **Audio:** HunyuanVideo-Foley synced sound via the `WanFoley` workflow. **Simple prompts:** a 3B rewriter on `:8013` auto-expands `<mpprompt:…>`. All uncensored & verified live.
 - **Speech (TTS):** Chatterbox-TTS-Server on `:8004` (own cu128 venv) — uncensored (Perth watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning. Verified live; coexists with coder-fast at 30.6 GB.
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, own venv. Verified live (TTS→STT round-trip); coexists with the coder in agent mode.
-- **Control panel:** native WPF cockpit (`doki panel` / `control.bat`) over `doki status json` — grouped live cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, coder model-swap, update badges. Built + launch-verified, with **24 unit tests** on its data layer (`dotnet test control\DokiCode.Control.Tests`).
+- **Control panel:** native WPF cockpit (`doki panel` / `DokiCode.lnk`) over `doki status json` — grouped live cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, coder model-swap, update badges. A **cinematic boot sequence** ("THE SEAL IGNITES" — gold FF summoning hexagram = Iron Man reactor → Star Trek LCARS rail booted from real `doki status json`) and an **app-wide premium re-theme** (deep void · one emitting cyan accent · gold as etched structure), both designed + adversarially reviewed via multi-agent workflows. **In-app auto-updater** (self-contained single-file exe on `v*` tags; safe in-place rename-and-relaunch swap). **41 unit tests** on its data + updater layers (`dotnet test control\DokiCode.Control.Tests`).
 - **Control plane:** `doki up/down/status/restart/logs/panel` + per-service `start/stop/restart` and `status json`; agent / coexist / media profiles; one-command `setup.ps1`. The installer is audit-hardened on the fresh-install / failure paths — atomic resumable model downloads, fail-loud dependency steps, in-session PATH refresh after winget. A fast no-GPU test layer (`doki test`, **99 assertions**) guards the installer helpers, the `status json` panel contract, and the sqlite/FTS5 memory store, alongside the panel's 24 xUnit.
 - **Model refresh (eval-gated):** Nemotron-Cascade-2 (45%) and Qwen3-Coder-Next-REAP (broken tool-calls) both lost — Qwen3-Coder-30B confirmed the best 32GB fit by measurement.
 
