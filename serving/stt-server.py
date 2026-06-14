@@ -37,8 +37,10 @@ def health():
 
 
 @app.post("/v1/audio/transcriptions")
-async def transcriptions(file: UploadFile = File(...), model: str = Form(default="parakeet")):
-    """OpenAI-compatible: multipart 'file' (16kHz wav best) -> {"text": ...}."""
+async def transcriptions(file: UploadFile = File(...), model_name: str = Form(default="parakeet", alias="model")):
+    """OpenAI-compatible: multipart 'file' (16kHz wav best) -> {"text": ...}.
+    NB: the form field is aliased to 'model' but the Python name must NOT be `model`
+    (that shadows the module-level model() loader)."""
     data = await file.read()
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
