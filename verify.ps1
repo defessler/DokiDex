@@ -174,6 +174,21 @@ if (-not (Test-Path (Join-Path $swModels "upscale_models\4x-UltraSharp.pth"))) {
     } catch { $results["upscaler (4x-UltraSharp)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 6f. Fast video — LTXV-2b-0.9.8-distilled (SwarmUI-native, near-real-time, long clips).
+#     Live-verified: 97 frames 768x512 in ~36s incl. the T5 auto-download. A speed option below Wan.
+Write-Host "[verify] fast video (LTXV) ..."
+if (-not (Test-Path (Join-Path $swModels "diffusion_models\ltxv-2b-0.9.8-distilled.safetensors"))) {
+    $results["fast video (LTXV)"] = "SKIP  (not installed; -Models full)"
+} else {
+    try {
+        $sidL = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $lb = @{ session_id = $sidL; images = 1; prompt = "a paper boat floating down a rain-soaked street gutter"; model = "ltxv-2b-0.9.8-distilled.safetensors"; textvideoframes = 49; steps = 8; cfgscale = 1; width = 768; height = 512; videofps = 24; videoformat = "h264-mp4" } | ConvertTo-Json
+        $lr = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 400 -Body $lb
+        $lmp4 = @($lr.images) | Where-Object { $_ -match '\.mp4$' }
+        $results["fast video (LTXV)"] = if ($lmp4) { "PASS  $(@($lmp4)[0])" } else { "FAIL  no mp4" }
+    } catch { $results["fast video (LTXV)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 7. Wan -> Foley (video WITH synced audio) via the WanFoley custom workflow
 Write-Host "[verify] Wan->Foley audio ..."
 $foleyModel = Join-Path $root "media\SwarmUI\dlbackend\comfy\ComfyUI\models\foley\hunyuanvideo_foley.safetensors"

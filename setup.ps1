@@ -252,6 +252,11 @@ if ($Models -eq "full") {
     Get-Model "$ace/diffusion_models/acestep_v1.5_turbo.safetensors"        (Join-Path $diff "acestep_v1.5_turbo.safetensors")
     Get-Model "$ace/vae/ace_1.5_vae.safetensors"                            (Join-Path $vae  "ace_1.5_vae.safetensors")
 
+    # Fast video: LTXV-2b-0.9.8-distilled — SwarmUI-native (class lightricks-ltx-video),
+    # near-real-time + long clips (up to ~257 frames). The T5 text-encoder auto-downloads on
+    # first gen. A SPEED option below the slower, higher-quality Wan 2.2.
+    Get-Model "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-2b-0.9.8-distilled.safetensors" (Join-Path $diff "ltxv-2b-0.9.8-distilled.safetensors")
+
     # Audio (V2A): HunyuanVideo-Foley — adds synced sound to a silent clip (muxed by the
     # WanFoley custom workflow). fp16 main for max quality. CLAP + SigLIP2 encoders auto-
     # download on first run. License: Tencent Hunyuan Community (local/personal use OK).

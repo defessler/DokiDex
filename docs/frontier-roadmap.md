@@ -58,8 +58,9 @@ into a known dead-end). The LTX-2 *audio* model is a separate newer release (the
 LTX-Video` repo is the video-only 0.9.x line, up to 0.9.8) — a speculative 14-26 GB pull of
 uncertain lip-sync value.
 
-- **Fast video (tractable):** LTXV-2b-0.9.8-distilled (~6 GB, SwarmUI-native, video-only) is the
-  clean Tier-2 add if a *speed* option below Wan 2.2 is wanted. No injection issue (native).
+- **Fast video** ✅ **DONE + live-verified:** LTXV-2b-0.9.8-distilled (~6 GB, SwarmUI-native, class
+  `lightricks-ltx-video`, T5 auto-downloads). Verified 97 frames 768×512 in ~36s — a near-real-time
+  *speed* option below Wan 2.2's quality. Wired in `setup.ps1`; guarded `verify.ps1` smoke.
 - **Talking-head / lip-sync (blocked):** Wan2.2-S2V-14B — highest *unique* value but blocked by
   the custom-workflow injection limitation above until SwarmUI adds a native S2V class.
 - **One-pass A/V (speculative):** LTX-2 audio model — separate big download, unverified value.
