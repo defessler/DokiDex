@@ -63,7 +63,13 @@ uncertain lip-sync value.
   *speed* option below Wan 2.2's quality. Wired in `setup.ps1`; guarded `verify.ps1` smoke.
 - **Talking-head / lip-sync (blocked):** Wan2.2-S2V-14B — highest *unique* value but blocked by
   the custom-workflow injection limitation above until SwarmUI adds a native S2V class.
-- **One-pass A/V (speculative):** LTX-2 audio model — separate big download, unverified value.
+- **One-pass A/V (attempted → blocked):** LTX-2 19B (`lightricks-ltx-video-2`) — SwarmUI *detects*
+  the class, but **can't load it** in this build: the diffusion model exists only as Kijai's
+  `transformer_only` safetensors, and SwarmUI's LTX2 path errors *"requires the safetensors checkpoint
+  format currently due to comfy limitations"* (Comfy-Org hosts only the LTX-2 text-encoders/loras, no
+  loadable checkpoint). Nascent support — revisit after a SwarmUI/ComfyUI update. (The 20 GB test
+  download was reclaimed.) So the audio-video frontier (S2V, SUPIR, LTX-2) is **fully mapped: all three
+  blocked** — by custom-workflow injection (S2V/SUPIR) or nascent loader support (LTX-2), not VRAM.
 - **Photoreal restoration upscale:** SUPIR — diffusion upscaler beyond 4x-UltraSharp.
 
 ## Tier 3 — cloud-only (state plainly; do not pretend to match locally)
