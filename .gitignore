@@ -29,6 +29,10 @@ stt/
 # Memory MCP runtime database
 serving/memory-mcp/*.db
 
+# Python caches
+__pycache__/
+*.pyc
+
 # Editor/OS noise
 .vscode/
 .idea/
