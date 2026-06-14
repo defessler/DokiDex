@@ -15,7 +15,7 @@ public partial class ServiceViewModel : ObservableObject
     {
         _doki = doki; _test = test;
         Name = s.Name;
-        Update(s);
+        Sync(s);
     }
 
     public string Name { get; }
@@ -32,6 +32,8 @@ public partial class ServiceViewModel : ObservableObject
     [ObservableProperty] private string _stateKind = "down";   // healthy|starting|degraded|down|notinstalled
     [ObservableProperty] private string _stateLabel = "";
     [ObservableProperty] private string _detail = "";
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasVersion))][NotifyPropertyChangedFor(nameof(VersionLine))] private string _version = "";
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasUpdate))][NotifyPropertyChangedFor(nameof(HasVersion))][NotifyPropertyChangedFor(nameof(VersionLine))] private string _update = "";
 
     [ObservableProperty] private bool _testRunning;
     [ObservableProperty][NotifyPropertyChangedFor(nameof(HasTestResult))] private string _testResult = "";
@@ -41,8 +43,12 @@ public partial class ServiceViewModel : ObservableObject
     public bool HasUi => !string.IsNullOrEmpty(Ui);
     public bool HasTestResult => !string.IsNullOrEmpty(TestResult);
     public bool HasTestFile => !string.IsNullOrEmpty(TestFile);
+    public bool HasVersion => !string.IsNullOrEmpty(Version) || (!string.IsNullOrEmpty(Update) && Update != "current");
+    public bool HasUpdate => !string.IsNullOrEmpty(Update) && Update != "current";
 
-    public void Update(ServiceStatus s)
+    public string VersionLine => string.IsNullOrEmpty(Version) ? Update : (string.IsNullOrEmpty(Update) || Update == "current" ? $"{Version} · up to date" : $"{Version}  ▲ {Update}");
+
+    public void Sync(ServiceStatus s)
     {
         Group = s.Group; Port = s.Port; Ui = s.Ui; VramGb = s.VramGb;
         Healthy = s.Healthy; Running = s.Running; Installed = s.Installed; Pid = s.Pid; Model = s.Model;

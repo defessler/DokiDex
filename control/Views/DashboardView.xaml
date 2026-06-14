@@ -43,6 +43,9 @@
                        FontSize="12" Margin="19,3,0,0"/>
             <TextBlock Text="{Binding Detail}" Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}"
                        FontSize="11" Margin="19,2,0,0" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding VersionLine}" Style="{StaticResource Mono}" FontSize="10.5" Margin="19,2,0,0"
+                       Foreground="{Binding HasUpdate, Converter={StaticResource WarnBrush}}"
+                       Visibility="{Binding HasVersion, Converter={StaticResource BoolVis}}" TextTrimming="CharacterEllipsis"/>
 
             <!-- actions -->
             <WrapPanel Margin="17,9,0,0">

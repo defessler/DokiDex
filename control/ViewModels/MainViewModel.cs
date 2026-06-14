@@ -11,9 +11,11 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly DokiService _doki = new();
     private readonly TestGenService _test = new();
+    private readonly UpdateService _update = new();
     private readonly Dispatcher _ui;
     private readonly Dictionary<string, ServiceViewModel> _byName = new();
     private Dictionary<string, List<string>> _profiles = new();
+    private readonly Dictionary<string, UpdateInfo> _lastUpdates = new();
     private CancellationTokenSource? _cts;
     private volatile bool _polling;
 
@@ -80,7 +82,7 @@ public partial class MainViewModel : ObservableObject
         _profiles = doc.Profiles ?? new();
         foreach (var s in doc.Services)
         {
-            if (_byName.TryGetValue(s.Name, out var vm)) vm.Update(s);
+            if (_byName.TryGetValue(s.Name, out var vm)) vm.Sync(s);
             else
             {
                 vm = new ServiceViewModel(_doki, _test, s);
@@ -88,6 +90,8 @@ public partial class MainViewModel : ObservableObject
                 (s.Group == "media" ? MediaServices : LlmServices).Add(vm);
             }
         }
+        foreach (var kv in _lastUpdates)
+            if (_byName.TryGetValue(kv.Key, out var uvm)) { uvm.Version = kv.Value.Version; uvm.Update = kv.Value.Update; }
         Gpu.Update(doc.Gpu);
         ActiveGroup = doc.Gpu?.ActiveGroup ?? "none";
         ActiveMode = DeriveMode();
@@ -163,5 +167,21 @@ public partial class MainViewModel : ObservableObject
     {
         _doki.RunVerifyConsole();
         StatusText = "running full-stack verify (console window)…";
+    }
+
+    [RelayCommand]
+    private async Task CheckUpdates()
+    {
+        StatusText = "checking for updates (git / gh)…";
+        var infos = await _update.CheckAsync().ConfigureAwait(false);
+        _ui.Invoke(() =>
+        {
+            foreach (var info in infos)
+            {
+                _lastUpdates[info.Service] = info;
+                if (_byName.TryGetValue(info.Service, out var vm)) { vm.Version = info.Version; vm.Update = info.Update; }
+            }
+            StatusText = infos.Count > 0 ? $"updates checked {DateTime.Now:HH:mm:ss}" : "update check returned nothing (git/gh unavailable?)";
+        });
     }
 }

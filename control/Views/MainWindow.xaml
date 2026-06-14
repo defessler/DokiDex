@@ -51,6 +51,8 @@
         <!-- global actions (bottom) -->
         <StackPanel DockPanel.Dock="Bottom">
           <TextBlock Text="GLOBAL" Style="{StaticResource SectionHeader}" Margin="2,0,0,6"/>
+          <Button Content="⟳  Check Updates" Style="{StaticResource NavBtn}" Command="{Binding CheckUpdatesCommand}"
+                  ToolTip="Check for newer SwarmUI (git) + llama-swap (GitHub) releases."/>
           <Button Content="✓  Verify stack" Style="{StaticResource NavBtn}" Command="{Binding VerifyCommand}"
                   ToolTip="Full-stack smoke test (opens a console)."/>
           <Button Content="⏻  Stop All" Style="{StaticResource NavBtn}" Foreground="{StaticResource DangerBrightBrush}"
