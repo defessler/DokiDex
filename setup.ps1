@@ -235,6 +235,15 @@ if ($Models -eq "full") {
     $upsc = Join-Path $swarm "Models\upscale_models"; New-Item -ItemType Directory -Force $upsc | Out-Null
     Get-Model "https://huggingface.co/Kim2091/UltraSharp/resolve/main/4x-UltraSharp.pth" (Join-Path $upsc "4x-UltraSharp.pth")
 
+    # Precise image editing: Qwen-Image-Edit-2511 — SwarmUI-native instruction edit + free
+    # inpaint. fp8mixed (~20GB) fits 32GB; Qwen2.5-VL TE + VAE shared from the Qwen-Image repo.
+    # (2511 ships fp8mixed, NOT fp8_e4m3fn — HF-tree-verified.)
+    $qedit = "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files"
+    $qbase = "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files"
+    Get-Model "$qedit/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors" (Join-Path $diff "qwen_image_edit_2511_fp8mixed.safetensors")
+    Get-Model "$qbase/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"        (Join-Path $te   "qwen_2.5_vl_7b_fp8_scaled.safetensors")
+    Get-Model "$qbase/vae/qwen_image_vae.safetensors"                             (Join-Path $vae  "qwen_image_vae.safetensors")
+
     # Audio (V2A): HunyuanVideo-Foley — adds synced sound to a silent clip (muxed by the
     # WanFoley custom workflow). fp16 main for max quality. CLAP + SigLIP2 encoders auto-
     # download on first run. License: Tencent Hunyuan Community (local/personal use OK).
