@@ -284,7 +284,16 @@ switch ($Command) {
                 if ($LASTEXITCODE -ne 0) { $failed = 1 }
             }
         }
-        # 2. control-panel data layer (xUnit).
+        # 2. persistent-memory store (sqlite + FTS5) — pure-stdlib python; skipped if python absent.
+        $memTest = Join-Path $root "tests\memory_db.test.py"
+        if (Test-Path $memTest) {
+            if (Get-Command python -ErrorAction SilentlyContinue) {
+                Write-Host "`n== memory_db.test.py ==" -ForegroundColor Cyan
+                & python $memTest
+                if ($LASTEXITCODE -ne 0) { $failed = 1 }
+            } else { Write-Host "`n~ memory_db.test.py skipped (python not found)" }
+        }
+        # 3. control-panel data layer (xUnit).
         $proj = Join-Path $root "control\DokiCode.Control.Tests\DokiCode.Control.Tests.csproj"
         if (Test-Path $proj) {
             Write-Host "`n== control-panel unit tests ==" -ForegroundColor Cyan
