@@ -2,7 +2,7 @@
 
 Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot-class setup that runs entirely on my own hardware (RTX 5090 / 32GB VRAM, 64GB DDR5, Windows 11). No cloud AI services at runtime; web search allowed.
 
-**▶ How it all works (full architecture):** [docs/how-it-works.md](docs/how-it-works.md) · **Design doc:** [docs/TDD.md](docs/TDD.md) · **Friendly ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/media-recipes.md](docs/media-recipes.md)
+**▶ Features (full index):** [docs/FEATURES.md](docs/FEATURES.md) · **How it all works (architecture):** [docs/how-it-works.md](docs/how-it-works.md) · **Design doc:** [docs/TDD.md](docs/TDD.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/media-recipes.md](docs/media-recipes.md)
 
 ## Run it
 
@@ -58,10 +58,10 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Code:** Crush v0.76, **91%** on the 11-task golden suite (`docs/scorecards/`). Claw Code bake-off'd → rejected (45%, flaky tool calls).
 - **Chat:** Chatbox → `:8080`. **Autocomplete:** Qwen2.5-Coder-3B FIM on `:8012` (live `/infill` verified).
 - **Web search:** keyless DuckDuckGo MCP — no AI-cloud traffic.
-- **Image + video + audio:** SwarmUI/ComfyUI installed 100% headlessly, `doki verify`-green (**14/14**, 2026-06-14). **Image:** Z-Image Turbo (1024² in seconds) + Z-Image Base + Chroma. **Video:** Wan 2.2 **TI2V-5B** text-to-video (832×480 in ~55s) **and image-to-video** (native `videomodel` — animate a still); **LTXV-2b** near-real-time fast video (97 frames in ~36s); + Wan 2.1 1.3B floor. **Music:** ACE-Step 1.5 (native audio model — 48 kHz stereo MP3 from style/bpm/duration). **Image-editing:** Qwen-Image-Edit-2511 (instruction edits + inpaint, e.g. red→green apple). **Upscaling:** 4×-UltraSharp (Refiner-Upscale). **Audio:** HunyuanVideo-Foley synced sound via the `WanFoley` workflow. **Simple prompts:** a 3B rewriter on `:8013` auto-expands `<mpprompt:…>`. All uncensored & verified live.
+- **Image + video + audio:** SwarmUI/ComfyUI installed 100% headlessly, `doki verify`-green (**15/15**, 2026-06-14). **Image:** Z-Image Turbo (1024² in seconds) + Z-Image Base + Chroma. **Video:** Wan 2.2 **TI2V-5B** text-to-video (832×480 in ~55s) **and image-to-video** (native `videomodel` — animate a still); **LTXV-2b** near-real-time fast video (97 frames in ~36s); + Wan 2.1 1.3B floor. **Music:** ACE-Step 1.5 (native audio model — 48 kHz stereo MP3 from style/bpm/duration). **Image-editing:** Qwen-Image-Edit-2511 (instruction edits + inpaint, e.g. red→green apple). **Upscaling:** 4×-UltraSharp (Refiner-Upscale). **Audio:** HunyuanVideo-Foley synced sound via the `WanFoley` workflow. **Simple prompts:** a 3B rewriter on `:8013` auto-expands `<mpprompt:…>`. All uncensored & verified live.
 - **Speech (TTS):** Chatterbox-TTS-Server on `:8004` (own cu128 venv) — uncensored (Perth watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning. Verified live; coexists with coder-fast at 30.6 GB.
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, own venv. Verified live (TTS→STT round-trip); coexists with the coder in agent mode.
-- **Control panel:** native WPF cockpit (`doki panel` / `control.bat`) over `doki status json` — grouped live cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, coder model-swap, update badges. Built + launch-verified, with **15 unit tests** on its data layer (`dotnet test control\DokiCode.Control.Tests`).
+- **Control panel:** native WPF cockpit (`doki panel` / `control.bat`) over `doki status json` — grouped live cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, coder model-swap, update badges. Built + launch-verified, with **24 unit tests** on its data layer (`dotnet test control\DokiCode.Control.Tests`).
 - **Control plane:** `doki up/down/status/restart/logs/panel` + per-service `start/stop/restart` and `status json`; agent / coexist / media profiles; one-command `setup.ps1`.
 - **Model refresh (eval-gated):** Nemotron-Cascade-2 (45%) and Qwen3-Coder-Next-REAP (broken tool-calls) both lost — Qwen3-Coder-30B confirmed the best 32GB fit by measurement.
 
