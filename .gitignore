@@ -23,6 +23,9 @@ media/
 # Local TTS install — Chatterbox-TTS-Server repo + cu128 venv + voice model weights
 tts/
 
+# Local STT install — onnx-asr venv + Parakeet model cache
+stt/
+
 # Editor/OS noise
 .vscode/
 .idea/
