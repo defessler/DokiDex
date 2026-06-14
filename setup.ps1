@@ -23,10 +23,26 @@ $root = $PSScriptRoot
 function Info($m) { Write-Host "[setup] $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  ok  $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
+function Sync-Path {
+    # Refresh THIS session's PATH from the machine+user registry so a tool winget just
+    # installed (python/git/dotnet) resolves later in the same run — winget edits the
+    # registry, not our already-started process environment.
+    $parts = @([Environment]::GetEnvironmentVariable('Path','Machine'),
+               [Environment]::GetEnvironmentVariable('Path','User')) | Where-Object { $_ }
+    $env:Path = $parts -join ';'
+}
 function Ensure-WinGet($id, $cmd) {
     if ($cmd -and (Get-Command $cmd -ErrorAction SilentlyContinue)) { Ok "$cmd present"; return }
     Info "installing $id ..."
     winget install $id --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+    Sync-Path   # so a freshly-installed command resolves later in this same session
+}
+function Pip($py) {
+    # Run pip in the given venv and FAIL LOUD: line 20 disables native-command error
+    # propagation, so each dependency step must check $LASTEXITCODE explicitly or a broken
+    # install passes silently and later gets cached as "present".
+    & $py -m pip @args
+    if ($LASTEXITCODE -ne 0) { throw "pip failed (exit $LASTEXITCODE): pip $($args -join ' ')" }
 }
 
 # ---- 1. Preflight ---------------------------------------------------------
@@ -76,15 +92,17 @@ if ($Tts) {
     $ttsRoot = Join-Path $root "tts\Chatterbox-TTS-Server"
     if (-not (Test-Path (Join-Path $ttsRoot ".git"))) { Info "cloning Chatterbox-TTS-Server ..."; git clone https://github.com/devnen/Chatterbox-TTS-Server $ttsRoot } else { Ok "Chatterbox-TTS-Server cloned" }
     $tpy = Join-Path $ttsRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $tpy)) {
+    $tok = Join-Path $ttsRoot ".venv\.deps-ok"   # sentinel: written only after ALL deps succeed
+    if (-not (Test-Path $tok)) {
         Info "creating venv + installing cu128 torch + deps (large, ~3GB) ..."
-        python -m venv (Join-Path $ttsRoot ".venv")
+        if (-not (Test-Path $tpy)) { python -m venv (Join-Path $ttsRoot ".venv") }   # reuse a partial venv; pip resumes
         & $tpy -m pip install --upgrade pip | Out-Null
-        & $tpy -m pip install -r (Join-Path $ttsRoot "requirements-nvidia-cu128.txt")
+        Pip $tpy install -r (Join-Path $ttsRoot "requirements-nvidia-cu128.txt")
         # chatterbox itself with --no-deps so it can't downgrade the cu128 torch
-        & $tpy -m pip install --no-deps "git+https://github.com/devnen/chatterbox-v2.git@master" s3tokenizer==0.3.0 onnx==1.16.0
+        Pip $tpy install --no-deps "git+https://github.com/devnen/chatterbox-v2.git@master" s3tokenizer==0.3.0 onnx==1.16.0
         # onnx needs protobuf >=3.20 but the cu128 reqs pin 3.19.6 (descript-audiotools) — fix it
-        & $tpy -m pip install protobuf==4.25.5
+        Pip $tpy install protobuf==4.25.5
+        New-Item -ItemType File -Force $tok | Out-Null   # all deps verified — safe to skip next run
     } else { Ok "TTS venv present" }
     # Use the public ORIGINAL model — the server's default 'chatterbox-turbo' repo is gated.
     $cfg = Join-Path $ttsRoot "config.yaml"
@@ -104,13 +122,15 @@ if ($Stt) {
     if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
     $sttRoot = Join-Path $root "stt"
     $spy = Join-Path $sttRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $spy)) {
+    $sok = Join-Path $sttRoot ".venv\.deps-ok"   # sentinel: written only after ALL deps succeed
+    if (-not (Test-Path $sok)) {
         Info "creating venv + installing onnx-asr (CPU EP) + FastAPI (~300MB) ..."
         New-Item -ItemType Directory -Force $sttRoot | Out-Null
-        python -m venv (Join-Path $sttRoot ".venv")
+        if (-not (Test-Path $spy)) { python -m venv (Join-Path $sttRoot ".venv") }   # reuse a partial venv; pip resumes
         & $spy -m pip install --upgrade pip | Out-Null
         # onnx-asr[cpu,hub] pulls onnxruntime + huggingface_hub; soundfile loads/resamples audio
-        & $spy -m pip install "onnx-asr[cpu,hub]" fastapi "uvicorn[standard]" python-multipart soundfile
+        Pip $spy install "onnx-asr[cpu,hub]" fastapi "uvicorn[standard]" python-multipart soundfile
+        New-Item -ItemType File -Force $sok | Out-Null   # all deps verified — safe to skip next run
     } else { Ok "STT venv present" }
     Ok "STT ready -> :8005 (OpenAI /v1/audio/transcriptions). First '.\doki.ps1 up' downloads the Parakeet model (~2GB)."
 }
@@ -121,7 +141,11 @@ if (-not $Media) { Info "core setup done.  -Media adds image/video,  -Tts speech
 Info "media stack (SwarmUI + ComfyUI + uncensored image/video models)"
 
 # 5a. prereqs: .NET 8 SDK + git
-if (-not ((dotnet --list-sdks 2>$null) -match '8\.0\.')) { Ensure-WinGet "Microsoft.DotNet.SDK.8" $null } else { Ok ".NET 8 SDK present" }
+# Guard the probe: a bare `dotnet` call throws CommandNotFoundException when dotnet is
+# absent (the very case this handles), and `2>$null` can't suppress it — only Get-Command can.
+$hasNet8 = $false
+if (Get-Command dotnet -ErrorAction SilentlyContinue) { $hasNet8 = [bool]((dotnet --list-sdks 2>$null) -match '8\.0\.') }
+if (-not $hasNet8) { Ensure-WinGet "Microsoft.DotNet.SDK.8" $null } else { Ok ".NET 8 SDK present" }
 Ensure-WinGet "Git.Git" "git"
 
 # 5b. clone SwarmUI
@@ -185,8 +209,17 @@ function Get-Model($url, $dest) {
     if (Test-Path $dest) { Ok "have $(Split-Path $dest -Leaf)"; return }
     if (-not $url) { Warn "could not resolve $(Split-Path $dest -Leaf)"; return }
     Info "downloading $(Split-Path $dest -Leaf) ..."
-    curl.exe -L --fail --retry 3 -o $dest $url
-    if ($LASTEXITCODE -ne 0) { Warn "download failed: $url" } else { Ok "$(Split-Path $dest -Leaf) ($([math]::Round((Get-Item $dest).Length/1GB,2)) GB)" }
+    # Download to a .part temp and atomically promote on success, so an interrupted or failed
+    # download never leaves a truncated file that the existence-only gate above treats as done.
+    # -C - resumes a prior .part; --remove-on-error clears curl's own partial on an HTTP error.
+    $tmp = "$dest.part"
+    curl.exe -L --fail --retry 3 -C - --remove-on-error -o $tmp $url
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        Warn "download failed: $url"; return
+    }
+    Move-Item -Force $tmp $dest
+    Ok "$(Split-Path $dest -Leaf) ($([math]::Round((Get-Item $dest).Length/1GB,2)) GB)"
 }
 # --- lean: the verified reliable defaults ---
 # image: Z-Image Turbo (uncensored, fast, photoreal) — verified ~seconds/image
