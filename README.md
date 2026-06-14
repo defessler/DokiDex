@@ -40,17 +40,17 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Code:** Crush (daily driver, bake-off winner) — OpenCode / Claw Code challengers
 - **Chat:** Chatbox → local endpoint · **Autocomplete:** small FIM model + llama.vscode
 - **Search:** keyless DuckDuckGo MCP
-- **Image + video:** SwarmUI (ComfyUI engine) — Z-Image Turbo + Wan 2.1, unfiltered, installed headlessly
+- **Image + video + audio:** SwarmUI (ComfyUI) — Z-Image Turbo/Base + Wan 2.2 (5B) with synced Foley audio, unfiltered, headless. A 3B prompt-rewriter auto-expands lazy prompts (`<mpprompt:…>`)
 
 ## Status
 
-**Complete and verified across the board (2026-06-13)** — fully local, one command to run:
+**Complete and verified across the board (2026-06-14)** — fully local, one command to run:
 
 - **Inference:** llama-swap `:8080` — `coder-fast` (265 tok/s), `coder-big`, `coder-fast-lite`; clean native tool calls.
 - **Code:** Crush v0.76, **91%** on the 11-task golden suite (`docs/scorecards/`). Claw Code bake-off'd → rejected (45%, flaky tool calls).
 - **Chat:** Chatbox → `:8080`. **Autocomplete:** Qwen2.5-Coder-3B FIM on `:8012` (live `/infill` verified).
 - **Web search:** keyless DuckDuckGo MCP — no AI-cloud traffic.
-- **Image + video:** SwarmUI/ComfyUI installed 100% headlessly — **Z-Image Turbo** (1024² in 54s) + **Wan 2.1** (832×480 clip in 25s), both uncensored & verified live.
+- **Image + video + audio:** SwarmUI/ComfyUI installed 100% headlessly, `doki verify`-green (**7/7**). **Image:** Z-Image Turbo (1024² in seconds) + Z-Image Base (quality). **Video:** Wan 2.2 **TI2V-5B** (832×480 in ~55s, 13.8 GB) + Wan 2.1 1.3B floor — the A14B dual-expert overflows 32 GB and is kept for a future GGUF/block-swap path. **Audio:** HunyuanVideo-Foley adds synced 48 kHz sound via the one-click `WanFoley` workflow. **Simple prompts:** a 3B rewriter on `:8013` auto-expands `<mpprompt:…>` through MagicPrompt. All uncensored & verified live.
 - **Control plane:** `doki up/down/status/restart/logs` with agent / coexist / media profiles; one-command `setup.ps1`.
 - **Model refresh (eval-gated):** Nemotron-Cascade-2 (45%) and Qwen3-Coder-Next-REAP (broken tool-calls) both lost — Qwen3-Coder-30B confirmed the best 32GB fit by measurement.
 

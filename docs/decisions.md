@@ -200,3 +200,51 @@ coherent 1024² in ~179s (CFG 3.5, 26 steps) — slower than Z-Image (54s) but a
 different softer/filmic look. **Kept as a 2nd option** (`-Models full`); Z-Image stays the
 fast default. `setup.ps1` fixed to fetch the stable variant directly (the regex resolver
 would have grabbed a `do_not_use/` file).
+
+### Media upgrade (2026-06-14): Sora-2-from-simple-prompts — Wan 2.2 + a local prompt-rewriter + Foley audio
+
+Goal: get local image+video **as close to Sora 2 as possible from SIMPLE prompts with little
+tuning**. Decided after **three multi-agent research rounds**, every load-bearing fact verified
+against primary sources (official repos + the HF file-tree API, with byte sizes and live URL
+checks). Eval-gated as always: the lean floor (Z-Image Turbo + Wan 2.1 1.3B) is untouched, and
+every swap is gated behind a blind simple-prompt bake-off.
+
+- **The centerpiece is NOT a model — it's an always-on local LLM prompt-rewriter.** A tiny
+  `Qwen2.5-3B-Instruct` (Q5, ~2.5GB) runs on its own port **:8013** (new
+  `serving\start-prompt-rewriter.ps1`, in doki's **`media` group** so it coexists with the video
+  model, ~24GB peak < 32GB). SwarmUI's **MagicPrompt** extension calls it; the user types
+  `<mpprompt:lazy idea>` and the 3B silently expands it into the 60–120-word cinematic prompt the
+  models were trained on. This is what manufactures "Sora-like from one sentence." The official
+  Wan content-safety rewrite rules (8–10, which silently swap "sensitive" prompts) are **omitted**
+  to honor the uncensored requirement.
+- **Image: no swap.** Z-Image Turbo already beats FLUX.2 Dev / Qwen-Image / HiDream / FLUX.1 on
+  photoreal-from-short-prompts across 3 independent 2026 reviews → no measured win. Added
+  **Z-Image Base** (non-distilled, `Comfy-Org/z_image` `z_image_bf16`) as the "quality" ceiling
+  (full CFG/negatives); Turbo stays the default; Chroma stays the stylized complement.
+- **Video: Wan 2.2 TI2V-5B** (single 5B model, efficient VAE) is the reliable quality default —
+  **validated live: 832×480×49 frames in 53s at 13.8GB VRAM**, a genuine upgrade over the 1.3B floor
+  (and leaves ~18GB free, so the rewriter coexists trivially). **Live-test correction to the
+  research:** the **A14B dual-expert** (fp8 high+low StepSwap) does NOT fit 32GB — both 13.3GB
+  experts + the 6.3GB text-encoder + activations thrash past 32GB even at 480×320×33 (timed out
+  >300s, VRAM pegged at 32GB) — the same wall decisions.md found for Wan 2.1 14B, made worse by the
+  two-expert architecture. The research's "fits 32GB" claim didn't survive contact with the card.
+  So the 14B is kept on disk but **NOT wired as the default**; reaching it needs GGUF-Q4 (~9.6GB/
+  expert) or block-swap (future opt-in). **Also corrected:** Wan 2.5/2.6/2.7 are API-only — Wan 2.2
+  is the newest OPEN Wan (verified vs the official `Wan-AI` HF org; "downloadable Wan 2.7" pages are SEO).
+- **Audio: HunyuanVideo-Foley** (SOTA V2A, beats MMAudio/ThinkSound). Runs as a ComfyUI post-step
+  on the silent clip; SwarmUI's own `SwarmSaveAnimationWS` node muxes the audio → **one muxed MP4
+  from a single API call** via a committed `WanFoley` custom workflow. License: Tencent Hunyuan
+  Community (local/personal OK; restricted in EU/UK/SK).
+
+**Four errors caught by the "iterate until solid" discipline** (cross-checking agents against
+primary sources): the Wan-2.7-is-open claim (false), the MagicPrompt tag form (it's the colon
+`<mpprompt:...>`, not a paired tag), the Z-Image Base packaging source (`Comfy-Org/z_image`, not
+`mcmonkey/swarm-models`), and a repeated "Wan 2.6 open weights" claim (false).
+
+**Honest Sora-2 gap** (Sora 2 is itself deprecated — OpenAI API sunset 2026-09-24): stills
+match/exceed Sora-2 keyframes; short 5s 480–720p Wan 2.2 clips are cinematic with a modest visual
+gap; still short on 1080p+/10–25s length, hardest physics + multi-shot identity, and joint-trained
+synced audio (Foley is good V2A post-hoc, not lip-sync). Speed/cost/control/uncensored win outright.
+
+Design + verified URLs/wiring: `~/.claude/plans/generic-honking-turing.md`. Bake-off scorecards to
+land under `docs/scorecards/` once candidates are generated head-to-head.

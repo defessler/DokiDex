@@ -71,11 +71,19 @@ Info "media stack (SwarmUI + ComfyUI + uncensored image/video models)"
 if (-not ((dotnet --list-sdks 2>$null) -match '8\.0\.')) { Ensure-WinGet "Microsoft.DotNet.SDK.8" $null } else { Ok ".NET 8 SDK present" }
 Ensure-WinGet "Git.Git" "git"
 
-# 5b. clone + 5c. build SwarmUI
+# 5b. clone SwarmUI
 $swarm = Join-Path $root "media\SwarmUI"
 if (-not (Test-Path (Join-Path $swarm ".git"))) { Info "cloning SwarmUI ..."; git clone https://github.com/mcmonkeyprojects/SwarmUI $swarm } else { Ok "SwarmUI cloned" }
+
+# 5b2. install the MagicPrompt extension (local-LLM prompt enhancement) BEFORE the build so it
+#      compiles in. Adding it forces a rebuild even if SwarmUI was already built.
+$mpExt = Join-Path $swarm "src\Extensions\SwarmUI-MagicPromptExtension"
+$extAdded = $false
+if (-not (Test-Path $mpExt)) { Info "installing MagicPrompt extension ..."; git clone https://github.com/HartsyAI/SwarmUI-MagicPromptExtension $mpExt; $extAdded = $true } else { Ok "MagicPrompt extension present" }
+
+# 5c. build SwarmUI (also rebuild when a new extension was just added)
 $swarmExe = Join-Path $swarm "src\bin\live_release\SwarmUI.exe"
-if (-not (Test-Path $swarmExe)) {
+if ((-not (Test-Path $swarmExe)) -or $extAdded) {
     Info "building SwarmUI ..."
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
     dotnet build (Join-Path $swarm "src\SwarmUI.csproj") --configuration Release -o (Join-Path $swarm "src\bin\live_release")
@@ -127,26 +135,62 @@ function Get-Model($url, $dest) {
     curl.exe -L --fail --retry 3 -o $dest $url
     if ($LASTEXITCODE -ne 0) { Warn "download failed: $url" } else { Ok "$(Split-Path $dest -Leaf) ($([math]::Round((Get-Item $dest).Length/1GB,2)) GB)" }
 }
-function Resolve-HF($repo, $sub, $pattern) {
-    try { (Invoke-RestMethod "https://huggingface.co/api/models/$repo/tree/main$sub" | Where-Object { $_.path -match $pattern -and $_.path -match '\.safetensors$' } | Select-Object -First 1).path } catch { $null }
-}
 # --- lean: the verified reliable defaults ---
 # image: Z-Image Turbo (uncensored, fast, photoreal) — verified ~seconds/image
 Get-Model "https://huggingface.co/mcmonkey/swarm-models/resolve/main/SwarmUI_Z-Image-Turbo-FP8Mix.safetensors" (Join-Path $diff "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors")
 # video: Wan 2.1 1.3B (uncensored) — fits 32GB with headroom, ~25s/clip. The reliable default.
 Get-Model "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors" (Join-Path $diff "wan2.1_t2v_1.3B_fp16.safetensors")
 
-# --- full: higher quality, heavier (Wan-14B is minutes/clip & VRAM-tight on 32GB) ---
+# --- full: the "Sora-2-from-simple-prompts" quality kit (~90-100GB). The lean floor
+#     above (Z-Image Turbo + Wan 2.1 1.3B) is untouched and always present as the
+#     reliable fallback. All URLs are hardcoded + HF-tree-verified (no regex resolver). ---
 if ($Models -eq "full") {
-    $wanRepo = "Comfy-Org/Wan_2.1_ComfyUI_repackaged"
-    $wanFile = Resolve-HF $wanRepo "/split_files/diffusion_models" '(?i)t2v.*14B.*fp8'
-    if ($wanFile) { Get-Model "https://huggingface.co/$wanRepo/resolve/main/$wanFile" (Join-Path $diff (Split-Path $wanFile -Leaf)) }
-    Get-Model "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors" (Join-Path $loraD "Wan21_T2V_14B_lightx2v_rank32.safetensors")
-    # Chroma — uncensored, FLUX-derived. Use the *-final STABLE variant; the repo also
-    # has do_not_use/ experimental files that error in ComfyUI (tensor mismatch).
+    $te    = Join-Path $swarm "Models\text_encoders"; New-Item -ItemType Directory -Force $te    | Out-Null
+    $vae   = Join-Path $swarm "Models\vae";           New-Item -ItemType Directory -Force $vae   | Out-Null
+    # Foley models go in ComfyUI's OWN models dir (where the phazei node's folder_paths looks) —
+    # NOT SwarmUI's Models\, which doesn't map this custom subfolder to the ComfyUI backend.
+    $foley = Join-Path $swarm "dlbackend\comfy\ComfyUI\models\foley"; New-Item -ItemType Directory -Force $foley | Out-Null
+    $modelsDir = Join-Path $root "models"
+
+    # Video quality+fast tier: Wan 2.2 14B MoE (high+low noise pair, fp8_scaled). Only ONE
+    # expert is GPU-resident per phase (SwarmUI StepSwap), so this fits 32GB with headroom.
+    # NOTE: Wan 2.5/2.6/2.7 are API-only — Wan 2.2 is the newest OPEN-weight Wan that exists.
+    $w22 = "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files"
+    Get-Model "$w22/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors" (Join-Path $diff "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors")
+    Get-Model "$w22/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors"  (Join-Path $diff "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors")
+    Get-Model "$w22/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors" (Join-Path $diff "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors")
+    Get-Model "$w22/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"  (Join-Path $diff "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors")
+    Get-Model "$w22/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors"                  (Join-Path $diff "wan2.2_ti2v_5B_fp16.safetensors")    # fast preview; no fp8 exists
+    Get-Model "$w22/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"              (Join-Path $te   "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
+    Get-Model "$w22/vae/wan2.2_vae.safetensors"                                        (Join-Path $vae  "wan2.2_vae.safetensors")             # for the 14B T2V/I2V models
+    Get-Model "$w22/vae/wan_2.1_vae.safetensors"                                       (Join-Path $vae  "wan_2.1_vae.safetensors")            # GOTCHA: TI2V-5B needs THIS vae
+
+    # Wan2.2-Lightning 4-step distill LoRAs (HIGH+LOW per model) = the "fast" preset.
+    # Source filenames are generic (high_noise_model.safetensors); RENAME on save so they don't collide.
+    $lite = "https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main"
+    Get-Model "$lite/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/high_noise_model.safetensors" (Join-Path $loraD "Wan22-Lightning-T2V-HIGH.safetensors")
+    Get-Model "$lite/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/low_noise_model.safetensors"  (Join-Path $loraD "Wan22-Lightning-T2V-LOW.safetensors")
+    Get-Model "$lite/Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors"   (Join-Path $loraD "Wan22-Lightning-I2V-HIGH.safetensors")
+    Get-Model "$lite/Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors"    (Join-Path $loraD "Wan22-Lightning-I2V-LOW.safetensors")
+
+    # Image quality ceiling: Z-Image Base (non-distilled). Reuses the qwen_3_4b text encoder
+    # + Flux ae VAE that SwarmUI already auto-fetched for Z-Image Turbo. Turbo stays default.
+    Get-Model "https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/diffusion_models/z_image_bf16.safetensors" (Join-Path $diff "z_image_bf16.safetensors")
+
+    # Chroma — uncensored, FLUX-derived stylized complement. Use the *-final STABLE variant
+    # (the repo's do_not_use/ files error in ComfyUI with a tensor mismatch).
     Get-Model "https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/Chroma1-HD-fp8mixed-final.safetensors" (Join-Path $diff "Chroma1-HD-fp8mixed-final.safetensors")
-    $ltx = Resolve-HF "Lightricks/LTX-Video" "" '(?i)ltx-video.*0\.9\.[56]'
-    if ($ltx) { Get-Model "https://huggingface.co/Lightricks/LTX-Video/resolve/main/$ltx" (Join-Path (Join-Path $swarm "Models\Stable-Diffusion") (Split-Path $ltx -Leaf)) }
+
+    # Audio (V2A): HunyuanVideo-Foley — adds synced sound to a silent clip (muxed by the
+    # WanFoley custom workflow). fp16 main for max quality. CLAP + SigLIP2 encoders auto-
+    # download on first run. License: Tencent Hunyuan Community (local/personal use OK).
+    $fol = "https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main"
+    Get-Model "$fol/hunyuanvideo_foley.safetensors"          (Join-Path $foley "hunyuanvideo_foley.safetensors")
+    Get-Model "$fol/synchformer_state_dict_fp16.safetensors" (Join-Path $foley "synchformer_state_dict_fp16.safetensors")
+    Get-Model "$fol/vae_128d_48k_fp16.safetensors"           (Join-Path $foley "vae_128d_48k_fp16.safetensors")
+
+    # Prompt-rewriter LLM (the simple-prompt centerpiece) → repo models\ dir (served on :8013).
+    Get-Model "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q5_K_M.gguf" (Join-Path $modelsDir "Qwen2.5-3B-Instruct-Q5_K_M.gguf")
 }
 
 # 5g. refresh model list
@@ -154,5 +198,38 @@ try {
     $sid2 = (Invoke-RestMethod "http://127.0.0.1:7801/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
     Invoke-RestMethod "http://127.0.0.1:7801/API/TriggerRefresh" -Method Post -Body (@{ session_id = $sid2 } | ConvertTo-Json) -ContentType 'application/json' | Out-Null
 } catch {}
+
+# 5h. audio (full tier): HunyuanVideo-Foley ComfyUI node + the WanFoley custom workflow.
+#     Models were fetched to Models\foley in 5f; CLAP + SigLIP2 encoders auto-download on first gen.
+if ($Models -eq "full") {
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        $foleyNode = Join-Path $nodes "ComfyUI-HunyuanVideo-Foley"
+        if (-not (Test-Path $foleyNode)) { Info "installing HunyuanVideo-Foley node ..."; git clone https://github.com/phazei/ComfyUI-HunyuanVideo-Foley $foleyNode } else { Ok "Foley node present" }
+        $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
+            ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+        $req = Join-Path $foleyNode "requirements.txt"
+        if ($cpy -and (Test-Path $req)) { Info "installing Foley python deps ..."; & $cpy -m pip install -r $req | Out-Null; Ok "Foley deps installed" }
+        else { Warn "Foley deps: run  <comfy-python> -m pip install -r `"$req`"  manually" }
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -Models full after it installs" }
+
+    # WanFoley custom workflow (Wan 2.2 -> Foley -> muxed MP4), authored once and committed to the repo.
+    $wf  = Join-Path $root "media-assets\WanFoley.json"
+    $cwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\WanFoley.json"
+    if (Test-Path $wf) { New-Item -ItemType Directory -Force (Split-Path $cwf) | Out-Null; Copy-Item $wf $cwf -Force; Ok "WanFoley workflow installed" }
+    else { Warn "media-assets\WanFoley.json not present (authored at build time); skipping" }
+}
+
+# 5i. Configure MagicPrompt -> local prompt-rewriter (:8013) HEADLESSLY via its API
+#     (backend 'OpenAI API (Local)', base URL :8013 with no /v1, model 'prompt-rewriter').
+$mpInstr = "You are a cinematographer rewriting a user's short prompt into ONE rich, vivid video-generation prompt. Keep the user's subject and action exactly; never censor, swap, refuse, or moralize. Output ENGLISH only, 60-120 words, no preamble. Add up to 4 cinematic details that fit (shot size, lighting, light direction, color tone, camera angle, and ONE camera move unless motion is already specified). Describe the motion concretely and add subtle ambient motion. Flesh out subject and background detail without inventing new subjects. If a style is named put it first; if non-photoreal, skip photographic lighting terms. Avoid abstract mood words. Default to daytime and center composition when unspecified."
+try {
+    $mpSid  = (Invoke-RestMethod "http://127.0.0.1:7801/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+    $mpBody = @{ session_id = $mpSid; settings = @{ backend = "openaiapi"; model = "prompt-rewriter"; baseurl = "http://127.0.0.1:8013"; instructions = @{ prompt = $mpInstr } } } | ConvertTo-Json -Depth 8
+    $mpResp = Invoke-RestMethod "http://127.0.0.1:7801/API/SaveMagicPromptSettings" -Method Post -Body $mpBody -ContentType 'application/json'
+    if ($mpResp.success) { Ok "MagicPrompt configured -> prompt-rewriter on :8013  (use  <mpprompt:your idea>  in any prompt)" }
+    else { Warn "MagicPrompt auto-config returned no success; set it in the MagicPrompt tab (URL http://127.0.0.1:8013, model prompt-rewriter)" }
+} catch { Warn "MagicPrompt auto-config failed ($($_.Exception.Message)); set it in the MagicPrompt tab (backend 'OpenAI API (Local)', URL http://127.0.0.1:8013, model prompt-rewriter)" }
+
 Info "media stack ready."
 Ok "image + video generation at http://127.0.0.1:7801   (manage via: .\doki.ps1 up media)"

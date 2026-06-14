@@ -22,8 +22,12 @@ $Services = [ordered]@{
     "llama-swap" = @{ script = (Join-Path $serving "start-serving.ps1"); health = "http://127.0.0.1:8080/v1/models"; group = "llm";   desc = "agent inference :8080" }
     "fim"        = @{ script = (Join-Path $serving "start-fim.ps1");     health = "http://127.0.0.1:8012/health";   group = "llm";   desc = "autocomplete  :8012" }
     "media"      = @{ script = (Join-Path $serving "start-media.ps1");   health = "http://127.0.0.1:7801/";         group = "media"; desc = "image+video   :7801" }
+    # Tiny always-on prompt-rewriter (:8013) — auto-expands lazy prompts for SwarmUI.
+    # group=media so it coexists with the image/video model (and is stopped for the big LLM).
+    # 'requires' lets doki skip it cleanly on lean installs where its model isn't present.
+    "prompt-rewriter" = @{ script = (Join-Path $serving "start-prompt-rewriter.ps1"); health = "http://127.0.0.1:8013/health"; group = "media"; desc = "prompt rewriter :8013"; requires = (Join-Path $root "models\Qwen2.5-3B-Instruct-Q5_K_M.gguf") }
 }
-$Profiles = [ordered]@{ agent = @("llama-swap"); coexist = @("llama-swap", "fim"); media = @("media") }
+$Profiles = [ordered]@{ agent = @("llama-swap"); coexist = @("llama-swap", "fim"); media = @("media", "prompt-rewriter") }
 
 function PidFile($n) { Join-Path $runDir "$n.pid" }
 function LogFile($n) { Join-Path $runDir "$n.log" }
@@ -76,8 +80,13 @@ function DoUp($profile) {
     $wantGroup = if ($profile -eq "media") { "media" } else { "llm" }
     foreach ($n in $Services.Keys) { if ($Services[$n].group -ne $wantGroup -and (IsRunning $n)) { StopSvc $n } }
     Write-Host "doki up [$profile]"
-    foreach ($n in $Profiles[$profile]) { StartSvc $n }
+    $starting = @()
     foreach ($n in $Profiles[$profile]) {
+        if ($Services[$n].requires -and -not (Test-Path $Services[$n].requires)) { Write-Host "  ~ $n skipped (not installed — run setup.ps1 -Media -Models full)"; continue }
+        StartSvc $n
+        $starting += $n
+    }
+    foreach ($n in $starting) {
         if (WaitHealth $n) { Write-Host "  ok  $n healthy" } else { Write-Host "  ..  $n started; health not confirmed yet (first model load can be slow)" }
     }
     ShowStatus
