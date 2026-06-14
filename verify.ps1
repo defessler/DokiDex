@@ -19,6 +19,20 @@ try {
     $results["chat/code (:8080)"] = if ($r.choices[0].message.content) { "PASS  '$($r.choices[0].message.content.Trim())'" } else { "FAIL  empty response" }
 } catch { $results["chat/code (:8080)"] = "FAIL  $($_.Exception.Message)" }
 
+# 1b. speech/TTS (:8004) — uncensored speech, coexists with the coder in agent mode (started by 'up agent')
+Write-Host "[verify] speech/TTS ..."
+if (-not (Test-Path (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\python.exe"))) {
+    $results["speech/TTS (:8004)"] = "SKIP  (not installed; -Tts)"
+} else {
+    try {
+        $tb = @{ model = "chatterbox"; input = "DokiCode speech test, fully local and unfiltered."; voice = "Emily.wav"; response_format = "wav" } | ConvertTo-Json
+        $ttmp = Join-Path $env:TEMP "doki_tts_verify.wav"
+        Invoke-WebRequest "http://127.0.0.1:8004/v1/audio/speech" -Method Post -ContentType "application/json" -Body $tb -OutFile $ttmp -TimeoutSec 180
+        $tsz = (Get-Item $ttmp).Length
+        $results["speech/TTS (:8004)"] = if ($tsz -gt 20000) { "PASS  $([math]::Round($tsz/1KB))KB wav" } else { "FAIL  tiny output ($tsz bytes)" }
+    } catch { $results["speech/TTS (:8004)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 2. autocomplete — coexist mode, FIM infill
 Write-Host "[verify] autocomplete ..."
 Doki up coexist

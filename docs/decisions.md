@@ -254,3 +254,30 @@ synced audio (Foley is good V2A post-hoc, not lip-sync). Speed/cost/control/unce
 
 Design + verified URLs/wiring: `~/.claude/plans/generic-honking-turing.md`. Bake-off scorecards to
 land under `docs/scorecards/` once candidates are generated head-to-head.
+
+### Speech/TTS (2026-06-14): uncensored local text-to-speech + voice cloning
+
+Added a fourth media modality — **speech**. Researched the mid-2026 open-TTS field (Chatterbox,
+Kokoro, F5, Fish, Higgs, Orpheus, VibeVoice, XTTS, Dia, IndexTTS-2, Kani, …) against the
+priorities: uncensored, zero-shot voice cloning, OpenAI-compatible serving, native Windows +
+Blackwell, small enough to coexist with the coder.
+
+- **Pick: Chatterbox (Resemble AI) behind the `devnen/Chatterbox-TTS-Server`.** The only candidate
+  that hits *every* axis: best-in-class zero-shot cloning + emotion control, a real OpenAI
+  `/v1/audio/speech` endpoint (+ `/tts`+`/upload_reference` for cloning), MIT license, and the
+  best-supported native-Windows-Blackwell path (torch 2.9 cu128, SDPA — *avoids* the flash-attn
+  sm_120 wall that kills Higgs/Orpheus). Kokoro-FastAPI is the no-clone fallback (Apache, tiny).
+- **Uncensored:** none of the open models have an input content-filter or a working consent-gate;
+  the only "safety" is watermarks. Chatterbox embeds a Perth watermark via one unguarded line in
+  each model file — **stripped** (`apply_watermark(...)` → `wav`) in `tts.py`/`mtl_tts.py`/
+  `tts_turbo.py`/`vc.py` so output is genuinely unmarked. (The binding constraint across the field
+  is *licensing*, not censorship — Chatterbox's MIT is clean.)
+- **Integration:** new `serving\start-tts.ps1` runs the server (its own isolated cu128 venv) on
+  **:8004**; doki `tts` service in the **`llm` group**, in the `agent` profile. **Validated live:**
+  synth (OpenAI route, 24kHz wav) + voice clone (from a reference wav) both work, and it
+  **coexists with coder-fast at 30.6GB < 32GB** — so no GPU-exclusive mode, TTS rides along with
+  chat/code. Works with Chatbox (point it at `http://127.0.0.1:8004/v1`).
+- **Two live-debug fixes** (now baked into `setup.ps1`): the server's default `repo_id:
+  chatterbox-turbo` is a **gated** HF repo (403) → switched to the public **original** `chatterbox`
+  model; and the cu128 requirements pin `protobuf 3.19.6` but `onnx` needs ≥3.20 (`builder`) →
+  pin **protobuf 4.25.5** (the descript-audiotools <3.20 pin is over-strict; synth works at runtime).

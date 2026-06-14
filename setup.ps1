@@ -12,6 +12,7 @@
 # Then:  .\doki.ps1 up        (chat + code)        .\doki.ps1 up media   (image + video)
 param(
     [switch]$Media,
+    [switch]$Tts,
     [ValidateSet("lean", "full")][string]$Models = "lean"
 )
 $ErrorActionPreference = "Stop"
@@ -62,7 +63,37 @@ Info "LLM assets"
     if (Test-Path (Join-Path $root $_.Key)) { Ok $_.Key } else { Warn "MISSING $($_.Key) -> $($_.Value)" }
 }
 
-if (-not $Media) { Info "core setup done. Re-run with -Media to add image + video generation."; return }
+# ---- TTS stack: uncensored speech + zero-shot voice cloning (Chatterbox) — optional, works with or without -Media ----
+if ($Tts) {
+    Info "TTS stack (Chatterbox: uncensored speech + zero-shot voice cloning)"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
+    Ensure-WinGet "Git.Git" "git"
+    $ttsRoot = Join-Path $root "tts\Chatterbox-TTS-Server"
+    if (-not (Test-Path (Join-Path $ttsRoot ".git"))) { Info "cloning Chatterbox-TTS-Server ..."; git clone https://github.com/devnen/Chatterbox-TTS-Server $ttsRoot } else { Ok "Chatterbox-TTS-Server cloned" }
+    $tpy = Join-Path $ttsRoot ".venv\Scripts\python.exe"
+    if (-not (Test-Path $tpy)) {
+        Info "creating venv + installing cu128 torch + deps (large, ~3GB) ..."
+        python -m venv (Join-Path $ttsRoot ".venv")
+        & $tpy -m pip install --upgrade pip | Out-Null
+        & $tpy -m pip install -r (Join-Path $ttsRoot "requirements-nvidia-cu128.txt")
+        # chatterbox itself with --no-deps so it can't downgrade the cu128 torch
+        & $tpy -m pip install --no-deps "git+https://github.com/devnen/chatterbox-v2.git@master" s3tokenizer==0.3.0 onnx==1.16.0
+        # onnx needs protobuf >=3.20 but the cu128 reqs pin 3.19.6 (descript-audiotools) — fix it
+        & $tpy -m pip install protobuf==4.25.5
+    } else { Ok "TTS venv present" }
+    # Use the public ORIGINAL model — the server's default 'chatterbox-turbo' repo is gated.
+    $cfg = Join-Path $ttsRoot "config.yaml"
+    if (Test-Path $cfg) { (Get-Content $cfg) -replace 'repo_id: chatterbox-turbo', 'repo_id: chatterbox' | Set-Content $cfg }
+    # Strip the Perth watermark in every chatterbox model file (genuinely unmarked, uncensored output).
+    $cbDir = Join-Path $ttsRoot ".venv\Lib\site-packages\chatterbox"
+    foreach ($f in "tts.py", "mtl_tts.py", "tts_turbo.py", "vc.py") {
+        $fp = Join-Path $cbDir $f
+        if (Test-Path $fp) { (Get-Content $fp) -replace 'self\.watermarker\.apply_watermark\(wav, sample_rate=self\.sr\)', 'wav  # watermark stripped (DokiCode: uncensored)' | Set-Content $fp }
+    }
+    Ok "TTS ready -> :8004 (OpenAI /v1/audio/speech + voice cloning). First '.\doki.ps1 up' downloads the voice model."
+}
+
+if (-not $Media) { Info "core setup done.  -Media adds image/video,  -Tts adds speech."; return }
 
 # ---- 5. Media stack: SwarmUI + ComfyUI + uncensored models ----------------
 Info "media stack (SwarmUI + ComfyUI + uncensored image/video models)"

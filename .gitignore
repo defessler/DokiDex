@@ -20,6 +20,9 @@ tmp/
 # Local media-gen install — SwarmUI + ComfyUI backend + image/video model weights
 media/
 
+# Local TTS install — Chatterbox-TTS-Server repo + cu128 venv + voice model weights
+tts/
+
 # Editor/OS noise
 .vscode/
 .idea/
