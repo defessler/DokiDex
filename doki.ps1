@@ -239,7 +239,7 @@ function Doctor {
         $inst = (-not $s.requires) -or (Test-Path $s.requires)
         $up = Probe $s.health
         $det = "$(if ($inst) { 'installed' } else { 'not installed' })" + "$(if ($up) { ' · port UP' } else { '' })"
-        DL "$n :$($s.port)" $(if (-not $inst) { "warn" } elseif ($up) { "ok" } else { "ok" }) $det
+        DL "$n :$($s.port)" $(if ($inst) { "ok" } else { "warn" }) $det
     }
 
     Write-Host "`nExtras"
@@ -272,15 +272,17 @@ switch ($Command) {
     }
     "verify" { & (Join-Path $root "verify.ps1") }
     "test" {
-        # unit tests (no GPU; fast). Live capability smokes are `doki verify`.
+        # unit tests (no GPU compute; fast). Live capability smokes are `doki verify`.
         $failed = 0
-        # 1. setup.ps1 failure-recovery helpers (atomic download, fail-loud pip, PATH refresh).
-        #    Run in a child pwsh so its `exit` can't tear down this script before the panel tests.
-        $psTest = Join-Path $root "tests\setup-helpers.test.ps1"
-        if (Test-Path $psTest) {
-            Write-Host "== setup.ps1 helper tests ==" -ForegroundColor Cyan
-            & pwsh -NoProfile -File $psTest
-            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+        # 1. PowerShell suites — installer failure-recovery helpers + the `status json` contract
+        #    the panel parses. Each runs in a child pwsh so its `exit` can't tear down this run.
+        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\doki-statusjson.test.ps1")) {
+            $tp = Join-Path $root $rel
+            if (Test-Path $tp) {
+                Write-Host "== $(Split-Path $tp -Leaf) ==" -ForegroundColor Cyan
+                & pwsh -NoProfile -File $tp
+                if ($LASTEXITCODE -ne 0) { $failed = 1 }
+            }
         }
         # 2. control-panel data layer (xUnit).
         $proj = Join-Path $root "control\DokiCode.Control.Tests\DokiCode.Control.Tests.csproj"
