@@ -8,6 +8,11 @@
 | **Date** | 2026-06-12 |
 | **Target hardware** | RTX 5090 (32GB VRAM) · 64GB DDR5 · i9-14900KS · Windows 11 |
 
+> **Note:** this is the original *design* doc (foundation: inference + harness + search). The
+> system has since grown image/video/music/edit generation, speech (TTS/STT), a persistent-memory
+> MCP, and a WPF control panel. For how the **complete as-built system** works, see
+> **[how-it-works.md](how-it-works.md)**.
+
 ---
 
 ## 1. Summary
