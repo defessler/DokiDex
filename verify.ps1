@@ -143,6 +143,21 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\qwen_image_edit_2511_
     } catch { $results["image edit (Qwen)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 6d. Music — ACE-Step 1.5 (SwarmUI-native audio model). Generates an instrumental clip.
+#     Live-verified: model + style/bpm/duration -> a real MP3 (48kHz stereo).
+Write-Host "[verify] music (ACE-Step 1.5) ..."
+if (-not (Test-Path (Join-Path $swModels "diffusion_models\acestep_v1.5_turbo.safetensors"))) {
+    $results["music (ACE-Step)"] = "SKIP  (not installed; -Models full)"
+} else {
+    try {
+        $sidM = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $mb = @{ session_id = $sidM; images = 1; model = "acestep_v1.5_turbo.safetensors"; prompt = "[instrumental]"; textaudiostyle = "upbeat electronic, energetic synth"; textaudiobpm = 128; textaudioduration = 10; steps = 10; cfgscale = 1 } | ConvertTo-Json
+        $mr = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 400 -Body $mb
+        $aud = @($mr.images) | Where-Object { $_ -match '\.(mp3|flac|wav|opus)$' }
+        $results["music (ACE-Step)"] = if ($aud) { "PASS  $(@($aud)[0])" } else { "FAIL  no audio output" }
+    } catch { $results["music (ACE-Step)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 7. Wan -> Foley (video WITH synced audio) via the WanFoley custom workflow
 Write-Host "[verify] Wan->Foley audio ..."
 $foleyModel = Join-Path $root "media\SwarmUI\dlbackend\comfy\ComfyUI\models\foley\hunyuanvideo_foley.safetensors"
