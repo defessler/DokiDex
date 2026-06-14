@@ -10,9 +10,9 @@ control panel — all uncensored, all on one box.
 ## Commands
 
 - Control plane: `.\doki.ps1 up [agent|coexist|media]` · `down` · `status [json]` · `restart` ·
-  `start|stop <service>` · `logs <svc>` · `panel`
+  `start|stop <service>` · `logs <svc>` · `panel` · `doctor` (env/install diagnostics)
 - Full-stack test (run before declaring done): `.\doki.ps1 verify`  (cycles modes, hits every
-  capability with a real API call; expects all-green)
+  capability with a real API call; expects all-green). Panel unit tests: `.\doki.ps1 test`.
 - Install/bootstrap: `.\setup.ps1 [-Media -Models full] [-Tts] [-Stt]`
 - Control panel (C# WPF): `dotnet build control\DokiCode.Control.csproj -c Release`
 

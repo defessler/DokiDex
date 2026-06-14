@@ -9,7 +9,7 @@
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test")][string]$Command = "status",
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg
 )
 $ErrorActionPreference = "Stop"
@@ -185,6 +185,69 @@ function RestartArg($a) {
     if ($a -and $Services.Contains($a)) { StopSvc $a; StartOne $a }
     else { DoDown; DoUp $a }
 }
+function Doctor {
+    function DL($label, $state, $detail) {
+        $color = switch ($state) { "ok" { "Green" } "warn" { "Yellow" } "miss" { "Red" } default { "Gray" } }
+        $mark = switch ($state) { "ok" { "  ok " } "warn" { "  !! " } "miss" { " MISS" } default { "  -- " } }
+        Write-Host ("{0}  {1,-20} {2}" -f $mark, $label, $detail) -ForegroundColor $color
+    }
+    Write-Host ""
+    Write-Host "DokiCode doctor — environment + install diagnostics"
+    Write-Host "===================================================="
+
+    Write-Host "`nHardware"
+    try {
+        $g = ((& nvidia-smi --query-gpu=name,driver_version,memory.total,memory.used,temperature.gpu '--format=csv,noheader,nounits' 2>$null) | Select-Object -First 1) -split ','
+        DL "GPU" "ok" ("{0} · driver {1} · {2}MB ({3}MB used) · {4}C" -f $g[0].Trim(), $g[1].Trim(), [int]([double]$g[2]), [int]([double]$g[3]), $g[4].Trim())
+    } catch { DL "GPU" "miss" "nvidia-smi not found — an NVIDIA GPU + driver is required" }
+    try { $free = [math]::Round((Get-PSDrive $root.Substring(0, 1)).Free / 1GB); DL "Disk ($($root.Substring(0,2)))" $(if ($free -lt 20) { "warn" } else { "ok" }) "$free GB free" } catch {}
+
+    Write-Host "`nToolchain"
+    foreach ($t in @(
+            @{n = "pwsh"; opt = $false; d = "control plane shell" }, @{n = "dotnet"; opt = $false; d = "control panel build/test" },
+            @{n = "python"; opt = $true; d = "TTS/STT/memory" }, @{n = "uv"; opt = $true; d = "MCP servers" },
+            @{n = "git"; opt = $false; d = "" }, @{n = "gh"; opt = $true; d = "update checks" },
+            @{n = "crush"; opt = $true; d = "coder CLI" }, @{n = "ffprobe"; opt = $true; d = "verify audio checks" })) {
+        $cmd = Get-Command $t.n -ErrorAction SilentlyContinue
+        if ($cmd) { DL $t.n "ok" $t.d } else { DL $t.n $(if ($t.opt) { "warn" } else { "miss" }) $(if ($t.opt) { "optional — $($t.d)" } else { "REQUIRED — $($t.d)" }) }
+    }
+
+    Write-Host "`nModels (models\)"
+    foreach ($m in @(
+            @{n = "coder-fast (Qwen3-30B)"; f = "Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf" },
+            @{n = "coder-big (gpt-oss-120b)"; f = "gpt-oss-120b-mxfp4-*.gguf" },  # multi-part split
+            @{n = "FIM (qwen2.5-3b)"; f = "qwen2.5-coder-3b-q8_0.gguf" },
+            @{n = "rewriter (qwen2.5-3b)"; f = "Qwen2.5-3B-Instruct-Q5_K_M.gguf" })) {
+        $files = @(Get-ChildItem (Join-Path $root "models\$($m.f)") -ErrorAction SilentlyContinue)
+        if ($files) { DL $m.n "ok" ("{0} GB{1}" -f [math]::Round(($files | Measure-Object Length -Sum).Sum / 1GB, 1), $(if ($files.Count -gt 1) { " ($($files.Count) parts)" } else { "" })) }
+        else { DL $m.n "warn" "not installed" }
+    }
+
+    Write-Host "`nMedia kit (media\SwarmUI\Models\)"
+    $swDiff = Join-Path $root "media\SwarmUI\Models\diffusion_models"
+    DL "SwarmUI backend" $(if (Test-Path (Join-Path $root "media\SwarmUI\src\bin\live_release\SwarmUI.exe")) { "ok" } else { "warn" }) $(if (Test-Path (Join-Path $root "media\SwarmUI\src\bin\live_release\SwarmUI.exe")) { "installed" } else { "run setup.ps1 -Media" })
+    foreach ($v in @(
+            @{n = "lean: Z-Image Turbo"; f = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors" }, @{n = "lean: Wan 2.1 1.3B"; f = "wan2.1_t2v_1.3B_fp16.safetensors" },
+            @{n = "full: Wan 2.2 5B"; f = "wan2.2_ti2v_5B_fp16.safetensors" }, @{n = "full: Qwen-Image-Edit"; f = "qwen_image_edit_2511_fp8mixed.safetensors" },
+            @{n = "full: ACE-Step music"; f = "acestep_v1.5_turbo.safetensors" }, @{n = "full: LTXV fast video"; f = "ltxv-2b-0.9.8-distilled.safetensors" })) {
+        DL $v.n $(if (Test-Path (Join-Path $swDiff $v.f)) { "ok" } else { "warn" }) $(if (Test-Path (Join-Path $swDiff $v.f)) { "present" } else { "not installed" })
+    }
+
+    Write-Host "`nServices (installable + port)"
+    foreach ($n in $Services.Keys) {
+        $s = $Services[$n]
+        $inst = (-not $s.requires) -or (Test-Path $s.requires)
+        $up = Probe $s.health
+        $det = "$(if ($inst) { 'installed' } else { 'not installed' })" + "$(if ($up) { ' · port UP' } else { '' })"
+        DL "$n :$($s.port)" $(if (-not $inst) { "warn" } elseif ($up) { "ok" } else { "ok" }) $det
+    }
+
+    Write-Host "`nExtras"
+    $memdb = Join-Path $root "serving\memory-mcp\memory.db"
+    DL "memory store" $(if (Test-Path $memdb) { "ok" } else { "warn" }) $(if (Test-Path $memdb) { "seeded ($([math]::Round((Get-Item $memdb).Length/1KB)) KB)" } else { "empty — run serving\memory-mcp\seed.py" })
+    DL "control panel" $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe")) { "ok" } else { "warn" }) $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe")) { "built" } else { "not built — dotnet build control\DokiCode.Control.csproj -c Release" })
+    Write-Host ""
+}
 function LaunchPanel {
     $exe = Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe"
     $proj = Join-Path $root "control\DokiCode.Control.csproj"
@@ -200,6 +263,7 @@ switch ($Command) {
     "start"   { if (-not $Arg) { throw "usage: .\doki.ps1 start <service>" }; StartOne $Arg }
     "stop"    { if (-not $Arg) { throw "usage: .\doki.ps1 stop <service>" }; StopOne $Arg }
     "panel"   { LaunchPanel }
+    "doctor"  { Doctor }
     "status"  { if ($Arg -eq "json" -or $Arg -eq "--json") { StatusJson } else { ShowStatus } }
     "logs" {
         if (-not $Arg) { throw "usage: .\doki.ps1 logs <llama-swap|fim|media>" }

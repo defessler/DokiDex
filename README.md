@@ -17,6 +17,8 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 .\doki.ps1 up media    # image + video + music + image-edit → SwarmUI on :7801
 .\doki.ps1 status      # what's running + health      .\doki.ps1 down
 .\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
+.\doki.ps1 doctor      # environment + install diagnostics (GPU, disk, toolchain, models, services)
+.\doki.ps1 test        # control-panel unit tests (fast, no GPU)
 .\doki.ps1 panel       # high-quality control panel (WPF): live status, GPU meter, logs, ⚡test
 .\control.bat          #   ...the same panel via double-click
 ```
