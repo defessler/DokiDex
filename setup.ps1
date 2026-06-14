@@ -142,8 +142,9 @@ if ($Models -eq "full") {
     $wanFile = Resolve-HF $wanRepo "/split_files/diffusion_models" '(?i)t2v.*14B.*fp8'
     if ($wanFile) { Get-Model "https://huggingface.co/$wanRepo/resolve/main/$wanFile" (Join-Path $diff (Split-Path $wanFile -Leaf)) }
     Get-Model "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors" (Join-Path $loraD "Wan21_T2V_14B_lightx2v_rank32.safetensors")
-    $chroma = Resolve-HF "silveroxides/Chroma1-HD-fp8-scaled" "" '(?i)chroma.*fp8'
-    if ($chroma) { Get-Model "https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/$chroma" (Join-Path $diff (Split-Path $chroma -Leaf)) }
+    # Chroma — uncensored, FLUX-derived. Use the *-final STABLE variant; the repo also
+    # has do_not_use/ experimental files that error in ComfyUI (tensor mismatch).
+    Get-Model "https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/Chroma1-HD-fp8mixed-final.safetensors" (Join-Path $diff "Chroma1-HD-fp8mixed-final.safetensors")
     $ltx = Resolve-HF "Lightricks/LTX-Video" "" '(?i)ltx-video.*0\.9\.[56]'
     if ($ltx) { Get-Model "https://huggingface.co/Lightricks/LTX-Video/resolve/main/$ltx" (Join-Path (Join-Path $swarm "Models\Stable-Diffusion") (Split-Path $ltx -Leaf)) }
 }

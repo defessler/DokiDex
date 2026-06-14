@@ -189,3 +189,14 @@ non-pruned Next is 80B (RAM-offload / coder-big tier, not a coder-fast replaceme
 **Qwen3-Coder-30B-A3B stays the daily driver** — purpose-built for agentic coding and the
 best 30B-class fit, now confirmed against the field. The refresh *process* is proven and
 repeatable; re-run it when a genuinely new ~30B agentic-coder GGUF appears.
+
+### Image refresh (2026-06-13): Chroma added as a 2nd uncensored image style
+
+Added **Chroma** (silveroxides Chroma1-HD-fp8, FLUX-derived, "Censored? No") alongside
+Z-Image Turbo. Gotcha caught the hard way: the repo's *largest* file lives in a
+`do_not_use/` folder and errors in ComfyUI (tensor-size mismatch) — the stable file is
+**`Chroma1-HD-fp8mixed-final.safetensors`** (auto-detects as `arch=chroma`). Verified:
+coherent 1024² in ~179s (CFG 3.5, 26 steps) — slower than Z-Image (54s) but a genuinely
+different softer/filmic look. **Kept as a 2nd option** (`-Models full`); Z-Image stays the
+fast default. `setup.ps1` fixed to fetch the stable variant directly (the regex resolver
+would have grabbed a `do_not_use/` file).
