@@ -54,34 +54,121 @@ function Get-StatusRows {
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="DokiCode Control" Height="390" Width="620" Background="#1e1e1e" WindowStartupLocation="CenterScreen">
-  <Grid Margin="12">
+        Title="DokiCode Control" Height="450" Width="640" Background="#1e1e1e"
+        WindowStartupLocation="CenterScreen">
+  <Window.Resources>
+    <!-- Buttons: flat, dark, color-coded, with hover/press feedback -->
+    <Style x:Key="Btn" TargetType="Button">
+      <Setter Property="Foreground" Value="#ffffff"/>
+      <Setter Property="Background" Value="#3a3d41"/>
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="0,0,6,6"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+      <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
+      <Setter Property="ToolTipService.ShowDuration" Value="20000"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                    BorderThickness="1" BorderBrush="Transparent" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="BorderBrush" Value="#b0ffffff"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="bd" Property="Opacity" Value="0.75"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="BtnPrimary" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Background" Value="#0e639c"/>
+    </Style>
+    <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Background" Value="#a1260d"/>
+    </Style>
+    <!-- Dark column headers (the default ones are light and clash) -->
+    <Style TargetType="DataGridColumnHeader">
+      <Setter Property="Background" Value="#333337"/>
+      <Setter Property="Foreground" Value="#ffffff"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="8,6"/>
+      <Setter Property="BorderThickness" Value="0,0,1,1"/>
+      <Setter Property="BorderBrush" Value="#3f3f46"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+    </Style>
+    <!-- Status cells: bold + semantic color so good/bad reads at a glance -->
+    <Style x:Key="CellBase" TargetType="DataGridCell">
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="8,3"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="CellInstalled" TargetType="DataGridCell" BasedOn="{StaticResource CellBase}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Installed}" Value="yes"><Setter Property="Foreground" Value="#6a9955"/></DataTrigger>
+        <DataTrigger Binding="{Binding Installed}" Value="NO"><Setter Property="Foreground" Value="#f14c4c"/></DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="CellRunning" TargetType="DataGridCell" BasedOn="{StaticResource CellBase}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Running}" Value="UP"><Setter Property="Foreground" Value="#4ec9b0"/></DataTrigger>
+        <DataTrigger Binding="{Binding Running}" Value="down"><Setter Property="Foreground" Value="#808080"/></DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="CellHealth" TargetType="DataGridCell" BasedOn="{StaticResource CellBase}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Health}" Value="ok"><Setter Property="Foreground" Value="#4ec9b0"/></DataTrigger>
+        <DataTrigger Binding="{Binding Health}" Value="..."><Setter Property="Foreground" Value="#9cdcfe"/></DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="CellUpdate" TargetType="DataGridCell" BasedOn="{StaticResource CellBase}">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Update}" Value="UPDATE"><Setter Property="Foreground" Value="#d7ba7d"/></DataTrigger>
+        <DataTrigger Binding="{Binding Update}" Value="current"><Setter Property="Foreground" Value="#808080"/></DataTrigger>
+      </Style.Triggers>
+    </Style>
+  </Window.Resources>
+  <Grid Margin="14">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
-    <TextBlock Grid.Row="0" Text="DokiCode — local AI stack" Foreground="#dddddd" FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
+    <TextBlock Grid.Row="0" Text="DokiCode — local AI stack" Foreground="#ffffff" FontSize="16" FontWeight="Bold" Margin="0,0,0,10"/>
     <DataGrid Grid.Row="1" Name="Grid" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
-              Background="#252526" Foreground="#dddddd" RowBackground="#252526" AlternatingRowBackground="#2d2d30"
-              GridLinesVisibility="Horizontal" BorderThickness="0" FontFamily="Consolas">
+              CanUserSortColumns="False" CanUserResizeColumns="False" SelectionMode="Single" RowHeaderWidth="0"
+              Background="#252526" Foreground="#d4d4d4" RowBackground="#252526" AlternatingRowBackground="#2d2d30"
+              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#3f3f46"
+              BorderThickness="1" BorderBrush="#3f3f46" FontFamily="Consolas" RowHeight="26">
       <DataGrid.Columns>
         <DataGridTextColumn Header="Service"   Binding="{Binding Service}"   Width="130"/>
-        <DataGridTextColumn Header="Installed" Binding="{Binding Installed}" Width="80"/>
-        <DataGridTextColumn Header="Running"   Binding="{Binding Running}"   Width="80"/>
-        <DataGridTextColumn Header="Health"    Binding="{Binding Health}"    Width="70"/>
+        <DataGridTextColumn Header="Installed" Binding="{Binding Installed}" Width="80"  CellStyle="{StaticResource CellInstalled}"/>
+        <DataGridTextColumn Header="Running"   Binding="{Binding Running}"   Width="80"  CellStyle="{StaticResource CellRunning}"/>
+        <DataGridTextColumn Header="Health"    Binding="{Binding Health}"    Width="70"  CellStyle="{StaticResource CellHealth}"/>
         <DataGridTextColumn Header="Version"   Binding="{Binding Version}"   Width="95"/>
-        <DataGridTextColumn Header="Update"    Binding="{Binding Update}"    Width="*"/>
+        <DataGridTextColumn Header="Update"    Binding="{Binding Update}"    Width="*"   CellStyle="{StaticResource CellUpdate}"/>
       </DataGrid.Columns>
     </DataGrid>
-    <WrapPanel Grid.Row="2" Margin="0,10,0,0">
-      <Button Name="BtnAgent"   Content="Agent"        Margin="0,0,6,0" Padding="10,4"/>
-      <Button Name="BtnCoexist" Content="Coexist"      Margin="0,0,6,0" Padding="10,4"/>
-      <Button Name="BtnMedia"   Content="Media"        Margin="0,0,6,0" Padding="10,4"/>
-      <Button Name="BtnStop"    Content="Stop"         Margin="0,0,12,0" Padding="10,4"/>
-      <Button Name="BtnVerify"  Content="Verify"       Margin="0,0,6,0" Padding="10,4"/>
-      <Button Name="BtnUpdates" Content="Check Updates" Margin="0,0,6,0" Padding="10,4"/>
-      <Button Name="BtnUI"      Content="Open :8080/ui" Margin="0,0,6,0" Padding="10,4"/>
-    </WrapPanel>
-    <TextBlock Grid.Row="3" Name="StatusBar" Text="ready" Foreground="#9cdcfe" Margin="0,10,0,0" TextWrapping="Wrap"/>
+    <StackPanel Grid.Row="2" Margin="0,12,0,0">
+      <TextBlock Text="MODE  ·  the GPU runs one at a time" Foreground="#858585" FontSize="11" Margin="2,0,0,5"/>
+      <WrapPanel>
+        <Button Name="BtnAgent"   Content="Agent"   Style="{StaticResource BtnPrimary}" ToolTip="Chat + code. Starts the LLM (llama-swap) on :8080. Your everyday default."/>
+        <Button Name="BtnCoexist" Content="Coexist" Style="{StaticResource BtnPrimary}" ToolTip="Chat + code + editor autocomplete. Adds the FIM model on :8012 next to the LLM."/>
+        <Button Name="BtnMedia"   Content="Media"   Style="{StaticResource BtnPrimary}" ToolTip="Image + video. Stops the LLM and starts SwarmUI on :7801 — the GPU can't run both at once."/>
+        <Button Name="BtnStop"    Content="Stop"    Style="{StaticResource BtnDanger}"  ToolTip="Stop every service and free the GPU."/>
+      </WrapPanel>
+      <TextBlock Text="ACTIONS" Foreground="#858585" FontSize="11" Margin="2,12,0,5"/>
+      <WrapPanel>
+        <Button Name="BtnVerify"  Content="Verify"        Style="{StaticResource Btn}" ToolTip="Full-stack smoke test: cycles agent → coexist → media and checks each capability for real. Opens a console window."/>
+        <Button Name="BtnUpdates" Content="Check Updates" Style="{StaticResource Btn}" ToolTip="Look for newer versions — winget (Crush, Chatbox), git (SwarmUI), GitHub (llama-swap). Results land in the Update column."/>
+        <Button Name="BtnUI"      Content="Open :8080/ui" Style="{StaticResource Btn}" ToolTip="Open the llama-swap web UI in your browser. Needs Agent or Coexist running."/>
+      </WrapPanel>
+    </StackPanel>
+    <TextBlock Grid.Row="3" Name="StatusBar" Text="ready" Foreground="#9cdcfe" Margin="0,12,0,0" TextWrapping="Wrap"/>
   </Grid>
 </Window>
 "@
