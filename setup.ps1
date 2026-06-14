@@ -46,7 +46,11 @@ Info "deploy configs"
 $crushDst = Join-Path $env:USERPROFILE ".config\crush"
 New-Item -ItemType Directory -Force $crushDst | Out-Null
 Copy-Item (Join-Path $root "harness\crush.json") (Join-Path $crushDst "crush.json") -Force
-Ok "crush.json -> $crushDst"
+Ok "crush.json -> $crushDst  (incl. the memory MCP; deps install on first launch via uv)"
+# Seed the persistent-memory store with DokiCode's facts/gotchas (idempotent; needs python).
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    try { python (Join-Path $root "serving\memory-mcp\seed.py") | Out-Null; Ok "memory store seeded (serving\memory-mcp)" } catch { Warn "memory seed skipped ($($_.Exception.Message))" }
+}
 if (Test-Path (Join-Path $env:APPDATA "Code\User")) {
     Ok "VS Code found — merge harness\llama.vscode-settings.json into Code\User\settings.json (it's a partial)"
 } else { Warn "VS Code not found; skip llama.vscode autocomplete settings" }
