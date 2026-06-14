@@ -272,8 +272,23 @@ switch ($Command) {
     }
     "verify" { & (Join-Path $root "verify.ps1") }
     "test" {
-        # unit tests for the control panel (no GPU; fast). Live capability smokes are `doki verify`.
+        # unit tests (no GPU; fast). Live capability smokes are `doki verify`.
+        $failed = 0
+        # 1. setup.ps1 failure-recovery helpers (atomic download, fail-loud pip, PATH refresh).
+        #    Run in a child pwsh so its `exit` can't tear down this script before the panel tests.
+        $psTest = Join-Path $root "tests\setup-helpers.test.ps1"
+        if (Test-Path $psTest) {
+            Write-Host "== setup.ps1 helper tests ==" -ForegroundColor Cyan
+            & pwsh -NoProfile -File $psTest
+            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+        }
+        # 2. control-panel data layer (xUnit).
         $proj = Join-Path $root "control\DokiCode.Control.Tests\DokiCode.Control.Tests.csproj"
-        if (Test-Path $proj) { & dotnet test $proj } else { Write-Host "panel test project not present" }
+        if (Test-Path $proj) {
+            Write-Host "`n== control-panel unit tests ==" -ForegroundColor Cyan
+            & dotnet test $proj
+            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+        } else { Write-Host "panel test project not present" }
+        exit $failed
     }
 }

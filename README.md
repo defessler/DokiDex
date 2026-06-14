@@ -18,7 +18,7 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 .\doki.ps1 status      # what's running + health      .\doki.ps1 down
 .\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
 .\doki.ps1 doctor      # environment + install diagnostics (GPU, disk, toolchain, models, services)
-.\doki.ps1 test        # control-panel unit tests (fast, no GPU)
+.\doki.ps1 test        # unit tests — installer helpers + control panel (fast, no GPU)
 .\doki.ps1 panel       # high-quality control panel (WPF): live status, GPU meter, logs, ⚡test
 .\control.bat          #   ...the same panel via double-click
 ```
@@ -62,7 +62,7 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Speech (TTS):** Chatterbox-TTS-Server on `:8004` (own cu128 venv) — uncensored (Perth watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning. Verified live; coexists with coder-fast at 30.6 GB.
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, own venv. Verified live (TTS→STT round-trip); coexists with the coder in agent mode.
 - **Control panel:** native WPF cockpit (`doki panel` / `control.bat`) over `doki status json` — grouped live cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, coder model-swap, update badges. Built + launch-verified, with **24 unit tests** on its data layer (`dotnet test control\DokiCode.Control.Tests`).
-- **Control plane:** `doki up/down/status/restart/logs/panel` + per-service `start/stop/restart` and `status json`; agent / coexist / media profiles; one-command `setup.ps1`.
+- **Control plane:** `doki up/down/status/restart/logs/panel` + per-service `start/stop/restart` and `status json`; agent / coexist / media profiles; one-command `setup.ps1`. The installer is audit-hardened on the fresh-install / failure paths — atomic resumable model downloads, fail-loud dependency steps, in-session PATH refresh after winget — with **16 helper regression tests** (`doki test`, alongside the panel's 24).
 - **Model refresh (eval-gated):** Nemotron-Cascade-2 (45%) and Qwen3-Coder-Next-REAP (broken tool-calls) both lost — Qwen3-Coder-30B confirmed the best 32GB fit by measurement.
 
 See `docs/media-recipes.md` (exact API call for every capability), `docs/benchmarks.md` (measurements), `docs/decisions.md` (every call + the eval gates), `docs/streamlined-setup-design.md` (control plane + media), and TDD §7 (roadmap).

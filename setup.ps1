@@ -211,9 +211,12 @@ function Get-Model($url, $dest) {
     Info "downloading $(Split-Path $dest -Leaf) ..."
     # Download to a .part temp and atomically promote on success, so an interrupted or failed
     # download never leaves a truncated file that the existence-only gate above treats as done.
-    # -C - resumes a prior .part; --remove-on-error clears curl's own partial on an HTTP error.
+    # -C - resumes a .part left by a hard kill; on soft failure we delete the .part and retry
+    # fresh next run (this also self-heals the rare full-but-unpromoted .part that would 416).
+    # NB: -C - and --remove-on-error are MUTUALLY EXCLUSIVE in curl (exit 2) — our own cleanup
+    # replaces --remove-on-error; do not re-add it.
     $tmp = "$dest.part"
-    curl.exe -L --fail --retry 3 -C - --remove-on-error -o $tmp $url
+    curl.exe -L --fail --retry 3 -C - -o $tmp $url
     if ($LASTEXITCODE -ne 0) {
         Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         Warn "download failed: $url"; return
