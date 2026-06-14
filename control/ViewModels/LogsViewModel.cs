@@ -21,8 +21,9 @@ public partial class LogsViewModel : ObservableObject, IDisposable
 {
     private const int MaxLines = 2500;
     private readonly DispatcherTimer _timer;
-    private readonly Dictionary<string, long> _offsets = new();   // file path -> bytes read
+    private readonly Dictionary<string, long> _offsets = new();   // file path -> bytes read (touched only on the worker)
     private readonly List<string> _services = new();
+    private bool _polling;
 
     public ObservableCollection<LogLine> Lines { get; } = new();
     public ObservableCollection<string> Tabs { get; } = new() { "All" };
@@ -70,53 +71,72 @@ public partial class LogsViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private void Poll()
+    // Runs on the UI dispatcher (DispatcherTimer). The file reads themselves are offloaded to a worker
+    // so a burst — or a large PRE-EXISTING log — never blocks the window; only the resulting Lines.Add
+    // marshals back. _polling skips overlapping ticks if a read ever runs long.
+    private async void Poll()
     {
-        if (Paused) return;
-        var dir = Services.RepoPaths.RunDir;
-        if (!Directory.Exists(dir)) return;
-        bool added = false;
-        foreach (var svc in _services.ToArray())
+        if (Paused || _polling) return;
+        _polling = true;
+        try
         {
-            added |= ReadNew(Path.Combine(dir, svc + ".log"), svc, isErr: false);
-            if (IncludeStderr) added |= ReadNew(Path.Combine(dir, svc + ".log.err"), svc, isErr: true);
+            var dir = Services.RepoPaths.RunDir;
+            var includeStderr = IncludeStderr;            // snapshot VM state for the worker
+            var svcs = _services.ToArray();
+            var newLines = await Task.Run(() => CollectNew(dir, svcs, includeStderr)).ConfigureAwait(true);
+            if (newLines.Count > 0)
+            {
+                foreach (var l in newLines) Lines.Add(l);
+                while (Lines.Count > MaxLines) Lines.RemoveAt(0);
+                LineAppended?.Invoke();
+            }
         }
-        if (added)
-        {
-            while (Lines.Count > MaxLines) Lines.RemoveAt(0);
-            LineAppended?.Invoke();
-        }
+        finally { _polling = false; }
     }
 
-    private bool ReadNew(string path, string svc, bool isErr)
+    // Worker-thread file read. _offsets is only ever touched here, and Poll's _polling guard serializes
+    // calls, so no locking is needed.
+    private List<LogLine> CollectNew(string dir, string[] svcs, bool includeStderr)
+    {
+        var sink = new List<LogLine>();
+        if (!Directory.Exists(dir)) return sink;
+        foreach (var svc in svcs)
+        {
+            ReadNewInto(Path.Combine(dir, svc + ".log"), svc, false, sink);
+            if (includeStderr) ReadNewInto(Path.Combine(dir, svc + ".log.err"), svc, true, sink);
+        }
+        return sink;
+    }
+
+    private void ReadNewInto(string path, string svc, bool isErr, List<LogLine> sink)
     {
         try
         {
-            if (!File.Exists(path)) return false;
+            if (!File.Exists(path)) return;
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            var start = _offsets.TryGetValue(path, out var off) ? off : 0;
+            // First sight of a file: seed the offset at its CURRENT length and read nothing — so a large
+            // pre-existing log (a service doki started earlier) is never read in full (that synchronous
+            // whole-file ReadToEnd was the freeze). We tail only content written after the panel opened.
+            if (!_offsets.TryGetValue(path, out var start)) { _offsets[path] = fs.Length; return; }
             if (fs.Length < start) start = 0;                 // file rotated/truncated
-            if (fs.Length == start) return false;
+            if (fs.Length == start) return;
             fs.Seek(start, SeekOrigin.Begin);
             using var sr = new StreamReader(fs);
             var chunk = sr.ReadToEnd();
             _offsets[path] = fs.Length;
-            bool any = false;
             foreach (var raw in chunk.Replace("\r", "").Split('\n'))
             {
                 if (raw.Length == 0) continue;
-                Lines.Add(new LogLine
+                sink.Add(new LogLine
                 {
                     Service = svc,
                     Time = DateTime.Now.ToString("HH:mm:ss"),
                     Text = isErr ? "[stderr] " + raw : raw,
                     Severity = Classify(raw, isErr),
                 });
-                any = true;
             }
-            return any;
         }
-        catch { return false; }
+        catch { }
     }
 
     public static string Classify(string text, bool isErr)

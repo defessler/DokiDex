@@ -7,7 +7,7 @@
 import os
 import tempfile
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 import uvicorn
 import onnx_asr
@@ -42,22 +42,29 @@ async def transcriptions(file: UploadFile = File(...), model_name: str = Form(de
     """OpenAI-compatible: multipart 'file' (16kHz wav best) -> {"text": ...}.
     NB: the form field is aliased to 'model' but the Python name must NOT be `model`
     (that shadows the module-level model() loader)."""
-    data = await file.read()
-    suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(data)
-        path = tmp.name
+    path = None
     try:
-        # recognize() (and the first-call model load) is blocking CPU work; run it OFF the event
-        # loop so /health stays responsive during a transcription — otherwise the doki/panel health
-        # probe (3s timeout) reports STT "down" for the whole ~6s job. onnx-asr resamples to 16k.
-        text = await run_in_threadpool(lambda: model().recognize(path))
-    finally:
+        data = await file.read()
+        suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            path = tmp.name          # set BEFORE write so a failed write still cleans up (delete=False)
+            tmp.write(data)
         try:
-            os.unlink(path)
-        except OSError:
-            pass
-    return {"text": text if isinstance(text, str) else (text[0] if text else "")}
+            # recognize() (and the first-call model load) is blocking CPU work; run it OFF the event
+            # loop so /health stays responsive during a transcription — otherwise the doki/panel health
+            # probe (3s timeout) reports STT "down" for the whole ~6s job. onnx-asr resamples to 16k.
+            text = await run_in_threadpool(lambda: model().recognize(path))
+        except Exception as e:
+            # onnx-asr handles WAV only; an mp3/webm/m4a, stereo, or truncated file would otherwise
+            # surface as an HTTP 500 + traceback. Return a clean 4xx instead.
+            raise HTTPException(status_code=400, detail=f"could not transcribe audio (WAV expected): {e}")
+        return {"text": text if isinstance(text, str) else (text[0] if text else "")}
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

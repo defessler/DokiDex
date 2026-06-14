@@ -180,26 +180,43 @@ if (Swarm-Up) { Ok "SwarmUI serving :7801" } else { throw "SwarmUI failed to sta
 # 5e. headless ComfyUI backend install (the verified InstallConfirmWS flow)
 if (-not (Test-Path (Join-Path $swarm "dlbackend\comfy"))) {
     Info "installing ComfyUI backend headlessly (~2GB download) ..."
-    $sid = (Invoke-RestMethod "http://127.0.0.1:7801/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $ws = [System.Net.WebSockets.ClientWebSocket]::new(); $ct = [Threading.CancellationToken]::None
-    $ws.ConnectAsync([Uri]"ws://127.0.0.1:7801/API/InstallConfirmWS", $ct).GetAwaiter().GetResult() | Out-Null
-    $payload = @{ session_id = $sid; theme = "modern_dark"; installed_for = "just_self"; backend = "comfyui"; models = "none"; install_amd = $false; language = "en"; make_shortcut = $false } | ConvertTo-Json -Compress
-    $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
-    $ws.SendAsync([System.ArraySegment[byte]]::new($bytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $ct).GetAwaiter().GetResult() | Out-Null
-    $buf = New-Object byte[] 32768; $sb = New-Object System.Text.StringBuilder; $deadline = (Get-Date).AddMinutes(20)
-    while ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open -and (Get-Date) -lt $deadline) {
-        $r = $ws.ReceiveAsync([System.ArraySegment[byte]]::new($buf), $ct).GetAwaiter().GetResult()
-        if ($r.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { break }
-        [void]$sb.Append([Text.Encoding]::UTF8.GetString($buf, 0, $r.Count))
-        if ($r.EndOfMessage) {
-            $f = $sb.ToString(); [void]$sb.Clear()
-            if ($f -match '"info":"([^"]*)"') { Info $Matches[1] }
-            if ($f -match '"success"\s*:\s*true') { break }
-            if ($f -match '"error"') { throw "backend install error: $f" }
+    $installed = $false
+    # A CancellationTokenSource (not CancellationToken.None) so a 20-min stall actually INTERRUPTS a
+    # blocked ReceiveAsync — the old wall-clock $deadline was only the while-condition and could never
+    # break out of a receive that hangs (dead TCP / stuck pip / AV folder lock during the multi-minute
+    # zero-frame install windows), hanging the whole one-command bootstrap forever.
+    $cts = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromMinutes(20)); $ct = $cts.Token
+    $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+    try {
+        $sid = (Invoke-RestMethod "http://127.0.0.1:7801/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $ws.ConnectAsync([Uri]"ws://127.0.0.1:7801/API/InstallConfirmWS", $ct).GetAwaiter().GetResult() | Out-Null
+        $payload = @{ session_id = $sid; theme = "modern_dark"; installed_for = "just_self"; backend = "comfyui"; models = "none"; install_amd = $false; language = "en"; make_shortcut = $false } | ConvertTo-Json -Compress
+        $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
+        $ws.SendAsync([System.ArraySegment[byte]]::new($bytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $ct).GetAwaiter().GetResult() | Out-Null
+        $buf = New-Object byte[] 32768; $sb = New-Object System.Text.StringBuilder
+        while ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+            $r = $ws.ReceiveAsync([System.ArraySegment[byte]]::new($buf), $ct).GetAwaiter().GetResult()
+            if ($r.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { break }
+            [void]$sb.Append([Text.Encoding]::UTF8.GetString($buf, 0, $r.Count))
+            if ($r.EndOfMessage) {
+                $f = $sb.ToString(); [void]$sb.Clear()
+                if ($f -match '"info":"([^"]*)"') { Info $Matches[1] }
+                if ($f -match '"success"\s*:\s*true') { $installed = $true; break }
+                if ($f -match '"error"') { throw "backend install error: $f" }
+            }
         }
     }
-    $ws.Dispose()
-    if (Test-Path (Join-Path $swarm "dlbackend\comfy")) { Ok "ComfyUI backend installed" } else { throw "backend install did not complete" }
+    catch { throw "ComfyUI backend install failed/timed out: $($_.Exception.Message)" }
+    finally { $ws.Dispose(); $cts.Dispose() }
+    # SwarmUI creates dlbackend\comfy EARLY (right after the 7z extract, before VC-redist + the
+    # multi-minute pip install), so its existence does NOT mean success. Require the explicit success
+    # frame; otherwise nuke the partial dir so the existence gate above reinstalls cleanly next run.
+    if (-not $installed) {
+        Remove-Item (Join-Path $swarm "dlbackend\comfy") -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $swarm "dlbackend\tmpcomfy") -Recurse -Force -ErrorAction SilentlyContinue
+        throw "ComfyUI backend install did not report success (partial install removed; re-run setup.ps1 -Media)"
+    }
+    Ok "ComfyUI backend installed"
 } else { Ok "ComfyUI backend present" }
 
 # 5f. download uncensored models (idempotent)

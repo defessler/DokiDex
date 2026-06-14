@@ -75,23 +75,31 @@ try {
     $results["autocomplete (:8012)"] = if ($r.content) { "PASS  '$($r.content.Trim())'" } else { "FAIL  empty" }
 } catch { $results["autocomplete (:8012)"] = "FAIL  $($_.Exception.Message)" }
 
-# 3 + 4. image + video — media mode
+# 3 + 4. image + video — media mode. SKIP cleanly on a lean / non-media install: the `media` service
+# has no `requires` gate, so without this guard `Doki up media` no-ops (start-media exits before a pid),
+# the dead :7801 probes FAIL, and verify exits 1 on an otherwise-healthy chat/TTS/STT box.
 Write-Host "[verify] image + video (this brings up SwarmUI; first gens load the models) ..."
-Doki up media
-for ($i = 0; $i -lt 60 -and -not (Probe "http://127.0.0.1:7801/"); $i++) { Start-Sleep 1 }
 $base = "http://127.0.0.1:7801"
-try {
-    $sid = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = @{ session_id = $sid; images = 1; prompt = "a red apple on a wooden table, photo"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 512; height = 512 } | ConvertTo-Json
-    $img = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 300 -Body $body
-    $results["image gen (Z-Image)"] = if ($img.images) { "PASS  $(@($img.images)[0])" } else { "FAIL  no image" }
-} catch { $results["image gen (Z-Image)"] = "FAIL  $($_.Exception.Message)" }
-try {
-    $sid2 = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = @{ session_id = $sid2; images = 1; prompt = "a cat walking across a floor, smooth motion"; model = "wan2.1_t2v_1.3B_fp16.safetensors"; textvideoframes = 17; steps = 20; cfgscale = 6; width = 480; height = 320; videofps = 16; videoformat = "h264-mp4" } | ConvertTo-Json
-    $vid = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 300 -Body $body
-    $results["video gen (Wan 1.3B)"] = if ($vid.images) { "PASS  $(@($vid.images)[0])" } else { "FAIL  no video" }
-} catch { $results["video gen (Wan 1.3B)"] = "FAIL  $($_.Exception.Message)" }
+if (-not (Test-Path (Join-Path $root "media\SwarmUI\launch-windows.bat"))) {
+    $results["image gen (Z-Image)"] = "SKIP  (media not installed; -Media)"
+    $results["video gen (Wan 1.3B)"] = "SKIP  (media not installed; -Media)"
+} else {
+    Doki up media
+    for ($i = 0; $i -lt 60 -and -not (Probe "http://127.0.0.1:7801/"); $i++) { Start-Sleep 1 }
+    try {
+        $sid = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $body = @{ session_id = $sid; images = 1; prompt = "a red apple on a wooden table, photo"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 512; height = 512 } | ConvertTo-Json
+        $img = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 300 -Body $body
+        $results["image gen (Z-Image)"] = if ($img.images) { "PASS  $(@($img.images)[0])" } else { "FAIL  no image" }
+    } catch { $results["image gen (Z-Image)"] = "FAIL  $($_.Exception.Message)" }
+    try {
+        $sid2 = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $body = @{ session_id = $sid2; images = 1; prompt = "a cat walking across a floor, smooth motion"; model = "wan2.1_t2v_1.3B_fp16.safetensors"; textvideoframes = 17; steps = 20; cfgscale = 6; width = 480; height = 320; videofps = 16; videoformat = "h264-mp4" } | ConvertTo-Json
+        $vid = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 300 -Body $body
+        $vmp4 = @($vid.images) | Where-Object { $_ -match '\.(mp4|webm|gif)$' }   # require a real video artifact, not a preview still
+        $results["video gen (Wan 1.3B)"] = if ($vmp4) { "PASS  $(@($vmp4)[0])" } else { "FAIL  no video artifact" }
+    } catch { $results["video gen (Wan 1.3B)"] = "FAIL  $($_.Exception.Message)" }
+}
 
 # --- new quality tier (-Models full); each test SKIPs cleanly if its asset isn't installed ---
 $swModels = Join-Path $root "media\SwarmUI\Models"

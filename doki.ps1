@@ -40,7 +40,10 @@ function LogFile($n) { Join-Path $runDir "$n.log" }
 function IsRunning($n) {
     $pf = PidFile $n
     if (-not (Test-Path $pf)) { return $false }
-    $procId = Get-Content $pf -ErrorAction SilentlyContinue
+    # -as [int] coerces non-numeric / partial / multi-line content to $null instead of throwing:
+    # Get-Process -Id 'garbage' is a binding error that fires BEFORE -EA can suppress it, which under
+    # $ErrorActionPreference='Stop' would abort the whole status/up/start invocation.
+    $procId = (Get-Content $pf -ErrorAction SilentlyContinue) -as [int]
     if (-not $procId) { return $false }
     [bool](Get-Process -Id $procId -ErrorAction SilentlyContinue)
 }
@@ -54,10 +57,18 @@ function StartSvc($n) {
 function StopSvc($n) {
     $pf = PidFile $n
     if (Test-Path $pf) {
-        $procId = Get-Content $pf -ErrorAction SilentlyContinue
+        $procId = (Get-Content $pf -ErrorAction SilentlyContinue) -as [int]
         if ($procId) { taskkill /PID $procId /T /F *> $null }
         Remove-Item $pf -Force -ErrorAction SilentlyContinue
         Write-Host "  - $n stopped"
+    }
+    elseif (Probe $Services[$n].health) {
+        # up but untracked (started outside doki, no pidfile): kill whatever listens on its port, so a
+        # GPU-group switch can actually evict it — otherwise an untracked opposite-group server OOMs 32GB.
+        $port = $Services[$n].port
+        $owners = if ($port) { @((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique) } else { @() }
+        if ($owners) { foreach ($op in $owners) { if ($op) { taskkill /PID $op /T /F *> $null } }; Write-Host "  - $n stopped (untracked, by port :$port)" }
+        else { Write-Host "  !! $n up untracked on :$port — stop it manually to free the GPU" }
     }
 }
 function WaitHealth($n, $timeout = 120) {
@@ -90,11 +101,14 @@ function GpuJson {
             $p = $line -split ',' | ForEach-Object { $_.Trim() }
             $active = "none"
             foreach ($n in $Services.Keys) { if ((IsRunning $n)) { $active = $Services[$n].group; break } }
-            $fan = if ($p.Count -gt 5 -and $p[5] -match '^\d') { [int][double]$p[5] } else { $null }
+            # nvidia-smi can return [N/A] for any metric; coerce per-field so one [N/A] degrades ONE
+            # field instead of throwing and nuking the whole gauge (was guarded for fan only).
+            $num = { param($v) if ("$v" -match '^[\d.]+$') { [double]$v } else { $null } }
+            $fan = if ($p.Count -gt 5) { & $num $p[5] } else { $null }
             return [pscustomobject]@{
-                usedMB = [int][double]$p[0]; totalMB = [int][double]$p[1]
-                util = [int][double]$p[2]; temp = [int][double]$p[3]
-                watts = [double]$p[4]; fan = $fan
+                usedMB = [int](& $num $p[0]); totalMB = [int](& $num $p[1])
+                util = [int](& $num $p[2]); temp = [int](& $num $p[3])
+                watts = (& $num $p[4]); fan = $(if ($null -ne $fan) { [int]$fan } else { $null })
                 perProcess = $false; activeGroup = $active
             }
         }
@@ -122,9 +136,10 @@ function StatusJson {
         $port = if ($s.port) { [int]$s.port } else { $m = [regex]::Match([string]$s.health, ':(\d+)'); if ($m.Success) { [int]$m.Groups[1].Value } else { $null } }
         $procId = $null
         $pf = PidFile $n
-        if (Test-Path $pf) { $procId = (Get-Content $pf -ErrorAction SilentlyContinue) }
+        if (Test-Path $pf) { $procId = (Get-Content $pf -ErrorAction SilentlyContinue) -as [int] }   # no throw on corrupt pidfile
+        $healthy = (Probe $s.health)   # probe ONCE (was probed twice per service)
         $model = $null; $modelState = $null; $configured = @()
-        if ($n -eq 'llama-swap' -and (Probe $s.health)) { $li = LlamaSwapModel; $model = $li.model; $modelState = $li.modelState; $configured = $li.configuredModels }
+        if ($n -eq 'llama-swap' -and $healthy) { $li = LlamaSwapModel; $model = $li.model; $modelState = $li.modelState; $configured = $li.configuredModels }
         [pscustomobject]@{
             name      = $n
             group     = $s.group
@@ -133,9 +148,9 @@ function StatusJson {
             ui        = $s.ui
             vramGB    = $s.vramGB
             health    = $s.health
-            healthy   = (Probe $s.health)
+            healthy   = $healthy
             running   = (IsRunning $n)
-            pid       = if ($procId) { [int]$procId } else { $null }
+            pid       = $procId
             installed = ((-not $s.requires) -or (Test-Path $s.requires))
             model            = $model
             modelState       = $modelState
@@ -151,7 +166,7 @@ function DoUp($profile) {
     if (-not $profile) { $profile = "agent" }
     if (-not $Profiles.Contains($profile)) { throw "unknown profile '$profile' — use: agent | coexist | media" }
     $wantGroup = if ($profile -eq "media") { "media" } else { "llm" }
-    foreach ($n in $Services.Keys) { if ($Services[$n].group -ne $wantGroup -and (IsRunning $n)) { StopSvc $n } }
+    foreach ($n in $Services.Keys) { if ($Services[$n].group -ne $wantGroup -and ((IsRunning $n) -or (Probe $Services[$n].health))) { StopSvc $n } }
     Write-Host "doki up [$profile]"
     $starting = @()
     foreach ($n in $Profiles[$profile]) {
@@ -170,7 +185,7 @@ function StartOne($name) {
     if ($Services[$name].requires -and -not (Test-Path $Services[$name].requires)) { Write-Host "$name not installed"; return }
     # respect the 32GB GPU mutual-exclusion: stop the opposite group first
     $g = $Services[$name].group
-    foreach ($n in $Services.Keys) { if ($Services[$n].group -ne $g -and (IsRunning $n)) { StopSvc $n } }
+    foreach ($n in $Services.Keys) { if ($Services[$n].group -ne $g -and ((IsRunning $n) -or (Probe $Services[$n].health))) { StopSvc $n } }
     StartSvc $name
     if (WaitHealth $name) { Write-Host "  ok  $name healthy" } else { Write-Host "  ..  $name started; health not confirmed yet" }
     ShowStatus

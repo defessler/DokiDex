@@ -36,7 +36,7 @@ public sealed class DokiService
 
     public void OpenUi(string url)
     {
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose(); } catch { }
     }
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(8) };
@@ -62,7 +62,7 @@ public sealed class DokiService
         {
             Process.Start(new ProcessStartInfo("pwsh",
                 $"-NoProfile -NoExit -File \"{RepoPaths.DokiPs1}\" verify")
-            { UseShellExecute = true, WorkingDirectory = RepoPaths.Root });
+            { UseShellExecute = true, WorkingDirectory = RepoPaths.Root })?.Dispose();
         }
         catch { }
     }
@@ -70,7 +70,7 @@ public sealed class DokiService
     private static void Spawn(string[] args)
     {
         var psi = NewPsi(args, capture: false);
-        try { Process.Start(psi); } catch { }
+        try { Process.Start(psi)?.Dispose(); } catch { }   // fire-and-forget: release the handle (no output read)
     }
 
     private static async Task<string> CaptureAsync(string[] args, CancellationToken ct)

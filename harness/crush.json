@@ -29,8 +29,8 @@
     }
   },
   "models": {
-    "large": { "model": "coder-fast", "provider": "local" },
-    "small": { "model": "coder-fast", "provider": "local" }
+    "large": { "model": "coder-fast-lite", "provider": "local" },
+    "small": { "model": "coder-fast-lite", "provider": "local" }
   },
   "mcp": {
     "websearch": {
