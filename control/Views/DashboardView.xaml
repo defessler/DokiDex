@@ -1,0 +1,115 @@
+<UserControl x:Class="DokiCode.Control.Views.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DokiCode.Control.ViewModels">
+  <UserControl.Resources>
+
+    <!-- ============ service card ============ -->
+    <DataTemplate x:Key="ServiceCard" DataType="{x:Type vm:ServiceViewModel}">
+      <Border Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource BorderBrush2}"
+              BorderThickness="1" CornerRadius="6" Margin="0,0,12,12" Width="318">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="3"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" CornerRadius="6,0,0,6" Background="{Binding Group, Converter={StaticResource GroupAccent}}"/>
+          <StackPanel Grid.Column="1" Margin="13,11,13,11">
+
+            <!-- header: dot + name + port -->
+            <DockPanel>
+              <Ellipse Width="10" Height="10" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,1,9,0"
+                       Fill="{Binding StateKind, Converter={StaticResource StateBrush}}"/>
+              <TextBlock DockPanel.Dock="Right" Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}"
+                         FontSize="12" VerticalAlignment="Center">
+                <Run Text=":"/><Run Text="{Binding Port, Mode=OneWay}"/>
+              </TextBlock>
+              <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" FontSize="14"/>
+            </DockPanel>
+
+            <TextBlock Text="{Binding StateLabel}" Foreground="{Binding StateKind, Converter={StaticResource StateBrush}}"
+                       FontSize="12" Margin="19,3,0,0"/>
+            <TextBlock Text="{Binding Detail}" Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}"
+                       FontSize="11" Margin="19,2,0,0" TextTrimming="CharacterEllipsis"/>
+
+            <!-- actions -->
+            <WrapPanel Margin="17,9,0,0">
+              <Button Content="▶ start" Style="{StaticResource IconBtn}" Command="{Binding StartCommand}"
+                      Visibility="{Binding Running, Converter={StaticResource InvBoolVis}}"/>
+              <Button Content="↻" Style="{StaticResource IconBtn}" Command="{Binding RestartCommand}" ToolTip="restart"
+                      Visibility="{Binding Running, Converter={StaticResource BoolVis}}"/>
+              <Button Content="■ stop" Style="{StaticResource IconBtn}" Command="{Binding StopCommand}"
+                      Visibility="{Binding Running, Converter={StaticResource BoolVis}}"/>
+              <Button Content="⎘ UI" Style="{StaticResource IconBtn}" Command="{Binding OpenUiCommand}"
+                      Visibility="{Binding HasUi, Converter={StaticResource BoolVis}}"/>
+              <Button Content="⚡ test" Style="{StaticResource IconBtn}" Command="{Binding TestCommand}"
+                      ToolTip="Run the smallest real generation for this service."/>
+            </WrapPanel>
+
+            <!-- test result tray -->
+            <Border Margin="17,9,0,0" Background="{StaticResource BgBrush}" CornerRadius="4" Padding="9,6"
+                    Visibility="{Binding HasTestResult, Converter={StaticResource BoolVis}}">
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="open" Style="{StaticResource IconBtn}" Margin="6,0,0,0"
+                        Command="{Binding OpenTestFileCommand}"
+                        Visibility="{Binding HasTestFile, Converter={StaticResource BoolVis}}"/>
+                <TextBlock Text="{Binding TestResult}" Style="{StaticResource Mono}" FontSize="11" TextWrapping="Wrap"/>
+              </DockPanel>
+            </Border>
+
+          </StackPanel>
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,18,14,18">
+    <StackPanel>
+
+      <!-- ===== mode switcher ===== -->
+      <TextBlock Text="MODE — the GPU runs one group at a time" Style="{StaticResource SectionHeader}"/>
+      <DockPanel Margin="0,2,0,6">
+        <Button DockPanel.Dock="Right" Content="⏻ Stop All" Style="{StaticResource BtnDanger}"
+                Command="{Binding StopAllCommand}" VerticalAlignment="Top"/>
+        <WrapPanel>
+          <Button Tag="agent" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="agent"
+                  Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=agent}"
+                  MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="chat + code (llama-swap + tts)">
+            <StackPanel><TextBlock Text="◉ AGENT" FontWeight="SemiBold"/><TextBlock Text="chat + code" FontSize="10" Foreground="#FFBFD8E8"/></StackPanel>
+          </Button>
+          <Button Tag="coexist" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="coexist"
+                  Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=coexist}"
+                  MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="chat + code + editor autocomplete (llama-swap + fim)">
+            <StackPanel><TextBlock Text="◉ COEXIST" FontWeight="SemiBold"/><TextBlock Text="+ autocomplete" FontSize="10" Foreground="#FFBFD8E8"/></StackPanel>
+          </Button>
+          <Button Tag="media" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="media"
+                  Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=media}"
+                  MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="image + video (SwarmUI + prompt-rewriter). Stops the LLM.">
+            <StackPanel><TextBlock Text="◉ MEDIA" FontWeight="SemiBold"/><TextBlock Text="image + video" FontSize="10" Foreground="#FFBFD8E8"/></StackPanel>
+          </Button>
+        </WrapPanel>
+      </DockPanel>
+      <Border Background="{StaticResource SurfaceBrush}" CornerRadius="5" Padding="11,8" Margin="0,2,0,18"
+              BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1">
+        <TextBlock Text="{Binding SwitchExplain}" Foreground="{StaticResource TextBrush}" FontSize="12" TextWrapping="Wrap"/>
+      </Border>
+
+      <!-- ===== LLM band ===== -->
+      <StackPanel Opacity="{Binding LlmActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
+        <TextBlock Text="LLM group" Style="{StaticResource SectionHeader}" Foreground="{StaticResource TealBrush}" Margin="2,0,0,8"/>
+        <ItemsControl ItemsSource="{Binding LlmServices}" ItemTemplate="{StaticResource ServiceCard}">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </StackPanel>
+
+      <!-- ===== MEDIA band ===== -->
+      <StackPanel Margin="0,8,0,0" Opacity="{Binding MediaActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
+        <TextBlock Text="MEDIA group" Style="{StaticResource SectionHeader}" Foreground="{StaticResource AmberBrush}" Margin="2,0,0,8"/>
+        <ItemsControl ItemsSource="{Binding MediaServices}" ItemTemplate="{StaticResource ServiceCard}">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </StackPanel>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
