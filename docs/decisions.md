@@ -228,9 +228,15 @@ every swap is gated behind a blind simple-prompt bake-off.
   experts + the 6.3GB text-encoder + activations thrash past 32GB even at 480×320×33 (timed out
   >300s, VRAM pegged at 32GB) — the same wall decisions.md found for Wan 2.1 14B, made worse by the
   two-expert architecture. The research's "fits 32GB" claim didn't survive contact with the card.
-  So the 14B is kept on disk but **NOT wired as the default**; reaching it needs GGUF-Q4 (~9.6GB/
-  expert) or block-swap (future opt-in). **Also corrected:** Wan 2.5/2.6/2.7 are API-only — Wan 2.2
-  is the newest OPEN Wan (verified vs the official `Wan-AI` HF org; "downloadable Wan 2.7" pages are SEO).
+  So the 14B is kept on disk but **NOT wired as the default**. **Block-swap was then tested live**
+  (user opted to try it): Kijai's **WanVideoWrapper** imports clean on Blackwell (110 nodes, the
+  experts have 40 swappable blocks), so it's *feasible* — but it needs its own model ecosystem (the
+  fp8-scaled umt5 is unsupported → another ~11GB T5 download) + a hand-built dual-expert workflow,
+  for a *slow* RAM-offloaded 14B with only a modest edge over the 5B. Poor ROI, so **5B is confirmed
+  the practical max** on this 32GB card (user's call; WanVideoWrapper removed). GGUF-Q4 (~9.6GB/
+  expert, native SwarmUI path) remains the cleaner option if the 14B is ever revisited. **Also
+  corrected:** Wan 2.5/2.6/2.7 are API-only — Wan 2.2 is the newest OPEN Wan (verified vs the
+  official `Wan-AI` HF org; "downloadable Wan 2.7" pages are SEO).
 - **Audio: HunyuanVideo-Foley** (SOTA V2A, beats MMAudio/ThinkSound). Runs as a ComfyUI post-step
   on the silent clip; SwarmUI's own `SwarmSaveAnimationWS` node muxes the audio → **one muxed MP4
   from a single API call** via a committed `WanFoley` custom workflow. License: Tencent Hunyuan
