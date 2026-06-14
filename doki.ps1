@@ -24,13 +24,16 @@ $Services = [ordered]@{
     # Uncensored TTS (:8004) — OpenAI-compatible /v1/audio/speech + voice cloning. ~4GB, group=llm
     # so it coexists with the coder in agent mode. 'requires' skips it cleanly when not installed.
     "tts"        = @{ script = (Join-Path $serving "start-tts.ps1");     health = "http://127.0.0.1:8004/";         group = "llm";   desc = "speech/TTS    :8004"; port = 8004; ui = "http://127.0.0.1:8004/"; vramGB = 4; requires = (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\python.exe") }
+    # Fully-local speech-to-text (:8005) — Parakeet via onnx-asr, OpenAI /v1/audio/transcriptions.
+    # CPU EP by default (~no VRAM), so group=llm to coexist with the coder in agent mode.
+    "stt"        = @{ script = (Join-Path $serving "start-stt.ps1");     health = "http://127.0.0.1:8005/health";   group = "llm";   desc = "speech-to-text :8005"; port = 8005; ui = $null; vramGB = 1; requires = (Join-Path $root "stt\.venv\Scripts\python.exe") }
     "media"      = @{ script = (Join-Path $serving "start-media.ps1");   health = "http://127.0.0.1:7801/";         group = "media"; desc = "image+video   :7801"; port = 7801; ui = "http://127.0.0.1:7801/"; vramGB = 18 }
     # Tiny always-on prompt-rewriter (:8013) — auto-expands lazy prompts for SwarmUI.
     # group=media so it coexists with the image/video model (and is stopped for the big LLM).
     # 'requires' lets doki skip it cleanly on lean installs where its model isn't present.
     "prompt-rewriter" = @{ script = (Join-Path $serving "start-prompt-rewriter.ps1"); health = "http://127.0.0.1:8013/health"; group = "media"; desc = "prompt rewriter :8013"; port = 8013; ui = $null; vramGB = 3; requires = (Join-Path $root "models\Qwen2.5-3B-Instruct-Q5_K_M.gguf") }
 }
-$Profiles = [ordered]@{ agent = @("llama-swap", "tts"); coexist = @("llama-swap", "fim"); media = @("media", "prompt-rewriter") }
+$Profiles = [ordered]@{ agent = @("llama-swap", "tts", "stt"); coexist = @("llama-swap", "fim"); media = @("media", "prompt-rewriter") }
 
 function PidFile($n) { Join-Path $runDir "$n.pid" }
 function LogFile($n) { Join-Path $runDir "$n.log" }

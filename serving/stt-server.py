@@ -1,0 +1,58 @@
+# DokiCode STT — fully-local speech-to-text on :8005.
+# NVIDIA Parakeet (TDT 0.6B v2) via onnx-asr — an OpenAI-compatible
+# /v1/audio/transcriptions endpoint. CPU execution provider by default (no VRAM),
+# so it coexists with the coder in agent mode; set STT_PROVIDER=cuda to use the GPU.
+#
+# No content filter — transcription is verbatim. Runs in its own isolated venv.
+import os
+import tempfile
+
+from fastapi import FastAPI, File, Form, UploadFile
+import uvicorn
+import onnx_asr
+
+MODEL_ID = os.environ.get("STT_MODEL", "nemo-parakeet-tdt-0.6b-v2")
+PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"] if os.environ.get("STT_PROVIDER") == "cuda" else ["CPUExecutionProvider"]
+
+app = FastAPI(title="DokiCode STT")
+_model = None
+
+
+def model():
+    global _model
+    if _model is None:
+        # downloads the Parakeet ONNX model from HF on first call, then caches it
+        _model = onnx_asr.load_model(MODEL_ID, providers=PROVIDERS)
+    return _model
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "DokiCode STT", "model": MODEL_ID, "providers": PROVIDERS}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/v1/audio/transcriptions")
+async def transcriptions(file: UploadFile = File(...), model: str = Form(default="parakeet")):
+    """OpenAI-compatible: multipart 'file' (16kHz wav best) -> {"text": ...}."""
+    data = await file.read()
+    suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(data)
+        path = tmp.name
+    try:
+        text = model().recognize(path)  # onnx-asr loads + resamples to 16k via soundfile
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return {"text": text if isinstance(text, str) else (text[0] if text else "")}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8005)

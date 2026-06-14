@@ -33,6 +33,22 @@ if (-not (Test-Path (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\py
     } catch { $results["speech/TTS (:8004)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 1c. speech-to-text (:8005) — Parakeet via onnx-asr; transcribe the TTS clip (a TTS->STT
+#     round-trip). Started by 'up agent' (group=llm). First call downloads the model (~2GB).
+Write-Host "[verify] speech-to-text ..."
+if (-not (Test-Path (Join-Path $root "stt\.venv\Scripts\python.exe"))) {
+    $results["speech-to-text (:8005)"] = "SKIP  (not installed; -Stt)"
+} elseif (-not (Test-Path (Join-Path $env:TEMP "doki_tts_verify.wav"))) {
+    $results["speech-to-text (:8005)"] = "SKIP  (no audio sample; needs -Tts above)"
+} else {
+    try {
+        $wav = Join-Path $env:TEMP "doki_tts_verify.wav"
+        $tr = Invoke-RestMethod "http://127.0.0.1:8005/v1/audio/transcriptions" -Method Post -Form @{ model = "parakeet"; file = Get-Item $wav } -TimeoutSec 300
+        $txt = "$($tr.text)".Trim()
+        $results["speech-to-text (:8005)"] = if ($txt.Length -gt 3) { "PASS  '$txt'" } else { "FAIL  empty transcript" }
+    } catch { $results["speech-to-text (:8005)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 2. autocomplete — coexist mode, FIM infill
 Write-Host "[verify] autocomplete ..."
 Doki up coexist

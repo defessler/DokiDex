@@ -13,6 +13,7 @@
 param(
     [switch]$Media,
     [switch]$Tts,
+    [switch]$Stt,
     [ValidateSet("lean", "full")][string]$Models = "lean"
 )
 $ErrorActionPreference = "Stop"
@@ -93,7 +94,24 @@ if ($Tts) {
     Ok "TTS ready -> :8004 (OpenAI /v1/audio/speech + voice cloning). First '.\doki.ps1 up' downloads the voice model."
 }
 
-if (-not $Media) { Info "core setup done.  -Media adds image/video,  -Tts adds speech."; return }
+# ---- STT stack: fully-local speech-to-text (NVIDIA Parakeet via onnx-asr) — optional ----
+if ($Stt) {
+    Info "STT stack (Parakeet TDT 0.6B v2 via onnx-asr: local speech-to-text)"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
+    $sttRoot = Join-Path $root "stt"
+    $spy = Join-Path $sttRoot ".venv\Scripts\python.exe"
+    if (-not (Test-Path $spy)) {
+        Info "creating venv + installing onnx-asr (CPU EP) + FastAPI (~300MB) ..."
+        New-Item -ItemType Directory -Force $sttRoot | Out-Null
+        python -m venv (Join-Path $sttRoot ".venv")
+        & $spy -m pip install --upgrade pip | Out-Null
+        # onnx-asr[cpu,hub] pulls onnxruntime + huggingface_hub; soundfile loads/resamples audio
+        & $spy -m pip install "onnx-asr[cpu,hub]" fastapi "uvicorn[standard]" python-multipart soundfile
+    } else { Ok "STT venv present" }
+    Ok "STT ready -> :8005 (OpenAI /v1/audio/transcriptions). First '.\doki.ps1 up' downloads the Parakeet model (~2GB)."
+}
+
+if (-not $Media) { Info "core setup done.  -Media adds image/video,  -Tts speech,  -Stt transcription."; return }
 
 # ---- 5. Media stack: SwarmUI + ComfyUI + uncensored models ----------------
 Info "media stack (SwarmUI + ComfyUI + uncensored image/video models)"
@@ -211,6 +229,11 @@ if ($Models -eq "full") {
     # Chroma — uncensored, FLUX-derived stylized complement. Use the *-final STABLE variant
     # (the repo's do_not_use/ files error in ComfyUI with a tensor mismatch).
     Get-Model "https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/Chroma1-HD-fp8mixed-final.safetensors" (Join-Path $diff "Chroma1-HD-fp8mixed-final.safetensors")
+
+    # Upscaler: 4x-UltraSharp (ESRGAN) -> Models\upscale_models. SwarmUI exposes it as the
+    # Upscale / Refiner-Upscale step for higher-detail stills and video frames.
+    $upsc = Join-Path $swarm "Models\upscale_models"; New-Item -ItemType Directory -Force $upsc | Out-Null
+    Get-Model "https://huggingface.co/Kim2091/UltraSharp/resolve/main/4x-UltraSharp.pth" (Join-Path $upsc "4x-UltraSharp.pth")
 
     # Audio (V2A): HunyuanVideo-Foley — adds synced sound to a silent clip (muxed by the
     # WanFoley custom workflow). fp16 main for max quality. CLAP + SigLIP2 encoders auto-

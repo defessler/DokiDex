@@ -12,8 +12,8 @@ gap-analysis workflow; every item checked against the installed repo.
 | 1 | **Image-to-Video** (animate a still) ✅ **DONE** | SwarmUI's **native** `videomodel` pipeline animates the already-installed Wan 2.2 TI2V-5B — **no custom workflow needed** (live testing corrected the original "fork WanFoley.json" plan). Also fixed the wrong VAE comment in `setup.ps1`. | **S** | **none** |
 | 2 | **Music / song generation** | ACE-Step 1.5 — nodes already ship in `comfy_extras/nodes_ace.py`; add an `AceStep.json` custom workflow + model download. | M | ~3 GB |
 | 3 | **Precise image editing** (instruction edits, inpaint) | Qwen-Image-Edit-2511 — SwarmUI-native; inpaint is free once the model is present. | M | ~12–20 GB |
-| 4 | **Upscaling / detail** | 4x-UltraSharp into `Models/upscale_models` (currently empty); SwarmUI exposes it as a refiner/upscale step. | S | ~0.07 GB |
-| 5 | **Speech-to-text** (the missing input modality) | Parakeet (NVIDIA) via `onnx-asr` in a FastAPI service on `:8005` (`start-stt.ps1`, `group=llm`, CPU EP first then CUDA). Mirrors the TTS service pattern. | M | ~2 GB |
+| 4 | **Upscaling / detail** ✅ **wired** | 4x-UltraSharp added to `setup.ps1 -Models full` → `Models/upscale_models`; SwarmUI exposes it as the Upscale / Refiner-Upscale step. | S | ~0.07 GB |
+| 5 | **Speech-to-text** (the missing input modality) ✅ **scaffolded** | Parakeet (NVIDIA) via `onnx-asr` FastAPI on `:8005` — `serving/stt-server.py` + `start-stt.ps1`, registered in doki (`group=llm`, agent profile, CPU EP first), `setup.ps1 -Stt` installs it, guarded `verify.ps1` smoke (TTS→STT round-trip). Installable; not yet live-tested. | M | ~2 GB |
 
 The **lead item is #1 (I2V)** — the single highest-value, zero-download capability the box
 was missing, now **shipped + live-verified** (3 real 25-frame mp4s generated).
