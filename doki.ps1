@@ -9,7 +9,7 @@
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify")][string]$Command = "status",
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg
 )
 $ErrorActionPreference = "Stop"
@@ -77,6 +77,25 @@ function ShowStatus {
     }
     Write-Host ""
 }
+function StatusJson {
+    # machine-readable status for the control panel — one source of truth from $Services.
+    $arr = foreach ($n in $Services.Keys) {
+        $s = $Services[$n]
+        $port = ([regex]::Match([string]$s.health, ':(\d+)')).Groups[1].Value
+        [pscustomobject]@{
+            name      = $n
+            group     = $s.group
+            desc      = $s.desc
+            port      = if ($port) { [int]$port } else { $null }
+            health    = $s.health
+            healthy   = (Probe $s.health)
+            running   = (IsRunning $n)
+            installed = ((-not $s.requires) -or (Test-Path $s.requires))
+            profiles  = @($Profiles.Keys | Where-Object { $Profiles[$_] -contains $n })
+        }
+    }
+    @{ services = @($arr); profiles = $Profiles } | ConvertTo-Json -Depth 5
+}
 function DoUp($profile) {
     if (-not $profile) { $profile = "agent" }
     if (-not $Profiles.Contains($profile)) { throw "unknown profile '$profile' — use: agent | coexist | media" }
@@ -95,12 +114,29 @@ function DoUp($profile) {
     ShowStatus
 }
 function DoDown { Write-Host "doki down"; foreach ($n in $Services.Keys) { StopSvc $n } }
+function StartOne($name) {
+    if (-not $Services.Contains($name)) { throw "unknown service '$name' — one of: $($Services.Keys -join ', ')" }
+    if ($Services[$name].requires -and -not (Test-Path $Services[$name].requires)) { Write-Host "$name not installed"; return }
+    # respect the 32GB GPU mutual-exclusion: stop the opposite group first
+    $g = $Services[$name].group
+    foreach ($n in $Services.Keys) { if ($Services[$n].group -ne $g -and (IsRunning $n)) { StopSvc $n } }
+    StartSvc $name
+    if (WaitHealth $name) { Write-Host "  ok  $name healthy" } else { Write-Host "  ..  $name started; health not confirmed yet" }
+    ShowStatus
+}
+function StopOne($name) {
+    if (-not $Services.Contains($name)) { throw "unknown service '$name' — one of: $($Services.Keys -join ', ')" }
+    StopSvc $name
+    ShowStatus
+}
 
 switch ($Command) {
     "up"      { DoUp $Arg }
     "down"    { DoDown }
     "restart" { DoDown; DoUp $Arg }
-    "status"  { ShowStatus }
+    "start"   { if (-not $Arg) { throw "usage: .\doki.ps1 start <service>" }; StartOne $Arg }
+    "stop"    { if (-not $Arg) { throw "usage: .\doki.ps1 stop <service>" }; StopOne $Arg }
+    "status"  { if ($Arg -eq "json" -or $Arg -eq "--json") { StatusJson } else { ShowStatus } }
     "logs" {
         if (-not $Arg) { throw "usage: .\doki.ps1 logs <llama-swap|fim|media>" }
         $l = LogFile $Arg
