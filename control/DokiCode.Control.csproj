@@ -17,4 +17,12 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
   </ItemGroup>
 
+  <!-- the test project lives under this folder; don't glob its sources into the app -->
+  <ItemGroup>
+    <Compile Remove="DokiCode.Control.Tests\**" />
+    <Page Remove="DokiCode.Control.Tests\**" />
+    <None Remove="DokiCode.Control.Tests\**" />
+    <ApplicationDefinition Remove="DokiCode.Control.Tests\**" />
+  </ItemGroup>
+
 </Project>

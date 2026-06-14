@@ -15,6 +15,12 @@ public sealed class DokiService
     public async Task<StatusDoc?> GetStatusAsync(CancellationToken ct = default)
     {
         var json = await CaptureAsync(new[] { "status", "json" }, ct).ConfigureAwait(false);
+        return ParseStatus(json);
+    }
+
+    // Pure, testable: deserialize the `doki status json` payload. Returns null on empty/invalid.
+    public static StatusDoc? ParseStatus(string? json)
+    {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try { return JsonSerializer.Deserialize<StatusDoc>(json, JsonOpts); }
         catch { return null; }
