@@ -8,6 +8,7 @@ import os
 import tempfile
 
 from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.concurrency import run_in_threadpool
 import uvicorn
 import onnx_asr
 
@@ -47,7 +48,10 @@ async def transcriptions(file: UploadFile = File(...), model_name: str = Form(de
         tmp.write(data)
         path = tmp.name
     try:
-        text = model().recognize(path)  # onnx-asr loads + resamples to 16k via soundfile
+        # recognize() (and the first-call model load) is blocking CPU work; run it OFF the event
+        # loop so /health stays responsive during a transcription — otherwise the doki/panel health
+        # probe (3s timeout) reports STT "down" for the whole ~6s job. onnx-asr resamples to 16k.
+        text = await run_in_threadpool(lambda: model().recognize(path))
     finally:
         try:
             os.unlink(path)
