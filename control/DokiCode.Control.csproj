@@ -10,11 +10,20 @@
     <AssemblyName>DokiCode.Control</AssemblyName>
     <RootNamespace>DokiCode.Control</RootNamespace>
     <Title>DokiCode Control</Title>
-    <ApplicationIcon></ApplicationIcon>
+    <ApplicationIcon>assets\dokicode.ico</ApplicationIcon>
+    <!-- Baseline version for the in-app auto-updater (Services/Updater.cs reports the entry-assembly
+         version; the release CI overrides this with -p:Version from the pushed vX.Y.Z tag). -->
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- native splash: shown by unmanaged code before JIT/extraction, so a self-contained
+         single-file launch gets instant feedback; it cross-fades into the animated BootWindow -->
+    <SplashScreen Include="assets\splash.png" />
   </ItemGroup>
 
   <!-- the test project lives under this folder; don't glob its sources into the app -->

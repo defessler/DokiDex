@@ -124,17 +124,17 @@
           <Button Tag="agent" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="agent"
                   Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=agent}"
                   MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="chat + code (llama-swap + tts)">
-            <StackPanel><TextBlock Text="◉ AGENT" FontWeight="SemiBold"/><TextBlock Text="chat + code" FontSize="10" Foreground="#FFBFD8E8"/></StackPanel>
+            <StackPanel><TextBlock Text="◉ AGENT" FontWeight="SemiBold"/><TextBlock Text="chat + code" FontSize="10" Foreground="{StaticResource InfoBrush}"/></StackPanel>
           </Button>
           <Button Tag="coexist" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="coexist"
                   Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=coexist}"
                   MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="chat + code + editor autocomplete (llama-swap + fim)">
-            <StackPanel><TextBlock Text="◉ COEXIST" FontWeight="SemiBold"/><TextBlock Text="+ autocomplete" FontSize="10" Foreground="#FFBFD8E8"/></StackPanel>
+            <StackPanel><TextBlock Text="◉ COEXIST" FontWeight="SemiBold"/><TextBlock Text="+ autocomplete" FontSize="10" Foreground="{StaticResource InfoBrush}"/></StackPanel>
           </Button>
           <Button Tag="media" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="media"
                   Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=media}"
                   MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="image + video (SwarmUI + prompt-rewriter). Stops the LLM.">
-            <StackPanel><TextBlock Text="◉ MEDIA" FontWeight="SemiBold"/><TextBlock Text="image + video" FontSize="10" Foreground="#FFBFD8E8"/></StackPanel>
+            <StackPanel><TextBlock Text="◉ MEDIA" FontWeight="SemiBold"/><TextBlock Text="image + video" FontSize="10" Foreground="{StaticResource InfoBrush}"/></StackPanel>
           </Button>
         </WrapPanel>
       </DockPanel>

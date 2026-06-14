@@ -279,7 +279,11 @@ function TailLogs($name) {
 function LaunchPanel {
     $exe = Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe"
     $proj = Join-Path $root "control\DokiCode.Control.csproj"
-    if (Test-Path $exe) { Start-Process $exe }
+    if (Test-Path $exe) {
+        # ensure the premium console-free launcher exists (DokiCode.lnk -> exe, arc-reactor icon)
+        if (-not (Test-Path (Join-Path $root "DokiCode.lnk"))) { try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {} }
+        Start-Process $exe
+    }
     elseif (Test-Path $proj) { Write-Host "launching control panel (dev) ..."; Start-Process "dotnet" -ArgumentList @("run", "--project", "`"$proj`"", "-c", "Release") }
     else { Write-Host "control panel not built. Build it with:  dotnet build control\DokiCode.Control.csproj -c Release" }
 }

@@ -23,9 +23,11 @@
             BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,1,0">
       <DockPanel Margin="14,14,14,12">
 
-        <TextBlock DockPanel.Dock="Top" Text="DokiCode" Style="{StaticResource H1}" FontSize="18"/>
-        <TextBlock DockPanel.Dock="Top" Text="local AI stack" Foreground="{StaticResource DimBrush}"
-                   FontSize="11" Margin="0,0,0,16"/>
+        <!-- brand wordmark — the splash voice: light, hair-spaced (no FontStretch/ScaleX) -->
+        <TextBlock DockPanel.Dock="Top" Text="D O K I C O D E" FontWeight="Thin" FontSize="19"
+                   FontFamily="Segoe UI Variable Display, Segoe UI Light, Segoe UI" Foreground="{StaticResource TextBrush}"/>
+        <TextBlock DockPanel.Dock="Top" Text="local intelligence stack" Foreground="{StaticResource DimBrush}"
+                   FontSize="10.5" Margin="0,1,0,16"/>
 
         <!-- GPU meter -->
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,18">

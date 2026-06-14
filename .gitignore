@@ -45,3 +45,9 @@ desktop.ini
 # .NET build artifacts
 [Bb]in/
 [Oo]bj/
+
+# control-panel generated previews / screen captures — NOT the tracked build inputs.
+# control/assets/dokicode.ico and control/assets/splash.png ARE required (ApplicationIcon +
+# native SplashScreen) and must stay committed; only the heavy/throwaway renders are ignored.
+control/assets/boot-capture.png
+control/assets/*-preview.png

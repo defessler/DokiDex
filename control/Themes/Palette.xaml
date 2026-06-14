@@ -2,21 +2,39 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:conv="clr-namespace:DokiCode.Control.Converters">
 
-  <!-- ============ palette (VS-Code dark, inherited from control.ps1) ============ -->
-  <Color x:Key="BgColor">#FF1E1E1E</Color>
-  <SolidColorBrush x:Key="BgBrush"      Color="#FF1E1E1E"/>
-  <SolidColorBrush x:Key="SurfaceBrush" Color="#FF252526"/>
-  <SolidColorBrush x:Key="Surface2Brush" Color="#FF2D2D30"/>
-  <SolidColorBrush x:Key="Surface3Brush" Color="#FF333337"/>
-  <SolidColorBrush x:Key="BorderBrush2" Color="#FF3F3F46"/>
-  <SolidColorBrush x:Key="TextBrush"    Color="#FFD4D4D4"/>
-  <SolidColorBrush x:Key="DimBrush"     Color="#FF858585"/>
-  <SolidColorBrush x:Key="AccentBrush"  Color="#FF0E639C"/>
-  <SolidColorBrush x:Key="TealBrush"    Color="#FF4EC9B0"/>
-  <SolidColorBrush x:Key="AmberBrush"   Color="#FFD7BA7D"/>
-  <SolidColorBrush x:Key="DangerBrush"  Color="#FFA1260D"/>
-  <SolidColorBrush x:Key="DangerBrightBrush" Color="#FFF14C4C"/>
-  <SolidColorBrush x:Key="InfoBrush"    Color="#FF9CDCFE"/>
+  <!-- ============ DokiCode premium theme — the splash aesthetic, app-wide ============
+       Deep VOID field; ONE emitting accent (reactor cyan = live/active/primary); GOLD as etched
+       structure that never glows (section labels, the MEDIA group, dividers). Functional status
+       colors (amber/red) are deliberately KEPT — telling you a service is DOWN is the panel's job
+       (the boot stays monochrome; the dashboard is where red/amber legitimately live). -->
+  <Color x:Key="BgColor">#FF0A0E14</Color>
+  <SolidColorBrush x:Key="BgBrush"      Color="#FF0A0E14"/>   <!-- app field (lifted from boot void for readability) -->
+  <SolidColorBrush x:Key="SurfaceBrush" Color="#FF0D121B"/>   <!-- rails, strips, mode panel -->
+  <SolidColorBrush x:Key="Surface2Brush" Color="#FF121826"/>  <!-- cards (sit above the field) -->
+  <SolidColorBrush x:Key="Surface3Brush" Color="#FF1B2433"/>  <!-- inputs / hover lift -->
+  <SolidColorBrush x:Key="BorderBrush2" Color="#FF243140"/>   <!-- hairline, cool -->
+  <SolidColorBrush x:Key="TextBrush"    Color="#FFE6EEF6"/>   <!-- cool white -->
+  <SolidColorBrush x:Key="DimBrush"     Color="#FF7E8C99"/>   <!-- cool grey (matches boot) -->
+  <SolidColorBrush x:Key="AccentBrush"  Color="#FF0E7490"/>   <!-- deep cyan (the rare emphatic fill) -->
+  <SolidColorBrush x:Key="TealBrush"    Color="#FF35E0F0"/>   <!-- LLM group / live = the emitting cyan -->
+  <SolidColorBrush x:Key="AmberBrush"   Color="#FFE8C77A"/>   <!-- MEDIA group / structure = etched gold -->
+  <SolidColorBrush x:Key="DangerBrush"  Color="#FF7A2230"/>   <!-- down (deep) -->
+  <SolidColorBrush x:Key="DangerBrightBrush" Color="#FFFF6B6B"/> <!-- crashed (the one alarm signal) -->
+  <SolidColorBrush x:Key="InfoBrush"    Color="#FFAFE3F2"/>
+
+  <!-- ============ boot sequence: arc-reactor / LCARS / FF accents ============ -->
+  <!-- deep-space field the reactor ignites against (Anthropic/OpenAI restraint = lots of void) -->
+  <Color x:Key="VoidColor">#FF05070B</Color>
+  <SolidColorBrush x:Key="VoidBrush"     Color="#FF05070B"/>
+  <SolidColorBrush x:Key="VoidEdgeBrush" Color="#FF0B0F16"/>
+  <!-- the one igniting accent (Iron Man reactor cyan) + its companions -->
+  <Color x:Key="ReactorColor">#FF35E0F0</Color>
+  <SolidColorBrush x:Key="ReactorBrush"    Color="#FF35E0F0"/>
+  <SolidColorBrush x:Key="ReactorDimBrush" Color="#7035E0F0"/>
+  <Color x:Key="ReactorGoldColor">#FFE8C77A</Color>
+  <SolidColorBrush x:Key="ReactorGoldBrush" Color="#FFE8C77A"/>
+  <SolidColorBrush x:Key="HudFaintBrush"   Color="#2A6FE9F5"/>
+  <SolidColorBrush x:Key="BootTextBrush"   Color="#FFEAF6FF"/>
 
   <!-- ============ converters ============ -->
   <conv:StateKindToBrushConverter x:Key="StateBrush"/>
@@ -47,8 +65,8 @@
 
   <!-- ============ buttons (ported from control.ps1) ============ -->
   <Style x:Key="Btn" TargetType="Button">
-    <Setter Property="Foreground" Value="#FFFFFFFF"/>
-    <Setter Property="Background" Value="#FF3A3D41"/>
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+    <Setter Property="Background" Value="{StaticResource Surface3Brush}"/>
     <Setter Property="Padding" Value="12,6"/>
     <Setter Property="Margin" Value="0,0,6,0"/>
     <Setter Property="FontSize" Value="12"/>

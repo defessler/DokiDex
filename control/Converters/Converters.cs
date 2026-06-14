@@ -13,18 +13,20 @@ internal static class Ink
         b.Freeze();
         return b;
     }
-    public static readonly SolidColorBrush Teal = Make("#4ec9b0");
-    public static readonly SolidColorBrush Amber = Make("#d7ba7d");
-    public static readonly SolidColorBrush AmberDeep = Make("#cc8400");
-    public static readonly SolidColorBrush Blue = Make("#569cd6");
-    public static readonly SolidColorBrush Orange = Make("#e0913a");
-    public static readonly SolidColorBrush Danger = Make("#f14c4c");
-    public static readonly SolidColorBrush Grey = Make("#808080");
-    public static readonly SolidColorBrush Dim = Make("#858585");
-    public static readonly SolidColorBrush Text = Make("#d4d4d4");
-    public static readonly SolidColorBrush Accent = Make("#0e639c");
-    public static readonly SolidColorBrush Info = Make("#9cdcfe");
-    public static readonly SolidColorBrush Surface2 = Make("#2d2d30");
+    // Premium theme: cyan = the emitting "live" signal, gold = etched structure, functional
+    // warm/red kept for genuine trouble (the dashboard's job). Matches Themes/Palette.xaml.
+    public static readonly SolidColorBrush Teal = Make("#35e0f0");      // healthy / live = the emitting cyan
+    public static readonly SolidColorBrush Amber = Make("#e8c77a");     // warn / structure = etched gold
+    public static readonly SolidColorBrush AmberDeep = Make("#b8954e");
+    public static readonly SolidColorBrush Blue = Make("#5aa9e6");      // starting
+    public static readonly SolidColorBrush Orange = Make("#e0913a");    // degraded (warm signal)
+    public static readonly SolidColorBrush Danger = Make("#ff6b6b");    // crashed (the one alarm)
+    public static readonly SolidColorBrush Grey = Make("#5a6b78");      // offline / not-installed (cool, never alarmist)
+    public static readonly SolidColorBrush Dim = Make("#7e8c99");
+    public static readonly SolidColorBrush Text = Make("#e6eef6");
+    public static readonly SolidColorBrush Accent = Make("#0e7490");    // deep cyan (the rare emphatic fill)
+    public static readonly SolidColorBrush Info = Make("#afe3f2");
+    public static readonly SolidColorBrush Surface2 = Make("#121826");
 }
 
 // service StateKind -> status-dot brush

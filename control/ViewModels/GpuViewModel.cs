@@ -29,7 +29,11 @@ public partial class GpuViewModel : ObservableObject
     public string SubLine => Available
         ? $"{FreeGb:0.0} GB free  ·  {Temp}°C  ·  {Watts:0}W{(Fan is int f ? $"  ·  fan {f}%" : "")}"
         : "nvidia-smi unavailable";
-    public string GroupLabel => Available ? $"RTX 5090 · 32 GB · {ActiveGroup.ToUpperInvariant()} group" : "RTX 5090";
+    public string GroupLabel => Available
+        ? (string.IsNullOrEmpty(ActiveGroup) || ActiveGroup.Equals("none", StringComparison.OrdinalIgnoreCase)
+            ? "RTX 5090 · 32 GB · idle"
+            : $"RTX 5090 · 32 GB · {ActiveGroup.ToUpperInvariant()} group")
+        : "RTX 5090";
 
     public void Update(GpuStatus? g)
     {
