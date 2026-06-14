@@ -51,3 +51,7 @@ desktop.ini
 # native SplashScreen) and must stay committed; only the heavy/throwaway renders are ignored.
 control/assets/boot-capture.png
 control/assets/*-preview.png
+
+# generated, machine-specific launcher shortcut (created per-machine by control.bat / `doki panel`,
+# with an absolute TargetPath) — never commit it.
+DokiCode.lnk

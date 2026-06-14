@@ -57,11 +57,16 @@ public sealed class SeverityToBrushConverter : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
 }
 
-// service group -> 3px accent brush
+// service group / active GPU group -> accent brush. Three-way so an IDLE meter (group "none")
+// does NOT fill with the reserved emitting cyan — idle gets a structural grey.
 public sealed class GroupToAccentConverter : IValueConverter
 {
-    public object Convert(object? value, Type t, object? p, CultureInfo c)
-        => (value as string) == "media" ? Ink.Amber : Ink.Teal;
+    public object Convert(object? value, Type t, object? p, CultureInfo c) => (value as string) switch
+    {
+        "media" => Ink.Amber,   // MEDIA = etched gold
+        "llm" => Ink.Teal,      // LLM live = the emitting cyan
+        _ => Ink.Dim,           // none/idle = structural grey, never the "live" cyan
+    };
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
 }
 

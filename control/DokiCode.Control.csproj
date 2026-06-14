@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- let the test project exercise the updater's internal swap/rollback path -->
+    <InternalsVisibleTo Include="DokiCode.Control.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- native splash: shown by unmanaged code before JIT/extraction, so a self-contained
          single-file launch gets instant feedback; it cross-fades into the animated BootWindow -->
     <SplashScreen Include="assets\splash.png" />

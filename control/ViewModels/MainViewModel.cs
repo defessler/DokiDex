@@ -32,6 +32,15 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _llmActive = true;
     [ObservableProperty] private bool _mediaActive;
 
+    // ---- the control panel's own auto-updater (Services/Updater.cs -> github releases) ----
+    [ObservableProperty] private string _appVersion = Updater.RunningVersion();
+    [ObservableProperty] private bool _updateAvailable;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(UpdateHasMessage))] private string _updateText = "";
+    [ObservableProperty] private bool _updateBusy;
+    [ObservableProperty] private double _updateProgress;
+    private string? _updateTag;
+    public bool UpdateHasMessage => !string.IsNullOrEmpty(UpdateText);
+
     // VM asks the View to confirm a GPU-evicting switch.
     public event Action<ConfirmInfo>? ConfirmRequested;
 
@@ -43,6 +52,7 @@ public partial class MainViewModel : ObservableObject
     {
         _cts = new CancellationTokenSource();
         _ = PollLoop(_cts.Token);
+        _ = CheckSelfUpdate();   // best-effort, once per launch
     }
 
     public void Shutdown()
@@ -182,6 +192,50 @@ public partial class MainViewModel : ObservableObject
                 if (_byName.TryGetValue(info.Service, out var vm)) { vm.Version = info.Version; vm.Update = info.Update; }
             }
             StatusText = infos.Count > 0 ? $"updates checked {DateTime.Now:HH:mm:ss}" : "update check returned nothing (git/gh unavailable?)";
+        });
+    }
+
+    // ---- self-update: check this panel's own GitHub releases, download + swap + relaunch ----
+    // Self-update only makes sense for a real published apphost exe — never under `dotnet run`, where
+    // Environment.ProcessPath is the SHARED dotnet host (swapping it would corrupt the SDK).
+    private static bool CanSelfUpdate()
+    {
+        var p = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(p)) return false;
+        return !System.IO.Path.GetFileNameWithoutExtension(p).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task CheckSelfUpdate()
+    {
+        if (!CanSelfUpdate()) return;
+        try
+        {
+            var info = await Updater.CheckForUpdateAsync().ConfigureAwait(false);
+            if (info == null) return;
+            _ui.Invoke(() => { _updateTag = info.Tag; UpdateAvailable = true; UpdateText = $"panel update available · {info.Tag}"; });
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    private async Task UpdateAndRestart()
+    {
+        if (_updateTag == null || UpdateBusy || !CanSelfUpdate()) return;
+        _ui.Invoke(() => { UpdateBusy = true; UpdateProgress = 0; UpdateText = $"downloading {_updateTag}…"; });
+        var prog = new Progress<double>(p => _ui.Invoke(() => UpdateProgress = p));
+        var ok = await Updater.DownloadUpdateAsync(_updateTag, prog).ConfigureAwait(false);
+        if (!ok) { _ui.Invoke(() => { UpdateBusy = false; UpdateText = "update download failed"; }); return; }
+
+        // Swap OFF the UI thread: the verified copy is tens of MB and crosses volumes (exe on the repo
+        // drive, staging under %LocalAppData%), so doing it on the dispatcher would freeze the window.
+        var exe = Environment.ProcessPath;
+        var relaunch = exe != null ? await Task.Run(() => Updater.ApplyInPlaceNow(exe)).ConfigureAwait(false) : null;
+        _ui.Invoke(() =>
+        {
+            if (relaunch == null) { UpdateBusy = false; UpdateText = "update apply failed"; return; }
+            UpdateText = "restarting…";
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(relaunch) { UseShellExecute = true }); } catch { }
+            System.Windows.Application.Current.Shutdown();
         });
     }
 }

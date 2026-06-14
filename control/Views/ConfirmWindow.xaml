@@ -38,7 +38,7 @@
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
         <Button Content="Cancel" Style="{StaticResource BtnGhost}" Padding="18,7" IsCancel="True" Click="OnCancel"/>
         <Button x:Name="ConfirmBtn" Content="Switch" Style="{StaticResource Btn}" Background="{StaticResource AmberBrush}"
-                Foreground="#FF1E1E1E" Padding="18,7" Margin="8,0,0,0" Click="OnConfirm"/>
+                Foreground="#FF0A0E14" Padding="18,7" Margin="8,0,0,0" Click="OnConfirm"/>
       </StackPanel>
     </StackPanel>
   </Border>

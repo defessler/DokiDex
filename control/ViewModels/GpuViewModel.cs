@@ -22,6 +22,7 @@ public partial class GpuViewModel : ObservableObject
     public double UsedPercent => TotalMB > 0 ? Math.Round(100.0 * UsedMB / TotalMB) : 0;
     public bool LowHeadroom => Available && FreeGb < 2.0;
     public bool HotTemp => Available && Temp >= 80;
+    public bool Warn => LowHeadroom || HotTemp;   // either trouble signal -> the SubLine goes amber
 
     public string Headline => Available
         ? $"{UsedGb:0.0} / {TotalGb:0.0} GB  ·  {UsedPercent:0}%"
@@ -47,7 +48,7 @@ public partial class GpuViewModel : ObservableObject
     private void NotifyComputed()
     {
         OnPropertyChanged(nameof(UsedGb)); OnPropertyChanged(nameof(TotalGb)); OnPropertyChanged(nameof(FreeGb));
-        OnPropertyChanged(nameof(UsedPercent)); OnPropertyChanged(nameof(LowHeadroom)); OnPropertyChanged(nameof(HotTemp));
+        OnPropertyChanged(nameof(UsedPercent)); OnPropertyChanged(nameof(LowHeadroom)); OnPropertyChanged(nameof(HotTemp)); OnPropertyChanged(nameof(Warn));
         OnPropertyChanged(nameof(Headline)); OnPropertyChanged(nameof(SubLine)); OnPropertyChanged(nameof(GroupLabel));
     }
 }

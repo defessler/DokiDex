@@ -39,7 +39,7 @@
                          Foreground="{Binding Gpu.ActiveGroup, Converter={StaticResource GroupAccent}}"/>
           </Border>
           <TextBlock Text="{Binding Gpu.Headline}" Style="{StaticResource Mono}" FontSize="13" FontWeight="SemiBold" Margin="0,6,0,0"/>
-          <TextBlock Text="{Binding Gpu.SubLine}" Foreground="{Binding Gpu.LowHeadroom, Converter={StaticResource WarnBrush}}"
+          <TextBlock Text="{Binding Gpu.SubLine}" Foreground="{Binding Gpu.Warn, Converter={StaticResource WarnBrush}}"
                      Style="{StaticResource Mono}" FontSize="11" Margin="0,2,0,0"/>
         </StackPanel>
 
@@ -59,6 +59,24 @@
                   ToolTip="Full-stack smoke test (opens a console)."/>
           <Button Content="⏻  Stop All" Style="{StaticResource NavBtn}" Foreground="{StaticResource DangerBrightBrush}"
                   Command="{Binding StopAllCommand}" ToolTip="Stop every service and free the GPU."/>
+
+          <!-- panel version + its own auto-updater (separate from the SwarmUI/llama-swap check above) -->
+          <Border Margin="0,12,0,0" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0" Padding="2,8,0,0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}" FontSize="10.5">
+                <Run Text="panel "/><Run Text="{Binding AppVersion}"/>
+              </TextBlock>
+              <Button Content="◆  Update &amp; restart" Style="{StaticResource NavBtn}" Margin="0,4,0,0" FontSize="12"
+                      Foreground="{StaticResource TealBrush}" Command="{Binding UpdateAndRestartCommand}"
+                      Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolVis}}"
+                      ToolTip="{Binding UpdateText}"/>
+              <TextBlock Text="{Binding UpdateText}" Style="{StaticResource Mono}" FontSize="10" Foreground="{StaticResource TealBrush}"
+                         Margin="2,3,0,0" TextWrapping="Wrap" Visibility="{Binding UpdateHasMessage, Converter={StaticResource BoolVis}}"/>
+              <ProgressBar Height="3" Margin="2,4,0,0" Minimum="0" Maximum="100" Value="{Binding UpdateProgress}"
+                           Background="{StaticResource BgBrush}" Foreground="{StaticResource TealBrush}" BorderThickness="0"
+                           Visibility="{Binding UpdateBusy, Converter={StaticResource BoolVis}}"/>
+            </StackPanel>
+          </Border>
         </StackPanel>
 
         <Grid/>

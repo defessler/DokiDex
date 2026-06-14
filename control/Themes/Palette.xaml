@@ -82,7 +82,7 @@
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="bd" Property="BorderBrush" Value="#B0FFFFFF"/>
+              <Setter TargetName="bd" Property="BorderBrush" Value="#9035E0F0"/>   <!-- cyan hover signal -->
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
               <Setter TargetName="bd" Property="Opacity" Value="0.75"/>
@@ -102,13 +102,13 @@
     <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
   </Style>
   <Style x:Key="BtnGhost" TargetType="Button" BasedOn="{StaticResource Btn}">
-    <Setter Property="Background" Value="#FF2D2D30"/>
+    <Setter Property="Background" Value="{StaticResource Surface2Brush}"/>
     <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
   </Style>
 
   <!-- small square icon button for card actions -->
   <Style x:Key="IconBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
-    <Setter Property="Background" Value="#FF2D2D30"/>
+    <Setter Property="Background" Value="{StaticResource Surface2Brush}"/>
     <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
     <Setter Property="Padding" Value="8,4"/>
     <Setter Property="FontSize" Value="12"/>
@@ -117,7 +117,7 @@
 
   <!-- segmented mode button: accent border when its mode is active -->
   <Style x:Key="ModeBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
-    <Setter Property="Background" Value="#FF2D2D30"/>
+    <Setter Property="Background" Value="{StaticResource Surface2Brush}"/>
     <Setter Property="Padding" Value="14,8"/>
     <Setter Property="MinWidth" Value="110"/>
   </Style>

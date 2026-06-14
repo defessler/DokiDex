@@ -1,0 +1,61 @@
+name: release
+
+# Build the self-contained single-file Windows panel and publish a GitHub release whenever a
+# version tag is pushed:   git tag v0.1.0 && git push origin v0.1.0
+# The in-app Updater (control/Services/Updater.cs) checks these releases and swaps the exe in place.
+# NOTE: the exe is the auto-update payload and must live INSIDE a cloned DokiCode repo (the panel
+# shells doki.ps1 and walks up to find it); running it standalone elsewhere is unsupported.
+# workflow_dispatch builds/validates only — publishing is gated to tag pushes below.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}   # also runnable manually from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish single-file self-contained exe
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag.StartsWith('v')) { $tag = 'v0.0.0-dev' }   # workflow_dispatch has no tag
+          $ver = $tag.TrimStart('v').Split('-')[0]                 # embed X.Y.Z so the updater can compare
+          if ($ver -notmatch '^\d+(\.\d+){0,2}$') { $ver = '0.0.0' }
+          dotnet publish control/DokiCode.Control.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=$ver -o publish
+          if (-not (Test-Path publish/DokiCode.Control.exe)) { throw 'publish produced no exe' }
+          Copy-Item publish/DokiCode.Control.exe "DokiCode-$tag-win-x64.exe"
+          Write-Host "packaged DokiCode-$tag-win-x64.exe ($([math]::Round((Get-Item "DokiCode-$tag-win-x64.exe").Length/1MB,1)) MB)"
+
+      # Optional Authenticode signing — only runs if a CODESIGN_PFX_BASE64 secret is set.
+      - name: Sign (optional)
+        if: ${{ env.CODESIGN_PFX_BASE64 != '' }}
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cs.pfx", [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+          & "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" sign `
+            /f "$env:RUNNER_TEMP\cs.pfx" /p $env:CODESIGN_PFX_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 (Get-Item DokiCode-*-win-x64.exe).FullName
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')   # only publish on a real v* tag, not manual dispatch
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DokiCode-*-win-x64.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
