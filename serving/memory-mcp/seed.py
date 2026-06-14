@@ -27,7 +27,10 @@ FACTS = [
 
 def main():
     c = memory_db._conn()  # ensures schema + FTS triggers exist
-    c.execute("DELETE FROM memories WHERE tags LIKE '%seed%'")  # idempotent refresh
+    # Idempotent refresh: drop only PRIOR seed rows. Match the exact 'seed' tag TOKEN (wrap the
+    # comma-list and look for ',seed,') — a bare LIKE '%seed%' would also nuke a user's own note
+    # tagged 'seedling' or 'seed-money'.
+    c.execute("DELETE FROM memories WHERE (',' || tags || ',') LIKE '%,seed,%'")
     c.commit()
     c.close()
     for content, tags in FACTS:

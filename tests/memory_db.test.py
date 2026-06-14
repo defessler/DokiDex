@@ -63,6 +63,18 @@ try:
     check(all(m["id"] != a for m in memory_db.recent(10)), "delete removes the row")
     check(all(m["id"] != a for m in memory_db.search("Blackwell")), "delete keeps the FTS index consistent")
 
+    # --- seed.py: idempotent refresh that matches the exact 'seed' tag token (not a substring) ---
+    import seed  # noqa: E402 — same temp MEMORY_DB; module import has no side effects
+    trap1 = memory_db.save("seedlings need watering", "garden,seedling")   # substring traps a naive
+    trap2 = memory_db.save("angel round closed", "startup,seed-money")     # '%seed%' delete would nuke
+    seed.main()
+    seed.main()  # run twice — must not duplicate
+    allrows = memory_db.recent(1000)
+    seeded = [m for m in allrows if "seed" in [t.strip() for t in (m["tags"] or "").split(",")]]
+    check(len(seeded) == len(seed.FACTS), f"seed is idempotent: exactly {len(seed.FACTS)} seed rows after two runs (got {len(seeded)})")
+    ids = {m["id"] for m in allrows}
+    check(trap1 in ids and trap2 in ids, "re-seed preserves user notes tagged 'seedling'/'seed-money' (exact-token delete)")
+
     print(f"  (FTS5 active on this interpreter: {memory_db._HAS_FTS})")
 finally:
     shutil.rmtree(_work, ignore_errors=True)
