@@ -54,6 +54,8 @@ if (-not (Test-Path (Join-Path $root "stt\.venv\Scripts\python.exe"))) {
 Write-Host "[verify] memory MCP ..."
 if (-not (Test-Path (Join-Path $root "serving\memory-mcp\memory_db.py"))) {
     $results["memory MCP"] = "SKIP  (not present)"
+} elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    $results["memory MCP"] = "SKIP  (python not found)"   # minimal chat/code-only install
 } else {
     try {
         $env:MEMORY_DB = Join-Path $env:TEMP "doki_mem_verify.db"
@@ -234,13 +236,14 @@ Doki up agent
 
 Write-Host ""
 Write-Host "=== Verify results ===" -ForegroundColor Cyan
-$pass = 0; $fail = 0
+$pass = 0; $fail = 0; $skip = 0
 foreach ($k in $results.Keys) {
     $v = $results[$k]
     $color = if ($v -like "PASS*") { "Green" } elseif ($v -like "SKIP*") { "DarkGray" } else { "Red" }
-    if ($v -like "PASS*") { $pass++ } elseif ($v -notlike "SKIP*") { $fail++ }
+    if ($v -like "PASS*") { $pass++ } elseif ($v -like "SKIP*") { $skip++ } else { $fail++ }
     Write-Host ("  {0,-24} {1}" -f $k, $v) -ForegroundColor $color
 }
 Write-Host ""
-Write-Host "$pass passed, $fail failed (of $($results.Count) checks)" -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Yellow" })
+$summary = "$pass passed, $fail failed" + $(if ($skip) { ", $skip skipped" } else { "" }) + " (of $($results.Count) checks)"
+Write-Host $summary -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Yellow" })
 exit $(if ($fail -eq 0) { 0 } else { 1 })
