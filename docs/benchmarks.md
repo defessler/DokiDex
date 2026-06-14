@@ -87,3 +87,38 @@ Resolves the Phase-1 "decide in phase 5" note: the **coder-fast-lite (64k ctx)**
 The final "see completions appear inline in the editor" step is the user's to eyeball; the backend (server + extension + config + endpoint) is verified end-to-end via `/infill`.
 
 **All phases (0–5) complete and verified — 2026-06-12.**
+
+## Phase 6 — media + speech + memory (2026-06-14)
+
+Same RTX 5090 / 32 GB box, all fully local. Media times are **per gen including the model
+load/swap** — the realistic cost when switching capabilities (the 32 GB card runs one model at a
+time, so each switch reloads). The *first* gen after `doki up media` also pays SwarmUI's ~30 s
+cold-start; steady-state (model resident) is faster — note how the warmer consecutive gens drop.
+
+### Speech + memory (agent mode — coexists with the coder)
+
+| Capability | Measurement | Notes |
+|---|---|---|
+| **TTS** — Chatterbox `:8004` | **4.4 s** for a 9-word sentence | ~4 GB VRAM; rides alongside coder-fast |
+| **STT** — Parakeet (onnx-asr) `:8005` | **5.8 s** to transcribe a ~3 s clip | CPU EP (no VRAM) |
+| **Memory search** — sqlite FTS5 | **< 5 ms** | + python startup if shelled |
+
+### Image / video / audio (media mode)
+
+| Capability | Settings | Time (incl. load) |
+|---|---|---|
+| **Image** — Z-Image Turbo | 1024×1024, 8 steps | 48.3 s¹ |
+| **Video** — Wan 2.2 TI2V-5B | 832×480, 49 frames, 20 steps | 26.0 s |
+| **Image-to-video** — Wan 2.2 5B | 832×480, 25 frames (warm 5B) | 20.7 s |
+| **Fast video** — LTXV-2b distilled | 768×512, 97 frames, 8 steps | **10.6 s** |
+| **Music** — ACE-Step 1.5 turbo | 10 s instrumental | 12.0 s |
+| **Upscale** — 4×-UltraSharp | 512 → 1024 (incl. base gen) | 11.8 s |
+| **Image-edit** — Qwen-Image-Edit-2511 | 512×512, 20 steps | 41.5 s² |
+
+¹ first gen after `up media` — includes SwarmUI's ~30 s cold-start + the Z-Image load; steady-state
+Z-Image Turbo is ~3–5 s. ² includes the ~20 GB Qwen model load.
+
+**Takeaways:** LTXV is the speed champ (97 frames in ~10 s — near-real-time class). Wan 2.2 5B is
+~26 s for a ~2 s 480p clip at full quality. The 32 GB single-model constraint means switching
+*capabilities* costs a model swap; consecutive gens within one model are much faster. All
+uncensored, all local. (FIM autocomplete is measured under coexist mode — see Phase 5.)
