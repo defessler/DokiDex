@@ -76,15 +76,28 @@ public sealed class DokiService
     private static async Task<string> CaptureAsync(string[] args, CancellationToken ct)
     {
         var psi = NewPsi(args, capture: true);
+        Process? p = null;
         try
         {
-            using var p = Process.Start(psi);
+            p = Process.Start(psi);
             if (p == null) return "";
+            // Drain BOTH streams. stderr is redirected, so leaving it unread would let a large
+            // stderr write fill the OS pipe buffer, block the child, and deadlock WaitForExit —
+            // hanging the status poll. The 30s cap guards against an otherwise-wedged pwsh.
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
             var outTask = p.StandardOutput.ReadToEndAsync();
-            await p.WaitForExitAsync(ct).ConfigureAwait(false);
-            return await outTask.ConfigureAwait(false);
+            var errTask = p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+            await Task.WhenAll(outTask, errTask).ConfigureAwait(false);
+            return outTask.Result;
         }
-        catch { return ""; }
+        catch
+        {
+            try { if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { }
+            return "";
+        }
+        finally { p?.Dispose(); }
     }
 
     private static ProcessStartInfo NewPsi(string[] args, bool capture)
