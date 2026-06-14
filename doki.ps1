@@ -248,6 +248,34 @@ function Doctor {
     DL "control panel" $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe")) { "ok" } else { "warn" }) $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe")) { "built" } else { "not built — dotnet build control\DokiCode.Control.csproj -c Release" })
     Write-Host ""
 }
+function TailLogs($name) {
+    # Each service's stdout and stderr are redirected to SEPARATE files at launch (.log / .log.err).
+    # Several servers (llama-server for fim/prompt-rewriter, uvicorn for tts/stt) log almost entirely
+    # to STDERR, so following only .log shows an empty file — follow BOTH live, newest bytes from each.
+    $files = @((LogFile $name), "$(LogFile $name).err") | Where-Object { Test-Path $_ }
+    if (-not $files) { Write-Host "no log for '$name' yet (start it with: .\doki.ps1 up)"; return }
+    Write-Host "== tailing $($files.Count) stream(s) for '$name'  (Ctrl+C to stop) ==" -ForegroundColor DarkGray
+    foreach ($f in $files) { Get-Content $f -Tail 20 -ErrorAction SilentlyContinue }
+    $pos = @{}; foreach ($f in $files) { $pos[$f] = (Get-Item $f).Length }
+    while ($true) {
+        Start-Sleep -Milliseconds 700
+        foreach ($f in $files) {
+            try {
+                $len = (Get-Item $f).Length
+                if ($len -lt $pos[$f]) { $pos[$f] = 0 }   # truncated/rotated -> re-read from start
+                if ($len -gt $pos[$f]) {
+                    $fs = [System.IO.File]::Open($f, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    try {
+                        $fs.Seek($pos[$f], [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $chunk = (New-Object System.IO.StreamReader($fs)).ReadToEnd()
+                    } finally { $fs.Dispose() }
+                    if ($chunk) { Write-Host -NoNewline $chunk }
+                    $pos[$f] = $len
+                }
+            } catch {}
+        }
+    }
+}
 function LaunchPanel {
     $exe = Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe"
     $proj = Join-Path $root "control\DokiCode.Control.csproj"
@@ -266,9 +294,9 @@ switch ($Command) {
     "doctor"  { Doctor }
     "status"  { if ($Arg -eq "json" -or $Arg -eq "--json") { StatusJson } else { ShowStatus } }
     "logs" {
-        if (-not $Arg) { throw "usage: .\doki.ps1 logs <llama-swap|fim|media>" }
-        $l = LogFile $Arg
-        if (Test-Path $l) { Get-Content $l -Tail 40 -Wait } else { Write-Host "no log for '$Arg' yet" }
+        if (-not $Arg) { throw "usage: .\doki.ps1 logs <$($Services.Keys -join '|')>" }
+        if (-not $Services.Contains($Arg)) { throw "unknown service '$Arg' — one of: $($Services.Keys -join ', ')" }
+        TailLogs $Arg
     }
     "verify" { & (Join-Path $root "verify.ps1") }
     "test" {
