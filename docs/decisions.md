@@ -313,3 +313,36 @@ built + **live-verified end-to-end (`doki verify` 13/13)**. Specs: `docs/control
   module-level `model()` loader → aliased it. Verified a TTS→STT round-trip.
 - **VAE correction:** the Wan 2.2 5B uses `wan2.2_vae` (not `wan_2.1_vae` — that's the 1.3B floor's);
   `setup.ps1` comment fixed.
+
+## 2026-06-14 — Installer + control-plane hardening (ultracode audit → fixes → regression tests)
+
+An adversarial multi-agent code audit (24 agents) themed *"trust real readiness, not proxy
+signals"* found **4 real bugs, all in `setup.ps1`'s fresh-install / failure paths**. Fixed all four,
+then scaffolded the project's first PowerShell test layer so they can't regress. Net: **81 unit
+assertions** across `doki test` (16 installer-helper + 41 status-json contract + 24 panel xUnit).
+
+- **PATH refresh (HIGH):** `Ensure-WinGet` never re-read PATH after a winget install, so a freshly
+  installed python/git/dotnet wasn't found in the same run → `CommandNotFoundException` aborted setup
+  under `$ErrorActionPreference='Stop'`. Added a `Sync-Path` helper (machine+user registry → `$env:Path`)
+  invoked after every real install.
+- **Guarded `dotnet` probe (HIGH):** `(dotnet --list-sdks 2>$null) -match '8\.0\.'` *threw* when dotnet
+  was absent — the exact case it handled — because `2>$null` can't suppress a PowerShell
+  CommandNotFoundException (line-20's `$PSNativeCommandUseErrorActionPreference=$false` only governs
+  native exit codes). Now `Get-Command dotnet`-gated.
+- **Verified-readiness venv gate (MED):** TTS/STT venvs gated on `.venv\Scripts\python.exe`, which
+  `python -m venv` creates *first* — a failed pip left a broken venv that re-runs skipped as "present".
+  Now gate on a `.deps-ok` sentinel written only after all deps succeed, with a `Pip` helper that fails
+  loud on `$LASTEXITCODE` (line 20 otherwise mutes pip failures). Existing venvs were sentinel-backfilled.
+- **Atomic model download (MED):** `curl -o $dest` left truncated files on interruption that the
+  existence-only gate then trusted. Now downloads to `$dest.part` and `Move-Item`s on success.
+  **Caught while writing the test:** the first draft used `-C - --remove-on-error` together — curl
+  rejects that combo (*"mutually exclusive"*, exit 2), which would have failed **every** download.
+  Dropped `--remove-on-error` (our own `.part` cleanup replaces it); kept `-C -` for resume. The test
+  existed before the fix shipped, so the bug never reached a real run — the case for testing installers.
+- **Status-json contract test:** the WPF panel parses `doki status json`; nothing guarded that seam.
+  Added a test that runs the real command and asserts the schema + cross-consistency (every panel field
+  present per service, groups ∈ {llm, media}, every profile names only real services). Catches the
+  config-drift class of bug (profile typo, renamed/dropped field) that would break the panel silently.
+- **Approach:** both PowerShell suites pull the *real* functions out of `setup.ps1`/`doki.ps1` by AST
+  (by name) rather than duplicating logic — they exercise committed source and can't silently drift,
+  and never run the install/switch bodies (no side effects).
