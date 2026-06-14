@@ -124,6 +124,25 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\wan2.2_ti2v_5B_fp16.s
     } catch { $results["image-to-video (5B)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 6c. Qwen-Image-Edit — instruction-based image edit (SwarmUI-native "Qwen Image Edit Plus").
+#     Live-verified: model + init image + an instruction prompt edits the image (red->green apple).
+Write-Host "[verify] image edit (Qwen-Image-Edit) ..."
+if (-not (Test-Path (Join-Path $swModels "diffusion_models\qwen_image_edit_2511_fp8mixed.safetensors"))) {
+    $results["image edit (Qwen)"] = "SKIP  (not installed; -Models full)"
+} else {
+    try {
+        $sidQ = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $bb = @{ session_id = $sidQ; images = 1; prompt = "a single red apple on a plain white background"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 512; height = 512 } | ConvertTo-Json
+        $bi = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 200 -Body $bb
+        $tmpQ = Join-Path $env:TEMP "doki_qwen_base.png"
+        Invoke-WebRequest "$base/$(@($bi.images)[0])" -OutFile $tmpQ -UseBasicParsing -TimeoutSec 60
+        $qb64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($tmpQ))
+        $eb = @{ session_id = $sidQ; images = 1; prompt = "change the apple to a green apple"; model = "qwen_image_edit_2511_fp8mixed.safetensors"; initimage = $qb64; steps = 20; cfgscale = 2.5; width = 512; height = 512 } | ConvertTo-Json
+        $ei = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 400 -Body $eb
+        $results["image edit (Qwen)"] = if ($ei.images) { "PASS  $(@($ei.images)[0])" } else { "FAIL  no edited image" }
+    } catch { $results["image edit (Qwen)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 7. Wan -> Foley (video WITH synced audio) via the WanFoley custom workflow
 Write-Host "[verify] Wan->Foley audio ..."
 $foleyModel = Join-Path $root "media\SwarmUI\dlbackend\comfy\ComfyUI\models\foley\hunyuanvideo_foley.safetensors"

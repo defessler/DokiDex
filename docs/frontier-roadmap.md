@@ -10,8 +10,8 @@ gap-analysis workflow; every item checked against the installed repo.
 | # | Gap closed | How | Effort | Downloads |
 |---|---|---|---|---|
 | 1 | **Image-to-Video** (animate a still) ✅ **DONE** | SwarmUI's **native** `videomodel` pipeline animates the already-installed Wan 2.2 TI2V-5B — **no custom workflow needed** (live testing corrected the original "fork WanFoley.json" plan). Also fixed the wrong VAE comment in `setup.ps1`. | **S** | **none** |
-| 2 | **Music / song generation** | ACE-Step 1.5 — nodes already ship in `comfy_extras/nodes_ace.py`; add an `AceStep.json` custom workflow + model download. | M | ~3 GB |
-| 3 | **Precise image editing** (instruction edits, inpaint) | Qwen-Image-Edit-2511 — SwarmUI-native; inpaint is free once the model is present. | M | ~12–20 GB |
+| 2 | **Music / song generation** ⏳ **wired (native, downloading)** | ACE-Step **1.5** is **SwarmUI-native** (`IsAceStep15()` + audio VAE; the qwen ace15 text-encoders auto-download) — no custom workflow needed. `setup.ps1` pulls the XL base (quality) + turbo (fast) + VAE; live test pending the download. | M | ~15 GB |
+| 3 | **Precise image editing** (instruction edits, inpaint) ✅ **DONE + live-verified** | Qwen-Image-Edit-2511 (`fp8mixed`, class `qwen-image-edit-plus`) — SwarmUI-native: `model` + init image + an instruction prompt edits the image (verified: red→green apple, composition preserved). Wired in `setup.ps1`; guarded `verify.ps1` smoke. | M | ~30 GB |
 | 4 | **Upscaling / detail** ✅ **wired** | 4x-UltraSharp added to `setup.ps1 -Models full` → `Models/upscale_models`; SwarmUI exposes it as the Upscale / Refiner-Upscale step. | S | ~0.07 GB |
 | 5 | **Speech-to-text** (the missing input modality) ✅ **scaffolded** | Parakeet (NVIDIA) via `onnx-asr` FastAPI on `:8005` — `serving/stt-server.py` + `start-stt.ps1`, registered in doki (`group=llm`, agent profile, CPU EP first), `setup.ps1 -Stt` installs it, guarded `verify.ps1` smoke (TTS→STT round-trip). Installable; not yet live-tested. | M | ~2 GB |
 

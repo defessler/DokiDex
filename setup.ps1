@@ -244,6 +244,14 @@ if ($Models -eq "full") {
     Get-Model "$qbase/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"        (Join-Path $te   "qwen_2.5_vl_7b_fp8_scaled.safetensors")
     Get-Model "$qbase/vae/qwen_image_vae.safetensors"                             (Join-Path $vae  "qwen_image_vae.safetensors")
 
+    # Music / song generation: ACE-Step 1.5 — SwarmUI-NATIVE audio model (class AceStep15).
+    # XL base = max quality, turbo = fast preset. The qwen ace15 text-encoders auto-download
+    # on first gen; the ace 1.5 VAE is provided here. (ACE-Step 1.5, NOT the v1 all-in-one.)
+    $ace = "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files"
+    Get-Model "$ace/diffusion_models/acestep_v1.5_xl_base_bf16.safetensors" (Join-Path $diff "acestep_v1.5_xl_base_bf16.safetensors")
+    Get-Model "$ace/diffusion_models/acestep_v1.5_turbo.safetensors"        (Join-Path $diff "acestep_v1.5_turbo.safetensors")
+    Get-Model "$ace/vae/ace_1.5_vae.safetensors"                            (Join-Path $vae  "ace_1.5_vae.safetensors")
+
     # Audio (V2A): HunyuanVideo-Foley — adds synced sound to a silent clip (muxed by the
     # WanFoley custom workflow). fp16 main for max quality. CLAP + SigLIP2 encoders auto-
     # download on first run. License: Tencent Hunyuan Community (local/personal use OK).
