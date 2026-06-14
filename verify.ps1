@@ -92,6 +92,22 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\wan2.2_ti2v_5B_fp16.s
     } catch { $results["Wan 2.2 video (5B)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 6b. Image-to-Video — animate a still into a clip with the Wan 2.2 5B via SwarmUI's
+#     NATIVE videomodel pipeline (model = the first frame, videomodel = the 5B animator).
+#     Live-verified: needs videosteps/videocfg/videoresolution for the I2V step to run.
+Write-Host "[verify] image-to-video (Wan 2.2 5B) ..."
+if (-not (Test-Path (Join-Path $swModels "diffusion_models\wan2.2_ti2v_5B_fp16.safetensors"))) {
+    $results["image-to-video (5B)"] = "SKIP  (not installed; -Models full)"
+} else {
+    try {
+        $sidI = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
+        $body = @{ session_id = $sidI; images = 1; prompt = "a red fox in fresh snow, gentle natural motion"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = "wan2.2_ti2v_5B_fp16.safetensors"; videoframes = 25; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = "Image"; videoformat = "h264-mp4" } | ConvertTo-Json
+        $iv = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 400 -Body $body
+        $mp4 = @($iv.images) | Where-Object { $_ -match '\.mp4$' }
+        $results["image-to-video (5B)"] = if ($mp4) { "PASS  $(@($mp4)[0])" } else { "FAIL  no mp4 in output" }
+    } catch { $results["image-to-video (5B)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 7. Wan -> Foley (video WITH synced audio) via the WanFoley custom workflow
 Write-Host "[verify] Wan->Foley audio ..."
 $foleyModel = Join-Path $root "media\SwarmUI\dlbackend\comfy\ComfyUI\models\foley\hunyuanvideo_foley.safetensors"

@@ -9,14 +9,36 @@ gap-analysis workflow; every item checked against the installed repo.
 
 | # | Gap closed | How | Effort | Downloads |
 |---|---|---|---|---|
-| 1 | **Image-to-Video** (animate a still) | Wire the *already-installed* Wan 2.2 TI2V-5B via `Wan22ImageToVideoLatent.start_image`. Fork `media-assets/WanFoley.json` → `WanI2V.json`: add a `LoadImage` feeding node 5's `start_image`; default 1280×704, length 121, fps 24. Fix the wrong VAE comment in `setup.ps1`. | **S** | **none** |
+| 1 | **Image-to-Video** (animate a still) ✅ **DONE** | SwarmUI's **native** `videomodel` pipeline animates the already-installed Wan 2.2 TI2V-5B — **no custom workflow needed** (live testing corrected the original "fork WanFoley.json" plan). Also fixed the wrong VAE comment in `setup.ps1`. | **S** | **none** |
 | 2 | **Music / song generation** | ACE-Step 1.5 — nodes already ship in `comfy_extras/nodes_ace.py`; add an `AceStep.json` custom workflow + model download. | M | ~3 GB |
 | 3 | **Precise image editing** (instruction edits, inpaint) | Qwen-Image-Edit-2511 — SwarmUI-native; inpaint is free once the model is present. | M | ~12–20 GB |
 | 4 | **Upscaling / detail** | 4x-UltraSharp into `Models/upscale_models` (currently empty); SwarmUI exposes it as a refiner/upscale step. | S | ~0.07 GB |
 | 5 | **Speech-to-text** (the missing input modality) | Parakeet (NVIDIA) via `onnx-asr` in a FastAPI service on `:8005` (`start-stt.ps1`, `group=llm`, CPU EP first then CUDA). Mirrors the TTS service pattern. | M | ~2 GB |
 
-The **lead item is #1 (I2V)** — it is the single highest-value, zero-download capability
-the box is missing, and the model is already on disk.
+The **lead item is #1 (I2V)** — the single highest-value, zero-download capability the box
+was missing, now **shipped + live-verified** (3 real 25-frame mp4s generated).
+
+### I2V recipe (SwarmUI native `videomodel`, live-verified 2026-06-14)
+
+`POST :7801/API/GenerateText2Image`. The **main `model`** makes the first frame; the
+**`videomodel`** (the 5B, class `wan-2_2-ti2v-5b`) animates it. The I2V step only runs when
+`videosteps`/`videocfg`/`videoresolution` are also supplied (the missing piece in the first
+attempt). Output array contains the first-frame PNG **and** the MP4.
+
+```jsonc
+{ "session_id": "...", "images": 1, "prompt": "...",
+  "model": "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors",   // first frame (any image model)
+  "videomodel": "wan2.2_ti2v_5B_fp16.safetensors",        // the animator
+  "videoframes": 25, "videosteps": 20, "videocfg": 3.5,
+  "videofps": 24, "videoresolution": "Image", "videoformat": "h264-mp4" }
+```
+
+To animate an **existing still** instead of a fresh frame, add `"initimage": "<base64>"` +
+`"initimagecreativity": 0` (the still passes through unchanged as frame 1). Why not a custom
+workflow: hand-authored `SwarmInputImage` nodes need editor-generated `custom_params`
+metadata to receive the image, and `SwarmLoadImageB64` + `${initimage}` gets a data-URL that
+its raw `b64decode` corrupts — the native path sidesteps both. Verify smoke added to
+`verify.ps1` (skips clean when the 5B isn't installed).
 
 ## Tier 2 — substantial, single big download each
 

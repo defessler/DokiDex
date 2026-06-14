@@ -193,8 +193,8 @@ if ($Models -eq "full") {
     Get-Model "$w22/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"  (Join-Path $diff "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors")
     Get-Model "$w22/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors"                  (Join-Path $diff "wan2.2_ti2v_5B_fp16.safetensors")    # fast preview; no fp8 exists
     Get-Model "$w22/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"              (Join-Path $te   "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
-    Get-Model "$w22/vae/wan2.2_vae.safetensors"                                        (Join-Path $vae  "wan2.2_vae.safetensors")             # for the 14B T2V/I2V models
-    Get-Model "$w22/vae/wan_2.1_vae.safetensors"                                       (Join-Path $vae  "wan_2.1_vae.safetensors")            # GOTCHA: TI2V-5B needs THIS vae
+    Get-Model "$w22/vae/wan2.2_vae.safetensors"                                        (Join-Path $vae  "wan2.2_vae.safetensors")             # used by the Wan 2.2 5B AND 14B models (WanFoley node 101 loads this)
+    Get-Model "$w22/vae/wan_2.1_vae.safetensors"                                       (Join-Path $vae  "wan_2.1_vae.safetensors")            # for the Wan 2.1 1.3B floor (NOT the 5B — corrected)
 
     # Wan2.2-Lightning 4-step distill LoRAs (HIGH+LOW per model) = the "fast" preset.
     # Source filenames are generic (high_noise_model.safetensors); RENAME on save so they don't collide.
