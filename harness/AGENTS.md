@@ -19,3 +19,13 @@ One sentence: what this codebase is.
 - Make the smallest change that solves the task. Do not refactor unrelated code.
 - Never invent file paths — list the directory if unsure.
 - Follow the existing code style of the file you are editing.
+
+## Memory
+
+A persistent `memory` MCP is available and survives across sessions — use it:
+
+- **Starting a non-trivial task:** `memory_search` the relevant keywords first to recall prior
+  decisions, gotchas, and context for this project.
+- **On a decision, a gotcha, or a non-obvious fact:** `memory_save` it (one fact per note, with
+  comma-separated `tags`) so a future session doesn't relearn it. Don't save what's already
+  obvious from the code or git history.
