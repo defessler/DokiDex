@@ -48,13 +48,22 @@ audio-to-video attention built in), so it's tractable like Qwen/ACE were. **Wan2
 NO registered SwarmUI class** — it would need a custom ComfyUI workflow (harder/uncertain,
 cf. the I2V custom-workflow dead-end).
 
-- **One-pass video+audio** — **LTX-2.3** (SwarmUI-native, audio-driven): joint A/V generation
-  vs the Wan→Foley two-step. The best risk-adjusted Tier-2 pick (native = high success). The
-  next loop target.
-- **Talking-head / lip-sync** — Wan2.2-S2V-14B (speech-to-video). Highest *unique* value
-  (audio-driven avatars) but **not SwarmUI-native** → custom workflow required.
-- **Photoreal restoration upscale** — SUPIR (diffusion upscaler) for the hardest detail
-  recovery; larger/slower than 4x-UltraSharp, used selectively.
+Deeper recon (2026-06-14): the ComfyUI **Wan-S2V nodes DO exist** (`WanSoundImageToVideo` +
+`AudioEncoderLoader` in `comfy_extras/nodes_wan.py`/`nodes_audio_encoder.py`) — but with no
+SwarmUI native class, S2V needs a hand-authored custom workflow, which hits the **same
+ref-image/audio base64-injection blocker** that killed the I2V custom workflow (`${initimage}`→
+data-URL corrupts `SwarmLoadImageB64`; `SwarmInputImage` needs editor-generated `custom_params`).
+So S2V is effectively **blocked pending native SwarmUI support** (don't sink a 14-28 GB download
+into a known dead-end). The LTX-2 *audio* model is a separate newer release (the `Lightricks/
+LTX-Video` repo is the video-only 0.9.x line, up to 0.9.8) — a speculative 14-26 GB pull of
+uncertain lip-sync value.
+
+- **Fast video (tractable):** LTXV-2b-0.9.8-distilled (~6 GB, SwarmUI-native, video-only) is the
+  clean Tier-2 add if a *speed* option below Wan 2.2 is wanted. No injection issue (native).
+- **Talking-head / lip-sync (blocked):** Wan2.2-S2V-14B — highest *unique* value but blocked by
+  the custom-workflow injection limitation above until SwarmUI adds a native S2V class.
+- **One-pass A/V (speculative):** LTX-2 audio model — separate big download, unverified value.
+- **Photoreal restoration upscale:** SUPIR — diffusion upscaler beyond 4x-UltraSharp.
 
 ## Tier 3 — cloud-only (state plainly; do not pretend to match locally)
 

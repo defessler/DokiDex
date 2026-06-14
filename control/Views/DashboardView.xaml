@@ -31,7 +31,28 @@
             <!-- header: dot + name + port -->
             <DockPanel>
               <Ellipse Width="10" Height="10" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,1,9,0"
-                       Fill="{Binding StateKind, Converter={StaticResource StateBrush}}"/>
+                       Fill="{Binding StateKind, Converter={StaticResource StateBrush}}">
+                <Ellipse.Style>
+                  <Style TargetType="Ellipse">
+                    <Style.Triggers>
+                      <!-- running-but-not-healthy = starting/loading: a calm pulse signals "working on it" -->
+                      <DataTrigger Binding="{Binding StateKind}" Value="degraded">
+                        <DataTrigger.EnterActions>
+                          <BeginStoryboard Name="Pulse">
+                            <Storyboard>
+                              <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.3"
+                                               Duration="0:0:0.75" AutoReverse="True" RepeatBehavior="Forever"/>
+                            </Storyboard>
+                          </BeginStoryboard>
+                        </DataTrigger.EnterActions>
+                        <DataTrigger.ExitActions>
+                          <StopStoryboard BeginStoryboardName="Pulse"/>
+                        </DataTrigger.ExitActions>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Ellipse.Style>
+              </Ellipse>
               <TextBlock DockPanel.Dock="Right" Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}"
                          FontSize="12" VerticalAlignment="Center">
                 <Run Text=":"/><Run Text="{Binding Port, Mode=OneWay}"/>
