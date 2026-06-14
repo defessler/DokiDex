@@ -42,7 +42,7 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Models:** ~30B coder MoE fully on GPU (fast daily driver) + ~120B sparse MoE with CPU-offloaded experts (heavy hitter)
 - **Code:** Crush (daily driver, bake-off winner) — OpenCode / Claw Code challengers
 - **Chat:** Chatbox → local endpoint · **Autocomplete:** small FIM model + llama.vscode
-- **Search:** keyless DuckDuckGo MCP
+- **Search + memory:** keyless DuckDuckGo MCP · a local **persistent-memory MCP** (sqlite FTS5) the coder can save facts/decisions to and recall across sessions
 - **Image + video + audio:** SwarmUI (ComfyUI) — Z-Image Turbo/Base + Wan 2.2 (5B) text-to-video **and image-to-video** with synced Foley audio; **music** (ACE-Step 1.5), **instruction image-editing** (Qwen-Image-Edit), **4×-UltraSharp upscaling** — all unfiltered, headless. A 3B prompt-rewriter auto-expands lazy prompts (`<mpprompt:…>`)
 - **Speech (TTS):** Chatterbox on `:8004` — uncensored (watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning; coexists with the coder LLM
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, coexists with the coder

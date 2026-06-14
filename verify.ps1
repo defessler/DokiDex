@@ -49,6 +49,21 @@ if (-not (Test-Path (Join-Path $root "stt\.venv\Scripts\python.exe"))) {
     } catch { $results["speech-to-text (:8005)"] = "FAIL  $($_.Exception.Message)" }
 }
 
+# 1d. memory MCP — persistent project memory (sqlite FTS5). Tests the store/search core
+#      (the MCP stdio wrapper is exercised by Crush; this verifies the underlying capability).
+Write-Host "[verify] memory MCP ..."
+if (-not (Test-Path (Join-Path $root "serving\memory-mcp\memory_db.py"))) {
+    $results["memory MCP"] = "SKIP  (not present)"
+} else {
+    try {
+        $env:MEMORY_DB = Join-Path $env:TEMP "doki_mem_verify.db"
+        $env:MEMPATH = Join-Path $root "serving\memory-mcp"
+        Remove-Item $env:MEMORY_DB -ErrorAction SilentlyContinue
+        $out = python -c "import os,sys; sys.path.insert(0,os.environ['MEMPATH']); import memory_db; memory_db.save('verify probe alpha bravo charlie','test'); r=memory_db.search('bravo'); print('OK' if r and 'alpha bravo' in r[0]['content'] else 'FAIL')" 2>&1 | Select-Object -Last 1
+        $results["memory MCP"] = if ("$out" -match "OK") { "PASS  store+search ok" } else { "FAIL  $out" }
+    } catch { $results["memory MCP"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 2. autocomplete — coexist mode, FIM infill
 Write-Host "[verify] autocomplete ..."
 Doki up coexist

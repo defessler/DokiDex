@@ -26,6 +26,9 @@ tts/
 # Local STT install — onnx-asr venv + Parakeet model cache
 stt/
 
+# Memory MCP runtime database
+serving/memory-mcp/*.db
+
 # Editor/OS noise
 .vscode/
 .idea/
