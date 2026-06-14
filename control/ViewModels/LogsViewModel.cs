@@ -119,7 +119,7 @@ public partial class LogsViewModel : ObservableObject, IDisposable
         catch { return false; }
     }
 
-    private static string Classify(string text, bool isErr)
+    public static string Classify(string text, bool isErr)
     {
         // Colour by CONTENT, not by stream: llama-server (and others) log normally to
         // stderr, so treating stderr as error painted everything red. The "[stderr]"

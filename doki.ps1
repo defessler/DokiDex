@@ -9,7 +9,7 @@
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel")][string]$Command = "status",
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg
 )
 $ErrorActionPreference = "Stop"
@@ -207,4 +207,9 @@ switch ($Command) {
         if (Test-Path $l) { Get-Content $l -Tail 40 -Wait } else { Write-Host "no log for '$Arg' yet" }
     }
     "verify" { & (Join-Path $root "verify.ps1") }
+    "test" {
+        # unit tests for the control panel (no GPU; fast). Live capability smokes are `doki verify`.
+        $proj = Join-Path $root "control\DokiCode.Control.Tests\DokiCode.Control.Tests.csproj"
+        if (Test-Path $proj) { & dotnet test $proj } else { Write-Host "panel test project not present" }
+    }
 }
