@@ -42,13 +42,19 @@ its raw `b64decode` corrupts — the native path sidesteps both. Verify smoke ad
 
 ## Tier 2 — substantial, single big download each
 
-- **Talking-head / lip-sync** — Wan2.2-S2V-14B (speech-to-video). Heavy (14B class), so
-  it runs in the media GPU group like the other big video models; quality bar for
-  audio-driven avatars.
+SwarmUI native-support recon (`T2IModelClassSorter.cs`, 2026-06-14): **LTX-2.3 IS native**
+(`isLtxv23` detects `text_embedding_projection.audio_aggregate_embed.weight` — it has
+audio-to-video attention built in), so it's tractable like Qwen/ACE were. **Wan2.2-S2V has
+NO registered SwarmUI class** — it would need a custom ComfyUI workflow (harder/uncertain,
+cf. the I2V custom-workflow dead-end).
+
+- **One-pass video+audio** — **LTX-2.3** (SwarmUI-native, audio-driven): joint A/V generation
+  vs the Wan→Foley two-step. The best risk-adjusted Tier-2 pick (native = high success). The
+  next loop target.
+- **Talking-head / lip-sync** — Wan2.2-S2V-14B (speech-to-video). Highest *unique* value
+  (audio-driven avatars) but **not SwarmUI-native** → custom workflow required.
 - **Photoreal restoration upscale** — SUPIR (diffusion upscaler) for the hardest detail
-  recovery; larger and slower than 4x-UltraSharp, used selectively.
-- **One-pass video+audio** — LTX-2.3 as an alternative to the Wan→Foley two-step (joint
-  generation rather than V2A post-hoc); evaluate against Wan 2.2 quality before adopting.
+  recovery; larger/slower than 4x-UltraSharp, used selectively.
 
 ## Tier 3 — cloud-only (state plainly; do not pretend to match locally)
 
