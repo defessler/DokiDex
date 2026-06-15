@@ -6,6 +6,7 @@
 # No content filter — transcription is verbatim. Runs in its own isolated venv.
 import os
 import tempfile
+import threading
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -17,13 +18,18 @@ PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"] if os.environ.get(
 
 app = FastAPI(title="DokiCode STT")
 _model = None
+_model_lock = threading.Lock()
 
 
 def model():
+    # Double-checked lock: recognize() runs in Starlette's threadpool, so two concurrent first
+    # requests could otherwise both build a redundant ONNX session during the multi-minute first load.
     global _model
     if _model is None:
-        # downloads the Parakeet ONNX model from HF on first call, then caches it
-        _model = onnx_asr.load_model(MODEL_ID, providers=PROVIDERS)
+        with _model_lock:
+            if _model is None:
+                # downloads the Parakeet ONNX model from HF on first call, then caches it
+                _model = onnx_asr.load_model(MODEL_ID, providers=PROVIDERS)
     return _model
 
 

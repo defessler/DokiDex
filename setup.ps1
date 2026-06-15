@@ -44,6 +44,13 @@ function Pip($py) {
     & $py -m pip @args
     if ($LASTEXITCODE -ne 0) { throw "pip failed (exit $LASTEXITCODE): pip $($args -join ' ')" }
 }
+function Git-Clone($url, $dest) {
+    # Clone and FAIL LOUD, removing a partial dir on failure — a hard kill mid-clone otherwise leaves
+    # a partial checkout the existence-only gates treat as "present" and never retry (same discipline
+    # as the .part-then-Move model downloads). Line 20 mutes native errors, so check $LASTEXITCODE.
+    git clone $url $dest
+    if ($LASTEXITCODE -ne 0) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue; throw "git clone failed (exit $LASTEXITCODE): $url" }
+}
 
 # ---- 1. Preflight ---------------------------------------------------------
 Info "preflight"
@@ -90,7 +97,7 @@ if ($Tts) {
     if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
     Ensure-WinGet "Git.Git" "git"
     $ttsRoot = Join-Path $root "tts\Chatterbox-TTS-Server"
-    if (-not (Test-Path (Join-Path $ttsRoot ".git"))) { Info "cloning Chatterbox-TTS-Server ..."; git clone https://github.com/devnen/Chatterbox-TTS-Server $ttsRoot } else { Ok "Chatterbox-TTS-Server cloned" }
+    if (-not (Test-Path (Join-Path $ttsRoot ".git"))) { Info "cloning Chatterbox-TTS-Server ..."; Git-Clone https://github.com/devnen/Chatterbox-TTS-Server $ttsRoot } else { Ok "Chatterbox-TTS-Server cloned" }
     $tpy = Join-Path $ttsRoot ".venv\Scripts\python.exe"
     $tok = Join-Path $ttsRoot ".venv\.deps-ok"   # sentinel: written only after ALL deps succeed
     if (-not (Test-Path $tok)) {
@@ -150,17 +157,21 @@ Ensure-WinGet "Git.Git" "git"
 
 # 5b. clone SwarmUI
 $swarm = Join-Path $root "media\SwarmUI"
-if (-not (Test-Path (Join-Path $swarm ".git"))) { Info "cloning SwarmUI ..."; git clone https://github.com/mcmonkeyprojects/SwarmUI $swarm } else { Ok "SwarmUI cloned" }
+if (-not (Test-Path (Join-Path $swarm ".git"))) { Info "cloning SwarmUI ..."; Git-Clone https://github.com/mcmonkeyprojects/SwarmUI $swarm } else { Ok "SwarmUI cloned" }
 
 # 5b2. install the MagicPrompt extension (local-LLM prompt enhancement) BEFORE the build so it
 #      compiles in. Adding it forces a rebuild even if SwarmUI was already built.
 $mpExt = Join-Path $swarm "src\Extensions\SwarmUI-MagicPromptExtension"
 $extAdded = $false
-if (-not (Test-Path $mpExt)) { Info "installing MagicPrompt extension ..."; git clone https://github.com/HartsyAI/SwarmUI-MagicPromptExtension $mpExt; $extAdded = $true } else { Ok "MagicPrompt extension present" }
+if (-not (Test-Path $mpExt)) { Info "installing MagicPrompt extension ..."; Git-Clone https://github.com/HartsyAI/SwarmUI-MagicPromptExtension $mpExt; $extAdded = $true } else { Ok "MagicPrompt extension present" }
 
-# 5c. build SwarmUI (also rebuild when a new extension was just added)
+# 5c. build SwarmUI (rebuild when missing, a new extension was added, OR the checkout advanced past
+#     the last build — the last_build sentinel was written but never read, so a `git pull` of SwarmUI
+#     previously kept running a stale binary).
 $swarmExe = Join-Path $swarm "src\bin\live_release\SwarmUI.exe"
-if ((-not (Test-Path $swarmExe)) -or $extAdded) {
+$builtAt = Get-Content (Join-Path $swarm "src\bin\last_build") -ErrorAction SilentlyContinue
+$headAt  = git -C $swarm rev-parse HEAD 2>$null
+if ((-not (Test-Path $swarmExe)) -or $extAdded -or ($headAt -and $headAt -ne $builtAt)) {
     Info "building SwarmUI ..."
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
     dotnet build (Join-Path $swarm "src\SwarmUI.csproj") --configuration Release -o (Join-Path $swarm "src\bin\live_release")
@@ -338,7 +349,7 @@ if ($Models -eq "full") {
     $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
     if (Test-Path $nodes) {
         $foleyNode = Join-Path $nodes "ComfyUI-HunyuanVideo-Foley"
-        if (-not (Test-Path $foleyNode)) { Info "installing HunyuanVideo-Foley node ..."; git clone https://github.com/phazei/ComfyUI-HunyuanVideo-Foley $foleyNode } else { Ok "Foley node present" }
+        if (-not (Test-Path $foleyNode)) { Info "installing HunyuanVideo-Foley node ..."; Git-Clone https://github.com/phazei/ComfyUI-HunyuanVideo-Foley $foleyNode } else { Ok "Foley node present" }
         $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
             ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
         $req = Join-Path $foleyNode "requirements.txt"
