@@ -90,4 +90,28 @@ public class MainViewModelTests
         vm.Apply(Doc(new[] { Svc("llama-swap", "llm", true) }));
         Assert.False(vm.StatusUnavailable);
     }
+
+    // The --design / DOKI_SAMPLE fixture is the panel's headless QA surface: it must paint EVERY card state
+    // (healthy/degraded/crashed/down/notinstalled) across BOTH bands, or a preview/snapshot silently stops
+    // covering a state. Guards SampleData + LoadDesignSample together (incl. the forced-crashed seam).
+    [Fact]
+    public void DesignSample_exercises_the_full_state_vocabulary_across_both_bands()
+    {
+        var vm = Make();
+        vm.LoadDesignSample();
+
+        Assert.NotEmpty(vm.LlmServices);     // DokiCode band
+        Assert.NotEmpty(vm.MediaServices);   // DokiGen band
+
+        var kinds = vm.LlmServices.Concat(vm.MediaServices).Select(s => s.StateKind).ToHashSet();
+        foreach (var expected in new[] { "healthy", "degraded", "crashed", "down", "notinstalled" })
+            Assert.Contains(expected, kinds);
+
+        // the two time-/config-derived states the fixture exists to prove are reachable headlessly
+        Assert.Equal("crashed", vm.LlmServices.Single(s => s.Name == "stt").StateKind);   // forced in LoadDesignSample
+        Assert.Equal("down", vm.LlmServices.Single(s => s.Name == "tts").StateKind);      // installed + stopped
+        Assert.True(vm.LlmServices.Single(s => s.Name == "llama-swap").HasModelSwap);     // >1 configured model -> swap chips
+        Assert.True(vm.Busy);                                                             // fim degraded -> caption sigil works
+        Assert.Equal("design sample — no backend", vm.StatusText);
+    }
 }
