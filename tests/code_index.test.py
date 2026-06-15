@@ -94,6 +94,12 @@ try:
     # the index holds 11-dim stub vectors; a 3-dim query must skip every row, not cosine over a shared prefix
     check(code_index.search_vec([1.0, 2.0, 3.0], k=5) == [], "dimension-mismatched query returns [] (no prefix mis-scoring)")
 
+    # --- code-preference re-rank: code outranks docs/config, implementation outranks its tests ---
+    check(code_index._rank_weight("serving/start-embed.ps1") > code_index._rank_weight("docs/features.md"),
+          "re-rank weights code above docs")
+    check(code_index._rank_weight("src/App.cs") > code_index._rank_weight("src/App.Tests/AppTests.cs"),
+          "re-rank weights an implementation above its tests")
+
     # --- walk_repo: skips weights / build output / vendored + non-source ext ---
     writefile("keep.py", "x = 1\n")
     writefile("models/huge.gguf", "BINARY")

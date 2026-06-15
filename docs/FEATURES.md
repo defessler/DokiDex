@@ -70,6 +70,7 @@ A pure-Python semantic index over the repo's own source, exposed as a `code_sear
 | **CPU embed server** `:8090` | `nomic-embed-text-v1.5` via `llama-server --embedding`, CPU-only → 0 VRAM; in the `agent` / `coexist` profiles. | Started by `doki up`; model auto-fetched (~260 MB) by `setup.ps1`. |
 | **Indexer** | Chunks source into overlapping line-windows, caps/batches each input to the embed token budget (skips a rejected chunk rather than aborting), stores vectors in a disposable `code_index.db`. | `doki index` (re)builds it. |
 | **Config** | Index DB at `serving/memory-mcp/code_index.db` (gitignored); `EMBED_URL` / `EMBED_MODEL` / `CODE_INDEX_DB` overridable. Wired in `crush.json` → `mcp.memory` (same server). | Automatic via Crush. |
+| **Retrieval benchmark** | `evals/rag-eval.py` scores `code_search` recall@k on a fixed query set — the measured gate for embedder/chunking changes (search re-ranks code above docs/tests so the *implementation* wins, not the doc that describes it). | `python evals/rag-eval.py` (embed server up) |
 
 ---
 

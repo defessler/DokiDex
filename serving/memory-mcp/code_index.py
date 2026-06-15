@@ -178,10 +178,25 @@ def index_files(paths, root, embed_fn=embed):
     return nfiles, nchunks
 
 
+# extensions that are actual source code (vs docs/config/data).
+_CODE_EXT = {".cs", ".ps1", ".psm1", ".py", ".xaml", ".js", ".ts", ".bat"}
+
+
+def _rank_weight(path):
+    """code_search ranks real source above docs/config — a doc that EXPLAINS a feature often out-cosines
+    the file that IMPLEMENTS it, but for "where is this?" the code is wanted — and the implementation above
+    its tests. A gentle multiplier that only flips near-ties (a strongly-matching doc still surfaces)."""
+    w = 1.0 if os.path.splitext(path)[1].lower() in _CODE_EXT else 0.85
+    if "test" in path.lower():
+        w *= 0.9
+    return w
+
+
 def search_vec(query_vec, k=5):
-    """Brute-force cosine nearest neighbours over every stored chunk. Returns [] for a degenerate
-    (zero-norm) query, and skips any stored vector whose dimension differs from the query — a mismatch
-    (index built with a different embed model) would otherwise silently mis-score over a shared prefix."""
+    """Brute-force cosine nearest neighbours over every stored chunk, re-ranked to prefer code over
+    docs/tests (see _rank_weight). Returns [] for a degenerate (zero-norm) query, and skips any stored
+    vector whose dimension differs from the query — a mismatch (index built with a different embed model)
+    would otherwise silently mis-score over a shared prefix."""
     qdim = len(query_vec)
     if math.sqrt(sum(x * x for x in query_vec)) == 0:
         return []
@@ -194,7 +209,7 @@ def search_vec(query_vec, k=5):
     for r in rows:
         v = _unpack(r[4])
         if len(v) == qdim:
-            scored.append((_cosine(query_vec, v), r))
+            scored.append((_cosine(query_vec, v) * _rank_weight(r[0]), r))
     scored.sort(key=lambda t: t[0], reverse=True)
     return [{"path": r[0], "start_line": r[1], "end_line": r[2], "content": r[3], "score": round(s, 4)}
             for s, r in scored[:k]]
