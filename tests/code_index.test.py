@@ -100,6 +100,14 @@ try:
     check(code_index._rank_weight("src/App.cs") > code_index._rank_weight("src/App.Tests/AppTests.cs"),
           "re-rank weights an implementation above its tests")
 
+    # --- path-prefix: the file path is prepended to the EMBED input (helps filename-concept queries) ---
+    captured = []
+    def spy(texts):
+        captured.extend(texts)
+        return [[1.0] for _ in texts]
+    code_index._embed_batch([(1, 1, "body text")], spy, prefix="serving/foo.py\n")
+    check(captured and captured[0].startswith("serving/foo.py"), "_embed_batch prepends the path prefix to the embed input")
+
     # --- walk_repo: skips weights / build output / vendored + non-source ext ---
     writefile("keep.py", "x = 1\n")
     writefile("models/huge.gguf", "BINARY")

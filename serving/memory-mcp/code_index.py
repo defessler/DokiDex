@@ -133,17 +133,21 @@ def _batched_by_chars(chunks, budget=EMBED_BATCH_CHARS):
         yield batch
 
 
-def _embed_batch(chunks, embed_fn):
-    """[(chunk, vec), ...] for one batch; on a server error, retry PER ITEM and skip any chunk the embed
-    server still rejects — so one pathological chunk can never abort the whole index."""
+def _embed_batch(chunks, embed_fn, prefix=""):
+    """[(chunk, vec), ...] for one batch. The embed input is `prefix + content` — the file path is
+    prepended so a query naming the concept-in-the-filename (e.g. "auto-updater" -> Updater.cs) matches.
+    On a server error, retry PER ITEM and skip any chunk the embed server still rejects — so one
+    pathological chunk can never abort the whole index."""
+    def inp(ch):
+        return _embed_input(prefix + ch[2])
     try:
-        vecs = embed_fn([_embed_input(ch[2]) for ch in chunks])
+        vecs = embed_fn([inp(ch) for ch in chunks])
         return list(zip(chunks, vecs))
     except Exception:
         out = []
         for ch in chunks:
             try:
-                out.append((ch, embed_fn([_embed_input(ch[2])])[0]))
+                out.append((ch, embed_fn([inp(ch)])[0]))
             except Exception:
                 pass
         return out
@@ -167,7 +171,7 @@ def index_files(paths, root, embed_fn=embed):
             if not chunks:
                 continue
             for batch in _batched_by_chars(chunks):
-                for (start, end, content), vec in _embed_batch(batch, embed_fn):
+                for (start, end, content), vec in _embed_batch(batch, embed_fn, prefix=f"{rel}\n"):
                     c.execute("INSERT INTO code_chunks(path,start_line,end_line,content,vec,ts) VALUES(?,?,?,?,?,?)",
                               (rel, start, end, content, _pack(vec), time.time()))
                     nchunks += 1
