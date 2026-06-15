@@ -39,10 +39,20 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _appVersion = Updater.RunningVersion();
     [ObservableProperty] private bool _updateAvailable;
     [ObservableProperty][NotifyPropertyChangedFor(nameof(UpdateHasMessage))] private string _updateText = "";
-    [ObservableProperty] private bool _updateBusy;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(Busy))] private bool _updateBusy;
     [ObservableProperty] private double _updateProgress;
     private string? _updateTag;
     public bool UpdateHasMessage => !string.IsNullOrEmpty(UpdateText);
+
+    // ---- "working" signal driving the animated caption sigil (loading / running an action) ----
+    // True while: a just-fired command is still settling (_actionTicks counts down over polls), an update
+    // check/download runs, or any service is warming up (degraded = running-but-not-yet-healthy). Self-
+    // clearing via the 2s poll, so it can never spin forever on a healthy idle stack.
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(Busy))] private bool _checkingUpdates;
+    private int _actionTicks;
+    public bool Busy => _actionTicks > 0 || CheckingUpdates || UpdateBusy
+                        || _byName.Values.Any(v => v.StateKind == "degraded");
+    private void BeginAction() { _actionTicks = 3; OnPropertyChanged(nameof(Busy)); }
 
     // VM asks the View to confirm a GPU-evicting switch.
     public event Action<ConfirmInfo>? ConfirmRequested;
@@ -112,7 +122,9 @@ public partial class MainViewModel : ObservableObject
         MediaActive = ActiveGroup == "media";
         Logs.SyncServices(doc.Services.Select(x => x.Name));
         LastUpdated = DateTime.Now.ToString("HH:mm:ss");
+        if (_actionTicks > 0) _actionTicks--;
         OnPropertyChanged(nameof(TotalServiceCount));   // collapse the empty-state once either band has cards
+        OnPropertyChanged(nameof(Busy));                // service warmup (degraded) + action countdown drive the caption sigil
         OnPropertyChanged(nameof(SwitchExplain));
     }
 
@@ -148,6 +160,7 @@ public partial class MainViewModel : ObservableObject
         {
             _doki.Up(target);
             StatusText = $"switching to {target.ToUpperInvariant()}…";
+            BeginAction();
         }
 
         if (!evicting) { Go(); return; }
@@ -174,6 +187,7 @@ public partial class MainViewModel : ObservableObject
     {
         _doki.Down();
         StatusText = "stopping all services…";
+        BeginAction();
     }
 
     [RelayCommand]
@@ -186,17 +200,22 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task CheckUpdates()
     {
+        CheckingUpdates = true;   // (UI thread here) drives the caption sigil; cleared in finally
         StatusText = "checking for updates (git / gh)…";
-        var infos = await _update.CheckAsync().ConfigureAwait(false);
-        _ui.Invoke(() =>
+        try
         {
-            foreach (var info in infos)
+            var infos = await _update.CheckAsync().ConfigureAwait(false);
+            _ui.Invoke(() =>
             {
-                _lastUpdates[info.Service] = info;
-                if (_byName.TryGetValue(info.Service, out var vm)) { vm.Version = info.Version; vm.Update = info.Update; }
-            }
-            StatusText = infos.Count > 0 ? $"updates checked {DateTime.Now:HH:mm:ss}" : "update check returned nothing (git/gh unavailable?)";
-        });
+                foreach (var info in infos)
+                {
+                    _lastUpdates[info.Service] = info;
+                    if (_byName.TryGetValue(info.Service, out var vm)) { vm.Version = info.Version; vm.Update = info.Update; }
+                }
+                StatusText = infos.Count > 0 ? $"updates checked {DateTime.Now:HH:mm:ss}" : "update check returned nothing (git/gh unavailable?)";
+            });
+        }
+        finally { _ui.Invoke(() => CheckingUpdates = false); }
     }
 
     // ---- self-update: check this panel's own GitHub releases, download + swap + relaunch ----

@@ -79,10 +79,70 @@
     <!-- left zone = SurfaceBrush, continuous with the rail; the brand lives here (draggable) -->
     <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource SurfaceBrush}"
             BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,1,0">
-      <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
-        <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="16" Height="16"
-              Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.85" VerticalAlignment="Center"/>
-        <TextBlock Text="D O K I C O D E" Margin="11,0,0,0" VerticalAlignment="Center"
+      <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
+        <!-- Brand sigil = an arc-reactor. When the panel is loading / running an action (Busy), a cyan
+             "working" ring spins up around it and the gold sigil counter-rotates faintly. Cyan is the live
+             accent; the gold stays etched (never glows). At rest both are still. -->
+        <Grid Width="22" Height="22" VerticalAlignment="Center">
+          <Ellipse Width="22" Height="22" Stroke="{StaticResource TealBrush}" StrokeThickness="1"
+                   StrokeDashArray="2.2 3.6" Opacity="0" RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
+            <Ellipse.Style>
+              <Style TargetType="Ellipse">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding Busy}" Value="True">
+                    <DataTrigger.EnterActions>
+                      <BeginStoryboard Name="BusySpin">
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                           From="0" To="360" Duration="0:0:2.2" RepeatBehavior="Forever"/>
+                        </Storyboard>
+                      </BeginStoryboard>
+                      <BeginStoryboard>
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0.9" Duration="0:0:0.3"/>
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                      <StopStoryboard BeginStoryboardName="BusySpin"/>
+                      <BeginStoryboard>
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.5"/>
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </DataTrigger.ExitActions>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Ellipse.Style>
+          </Ellipse>
+          <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="16" Height="16"
+                HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"
+                Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.85">
+            <Path.RenderTransform><RotateTransform/></Path.RenderTransform>
+            <Path.Style>
+              <Style TargetType="Path">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding Busy}" Value="True">
+                    <DataTrigger.EnterActions>
+                      <BeginStoryboard Name="SigilTurn">
+                        <Storyboard>
+                          <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                           From="0" To="-360" Duration="0:0:7" RepeatBehavior="Forever"/>
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                      <StopStoryboard BeginStoryboardName="SigilTurn"/>
+                    </DataTrigger.ExitActions>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Path.Style>
+          </Path>
+        </Grid>
+        <TextBlock Text="D O K I C O D E" Margin="9,0,0,0" VerticalAlignment="Center"
                    FontFamily="Segoe UI Variable Display, Segoe UI Light, Segoe UI"
                    FontWeight="Thin" FontSize="12.5" Foreground="{StaticResource TextBrush}" Opacity="0.92"/>
       </StackPanel>
