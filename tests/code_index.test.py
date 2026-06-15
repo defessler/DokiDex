@@ -100,6 +100,21 @@ try:
     check(not any(w.startswith("bin/") for w in walked), "walk_repo skips bin/ build output")
     check(not any(".git" in w for w in walked), "walk_repo skips .git")
 
+    # --- request-budget batching + truncation (the fix for the embed server's per-input token limit) ---
+    check(len(code_index._embed_input("z" * 9000)) == code_index.MAX_EMBED_CHARS, "_embed_input truncates an over-long chunk")
+    check(code_index._embed_input("short") == "short", "_embed_input leaves a short chunk untouched")
+    big_batch = [(i, i, "y" * 2500) for i in range(5)]   # 12500 chars total vs a 6000-char budget
+    parts = list(code_index._batched_by_chars(big_batch))
+    check(len(parts) >= 2, f"_batched_by_chars splits when total exceeds the budget ({len(parts)} parts)")
+    check(sum(len(p) for p in parts) == 5, "_batched_by_chars preserves every chunk across splits")
+
+    def flaky(texts):   # fails on any batch/item containing BOOM (simulates the embed server rejecting one)
+        if any("BOOM" in t for t in texts):
+            raise RuntimeError("server 500")
+        return [[1.0] for _ in texts]
+    got = code_index._embed_batch([(1, 1, "good one"), (2, 2, "BOOM bad"), (3, 3, "good two")], flaky)
+    check(len(got) == 2 and all("good" in c[2] for c, _ in got), "_embed_batch skips a rejected chunk, keeps the rest (no abort)")
+
 except Exception as e:
     import traceback
     traceback.print_exc()

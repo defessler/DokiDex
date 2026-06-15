@@ -22,6 +22,11 @@ DB_PATH = os.environ.get("CODE_INDEX_DB", os.path.join(os.path.dirname(os.path.a
 EMBED_URL = os.environ.get("EMBED_URL", "http://127.0.0.1:8090/v1/embeddings")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "embed")
 
+# nomic-embed-text caps at 2048 tokens PER INPUT; ~4 chars/token, so truncate any single chunk well under
+# that, and cap TOTAL chars per embed request so it never overruns the server's token batch (n_batch).
+MAX_EMBED_CHARS = 4000
+EMBED_BATCH_CHARS = 6000
+
 # files worth indexing (source + docs/config); everything else is skipped by the walker.
 SOURCE_EXT = {".ps1", ".psm1", ".cs", ".py", ".xaml", ".json", ".md", ".yaml", ".yml", ".bat", ".js", ".ts"}
 # directory names never worth indexing (weights, build output, deps, vendored servers).
@@ -99,7 +104,41 @@ def embed(texts):
     return [d["embedding"] for d in data["data"]]
 
 
-def index_files(paths, root, embed_fn=embed, batch=32):
+def _embed_input(text):
+    return text if len(text) <= MAX_EMBED_CHARS else text[:MAX_EMBED_CHARS]
+
+
+def _batched_by_chars(chunks, budget=EMBED_BATCH_CHARS):
+    """Group chunks so each embed request stays under the server's token budget (chars as a proxy)."""
+    batch, size = [], 0
+    for ch in chunks:
+        clen = min(len(ch[2]), MAX_EMBED_CHARS)
+        if batch and size + clen > budget:
+            yield batch
+            batch, size = [], 0
+        batch.append(ch)
+        size += clen
+    if batch:
+        yield batch
+
+
+def _embed_batch(chunks, embed_fn):
+    """[(chunk, vec), ...] for one batch; on a server error, retry PER ITEM and skip any chunk the embed
+    server still rejects — so one pathological chunk can never abort the whole index."""
+    try:
+        vecs = embed_fn([_embed_input(ch[2]) for ch in chunks])
+        return list(zip(chunks, vecs))
+    except Exception:
+        out = []
+        for ch in chunks:
+            try:
+                out.append((ch, embed_fn([_embed_input(ch[2])])[0]))
+            except Exception:
+                pass
+        return out
+
+
+def index_files(paths, root, embed_fn=embed):
     """Chunk + embed + (re)store each file at `root/path`. embed_fn is injectable (stubbed in tests).
     Re-indexing a file replaces its old chunks. Returns (files_indexed, chunks_written)."""
     c = _conn()
@@ -116,10 +155,8 @@ def index_files(paths, root, embed_fn=embed, batch=32):
             c.execute("DELETE FROM code_chunks WHERE path=?", (rel,))   # replace this file's chunks
             if not chunks:
                 continue
-            for i in range(0, len(chunks), batch):
-                grp = chunks[i:i + batch]
-                vecs = embed_fn([ch[2] for ch in grp])
-                for (start, end, content), vec in zip(grp, vecs):
+            for batch in _batched_by_chars(chunks):
+                for (start, end, content), vec in _embed_batch(batch, embed_fn):
                     c.execute("INSERT INTO code_chunks(path,start_line,end_line,content,vec,ts) VALUES(?,?,?,?,?,?)",
                               (rel, start, end, content, _pack(vec), time.time()))
                     nchunks += 1

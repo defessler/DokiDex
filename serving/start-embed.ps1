@@ -9,6 +9,11 @@
 # Usage:  .\start-embed.ps1 [-Detach] [-PidFile <p>] [-LogFile <l>]
 param([switch]$Detach, [string]$PidFile, [string]$LogFile)
 
+# Hide the GPU from THIS process: a CUDA-built llama-server still grabs a ~100-300MB CUDA context at
+# -ngl 0, which would quietly steal VRAM the coder needs. With no visible device it runs pure CPU -> a
+# truly 0-VRAM embed server that coexists with the full-size coder. (Child procs inherit this env.)
+$env:CUDA_VISIBLE_DEVICES = "-1"
+
 $server = Join-Path $PSScriptRoot "llama.cpp\llama-server.exe"
 $model  = Join-Path (Split-Path $PSScriptRoot) "models\nomic-embed-text-v1.5.f16.gguf"
 
@@ -19,7 +24,8 @@ $argList = @(
     "--embedding",            # expose POST /v1/embeddings
     "--pooling", "mean",      # nomic-embed-text uses mean pooling
     "-ngl", "0",              # CPU-only: zero VRAM, never competes for the GPU
-    "-c", "8192",             # enough context for a ~60-line code chunk
+    "-c", "2048",             # nomic-embed's native max sequence length; chunks are capped to fit
+    "-b", "2048", "-ub", "2048",  # batch+ubatch must cover a whole chunk — the default ubatch 512 silently drops longer inputs
     "--alias", "embed"        # id in /v1/models + /v1/embeddings (code_index.py EMBED_MODEL default)
 )
 
