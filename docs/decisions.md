@@ -1,5 +1,40 @@
 # Decision log
 
+## 2026-06-15 — Media quality research → **keep Z-Image Turbo + the current rewriter** (both already near-optimal)
+
+Chasing the "quality" goal, researched the two GPU-free quality levers for `doki gen` / DokiGen Studio:
+the default image model and the `:8013` prompt-rewriter instruction. **Conclusion: both are already at/near
+the local-32GB SOTA as of mid-2026 — no change warranted.** A useful negative result that prevents
+misdirected effort (and an unverifiable blind edit to a tuned prompt).
+
+**Image model — stay on Z-Image Turbo.** It ranks **#1 open-source** (≈#8 overall) on the Artificial
+Analysis text-to-image leaderboard, 8 steps, ~1–2 min, fits ≤16GB. The mid-2026 "successors" are **heavier
+and *not* better on photorealism** for our use:
+- *Qwen-Image-2512* — 40GB+ model / 21GB Q8 GGUF, ~5–6 min; great in-image text, but a practitioner rundown
+  rates it below Z-Image Turbo on photorealism. (We already use *Qwen-Image-Edit-2511* for the `edit` kind —
+  that stays; it's the right tool there.)
+- *FLUX.2 Dev* — 32B (+24B TE), 32GB Q8 GGUF (fills the whole card), 20+ min, "soft/blurred faces." Too heavy
+  + slower + weaker photorealism. Ruled out.
+
+**Rewriter instruction (`$mpInstr` in setup.ps1) — already Sora-2-shaped.** It does one-camera-move,
+shot-size/lighting/light-direction/color/angle, style-first, locked subject ("keep subject+action exactly,
+no new subjects"), and "avoid abstract mood words" — which is exactly current Sora-2 cinematic-prompt
+guidance. Sora-2's third "audio" section does **not** apply: Wan/LTXV are silent and audio is a separate
+Foley pass (`-Foley`). So no rewrite; editing it blindly (it can't be A/B-tested without the card) risks a
+silent regression.
+
+**Backlog (GPU-eval only, low priority):**
+- *FLUX.2 Klein* (4B, distilled from FLUX.2 32B, "real-time on consumer HW") — speculative: FLUX-family
+  *prompt adherence* could help complex compositions even if photorealism ≈ Z-Image. Not in the practitioner
+  rundown yet → unverified. Run through the eval gate if/when curious. See `memory: dokidex-model-eval-candidates`.
+- *Optional rewriter A/B deltas* (test on-card before adopting, don't ship blind): plural "3–5 color anchors"
+  vs the current single "color tone"; an explicit "avoid pronouns — reuse one locked subject descriptor."
+
+Sources: [Z-Image (Tongyi-MAI)](https://github.com/Tongyi-MAI/Z-Image) ·
+[Diffusion Doodles model rundown (Z-Image Turbo / Qwen-Image-2512 / FLUX.2 Dev)](https://medium.com/diffusion-doodles/model-rundown-z-image-turbo-qwen-image-2512-edit-2511-flux-2-dev-fc787f5e87ad) ·
+[Sora 2 prompting guide (WaveSpeed)](https://wavespeed.ai/blog/posts/sora-2-prompting-tips-better-videos-2026/) ·
+[Best open-source image models 2026 (WaveSpeed)](https://wavespeed.ai/landing/models/best-open-source-image-models-2026)
+
 ## 2026-06-12 — Phase 2: harness bake-off → **Crush** is the daily driver
 
 8-run matrix (2 harnesses × 2 models × 2 golden tasks), headless via `evals/run-eval.ps1`, objective pass checks. Clean results after fixing a check bug (array `-notmatch` false-negative):
