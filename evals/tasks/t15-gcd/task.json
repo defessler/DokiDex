@@ -1,0 +1,5 @@
+{
+  "name": "t15-gcd",
+  "kind": "tdd-feature",
+  "prompt": "The test suite references App.MathUtil.Gcd(int a, int b), which isn't implemented yet, so the build currently fails. Create src/App/MathUtil.cs with `public static int Gcd(int a, int b)` returning the greatest common divisor of a and b using the Euclidean algorithm. The result is always NON-NEGATIVE, even when an input is negative (e.g. Gcd(-12, 8) == 4), and Gcd(0, 0) == 0. Do not modify the existing tests."
+}
