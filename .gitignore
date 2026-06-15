@@ -1,5 +1,9 @@
-# Model weights — huge binaries, never in git
-models/
+# Model weights — huge binaries, never in git.
+# NOTE: anchored to the repo root (/models/) — an unanchored `models/` also matches the panel's
+# source dir control/Models/ (case-insensitive on Windows), which silently dropped Status.cs from
+# git and broke CI / fresh-clone builds. The *.gguf/*.safetensors/*.bin patterns below are the real
+# backstop for stray weight files anywhere in the tree.
+/models/
 *.gguf
 *.safetensors
 *.bin
