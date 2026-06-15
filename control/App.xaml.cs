@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using DokiDex.Control.Views;
@@ -7,6 +8,10 @@ namespace DokiDex.Control;
 public partial class App : Application
 {
     private static Mutex? _single;   // held for the process lifetime; guards against duplicate launches
+
+    /// <summary>Populated-panel sample mode: `dotnet run -- --design` (or DOKI_SAMPLE=1) renders the cockpit
+    /// from canned data with no backend/boot/updater — for off-GPU UI/theme iteration + snapshots.</summary>
+    public static bool DesignMode { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -26,6 +31,19 @@ public partial class App : Application
             Shutdown();
         };
         AppDomain.CurrentDomain.UnhandledException += (_, a) => LogCrash(a.ExceptionObject);
+
+        // DESIGN MODE: render the populated panel from canned sample data — no backend, no boot, no updater,
+        // no single-instance lock — for off-GPU UI/theme iteration + snapshots.  (dotnet run -- --design)
+        if (e.Args.Any(a => a.Equals("--design", StringComparison.OrdinalIgnoreCase))
+            || Environment.GetEnvironmentVariable("DOKI_SAMPLE") == "1")
+        {
+            DesignMode = true;
+            var w = new Views.MainWindow();
+            Current.MainWindow = w;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            w.Show();
+            return;
+        }
 
         // Single-instance: a self-contained single-file exe self-extracts for a few seconds on first run —
         // exactly when an impatient user double-clicks again. Don't open a second boot + poll loop + updater

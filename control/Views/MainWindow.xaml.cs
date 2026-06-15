@@ -35,7 +35,7 @@ public partial class MainWindow : Window
             MaxBtn.ToolTip = max ? "Restore" : "Maximize"; // keep the affordance in sync with the glyph
         };
 
-        Loaded += (_, _) => _vm.Start();
+        Loaded += (_, _) => { if (App.DesignMode) _vm.LoadDesignSample(); else _vm.Start(); };
         Closed += (_, _) => _vm.Shutdown();
     }
 

@@ -1,0 +1,55 @@
+name: ci
+
+# Runs the GPU-free test suite on every push / PR to main: the .NET control-panel build
+# (catches XAML + StaticResource breaks), its xUnit tests, the two framework-free PowerShell
+# contract suites, and the memory-store python tests. Mirrors release.yml's runner + toolchain.
+#
+# The golden eval suite (evals/) is INTENTIONALLY EXCLUDED from CI: it drives the live
+# :8080 llama-swap endpoint against local GGUF models, neither of which exist on a
+# windows-latest runner (no GPU, no weights) — so it can never pass here. Run it locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build control panel (catches XAML / StaticResource breaks)
+        run: dotnet build -c Release control/DokiDex.Control.csproj
+
+      - name: Test control panel
+        run: dotnet test -c Release control/DokiDex.Control.Tests/DokiDex.Control.Tests.csproj
+
+      # The PS suites are framework-free and self-report `exit 1` on any failed assertion;
+      # check $LASTEXITCODE explicitly so a non-zero count fails the step (a multi-line run:
+      # block only surfaces the last statement's code otherwise).
+      - name: PowerShell — setup helpers
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tests/setup-helpers.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "setup-helpers.test.ps1 failed (exit $LASTEXITCODE)" }
+
+      - name: PowerShell — doki status json contract
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tests/doki-statusjson.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "doki-statusjson.test.ps1 failed (exit $LASTEXITCODE)" }
+
+      - name: Python — memory store
+        shell: pwsh
+        run: |
+          python tests/memory_db.test.py
+          if ($LASTEXITCODE -ne 0) { throw "memory_db.test.py failed (exit $LASTEXITCODE)" }

@@ -69,6 +69,15 @@ public partial class MainViewModel : ObservableObject
         _ = CheckSelfUpdate();   // best-effort, once per launch
     }
 
+    // Design mode (App.DesignMode): populate the cockpit from canned sample data and DON'T poll. Forces one
+    // service to 'crashed' (that state is time-derived over a 90s grace, so it's unreachable from one Apply).
+    internal void LoadDesignSample()
+    {
+        Apply(SampleData.Status());
+        if (_byName.TryGetValue("stt", out var crashed)) { crashed.StateKind = "crashed"; crashed.StateLabel = "running · not responding"; }
+        StatusText = "design sample — no backend";
+    }
+
     public void Shutdown()
     {
         _cts?.Cancel();

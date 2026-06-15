@@ -2,6 +2,8 @@
 # Cycles the doki modes and checks each capability with a REAL API call:
 #   chat/code (:8080) · autocomplete (:8012) · image + video (:7801)
 # Restores agent mode at the end. Run via:  .\verify.ps1   or   .\doki.ps1 verify
+# -Json emits the results as JSON to stdout (no colored grid) for a machine/panel to consume.
+param([switch]$Json)
 $ErrorActionPreference = "Continue"
 $root = $PSScriptRoot
 $results = [ordered]@{}
@@ -256,16 +258,25 @@ if (-not ((Test-Path $cwfPath) -and (Test-Path $foleyModel))) {
 # restore default resting state
 Doki up agent
 
-Write-Host ""
-Write-Host "=== Verify results ===" -ForegroundColor Cyan
 $pass = 0; $fail = 0; $skip = 0
 foreach ($k in $results.Keys) {
     $v = $results[$k]
-    $color = if ($v -like "PASS*") { "Green" } elseif ($v -like "SKIP*") { "DarkGray" } else { "Red" }
     if ($v -like "PASS*") { $pass++ } elseif ($v -like "SKIP*") { $skip++ } else { $fail++ }
-    Write-Host ("  {0,-24} {1}" -f $k, $v) -ForegroundColor $color
 }
-Write-Host ""
-$summary = "$pass passed, $fail failed" + $(if ($skip) { ", $skip skipped" } else { "" }) + " (of $($results.Count) checks)"
-Write-Host $summary -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Yellow" })
+
+if ($Json) {
+    $payload = [ordered]@{ checks = $results; summary = [ordered]@{ passed = $pass; failed = $fail; skipped = $skip; total = $results.Count } }
+    $payload | ConvertTo-Json -Depth 5
+} else {
+    Write-Host ""
+    Write-Host "=== Verify results ===" -ForegroundColor Cyan
+    foreach ($k in $results.Keys) {
+        $v = $results[$k]
+        $color = if ($v -like "PASS*") { "Green" } elseif ($v -like "SKIP*") { "DarkGray" } else { "Red" }
+        Write-Host ("  {0,-24} {1}" -f $k, $v) -ForegroundColor $color
+    }
+    Write-Host ""
+    $summary = "$pass passed, $fail failed" + $(if ($skip) { ", $skip skipped" } else { "" }) + " (of $($results.Count) checks)"
+    Write-Host $summary -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Yellow" })
+}
 exit $(if ($fail -eq 0) { 0 } else { 1 })

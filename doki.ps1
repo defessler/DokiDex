@@ -10,7 +10,8 @@
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
     [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor")][string]$Command = "status",
-    [Parameter(Position = 1)][string]$Arg
+    [Parameter(Position = 1)][string]$Arg,
+    [switch]$Clear   # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -37,6 +38,18 @@ $Profiles = [ordered]@{ agent = @("llama-swap", "tts", "stt"); coexist = @("llam
 
 function PidFile($n) { Join-Path $runDir "$n.pid" }
 function LogFile($n) { Join-Path $runDir "$n.log" }
+function RotateLog($n, $capMB = 5) {
+    # Keep .run\<name>.log / .log.err from growing unbounded across long runs. Start-Process
+    # overwrites the log on relaunch, so a fresh restart is already clean — but a previous run can
+    # leave a multi-MB file we'd silently discard. Before (re)starting, if either stream is over the
+    # cap, roll it to <file>.1 (one generation), so the last big run is kept but never accumulates.
+    # Best-effort: a still-open file (untracked leftover) just stays put rather than aborting `up`.
+    $cap = $capMB * 1MB
+    foreach ($f in @((LogFile $n), "$(LogFile $n).err")) {
+        $fi = Get-Item $f -ErrorAction SilentlyContinue
+        if ($fi -and $fi.Length -gt $cap) { Move-Item $f "$f.1" -Force -ErrorAction SilentlyContinue }
+    }
+}
 function IsRunning($n) {
     $pf = PidFile $n
     if (-not (Test-Path $pf)) { return $false }
@@ -51,6 +64,7 @@ function Probe($u) { try { Invoke-WebRequest $u -TimeoutSec 3 -UseBasicParsing |
 function StartSvc($n) {
     if (IsRunning $n) { Write-Host "  $n already up"; return }
     if (Probe $Services[$n].health) { Write-Host "  $n already up (untracked — started outside doki)"; return }
+    RotateLog $n   # roll oversized logs before the start script reopens .log/.log.err
     & $Services[$n].script -Detach -PidFile (PidFile $n) -LogFile (LogFile $n) | Out-Null
     Write-Host "  + $n  $($Services[$n].desc)"
 }
@@ -327,9 +341,15 @@ switch ($Command) {
     "doctor"  { Doctor }
     "status"  { if ($Arg -eq "json" -or $Arg -eq "--json") { StatusJson } else { ShowStatus } }
     "logs" {
-        if (-not $Arg) { throw "usage: .\doki.ps1 logs <$($Services.Keys -join '|')>" }
+        if (-not $Arg) { throw "usage: .\doki.ps1 logs <$($Services.Keys -join '|')> [-Clear]" }
         if (-not $Services.Contains($Arg)) { throw "unknown service '$Arg' — one of: $($Services.Keys -join ', ')" }
-        TailLogs $Arg
+        if ($Clear) {
+            # wipe stdout+stderr (and the rotated .1 generation) for this service, then exit without tailing
+            @((LogFile $Arg), "$(LogFile $Arg).err", "$(LogFile $Arg).1", "$(LogFile $Arg).err.1") |
+                Where-Object { Test-Path $_ } | Remove-Item -Force -ErrorAction SilentlyContinue
+            Write-Host "  cleared logs for $Arg"
+        }
+        else { TailLogs $Arg }
     }
     "verify" { & (Join-Path $root "verify.ps1") }
     "test" {
