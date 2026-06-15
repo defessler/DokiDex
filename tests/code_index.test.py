@@ -89,6 +89,11 @@ try:
     code_index.index_files([f_gpu], _work, embed_fn=stub_embed)
     check(code_index.count() == 3, "re-indexing a file replaces its chunks (count stays 3)")
 
+    # --- search_vec guards: degenerate / mismatched queries return [] instead of garbage rankings ---
+    check(code_index.search_vec([0.0, 0.0, 0.0], k=5) == [], "zero-norm query returns [] (no all-tied ranking)")
+    # the index holds 11-dim stub vectors; a 3-dim query must skip every row, not cosine over a shared prefix
+    check(code_index.search_vec([1.0, 2.0, 3.0], k=5) == [], "dimension-mismatched query returns [] (no prefix mis-scoring)")
+
     # --- walk_repo: skips weights / build output / vendored + non-source ext ---
     writefile("keep.py", "x = 1\n")
     writefile("models/huge.gguf", "BINARY")

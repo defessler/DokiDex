@@ -374,7 +374,7 @@ switch ($Command) {
         & python (Join-Path $serving "memory-mcp\code_index.py") $root
     }
     "gen" {
-        if (-not $Arg) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit] [-Fast] [-Upscale] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
+        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit] [-Fast] [-Upscale] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
         $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit
         Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Raw:$Raw -NoOpen:$NoOpen -InitImage $InitImage -Out $Out | Out-Null

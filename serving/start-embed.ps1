@@ -16,6 +16,7 @@ $env:CUDA_VISIBLE_DEVICES = "-1"
 
 $server = Join-Path $PSScriptRoot "llama.cpp\llama-server.exe"
 $model  = Join-Path (Split-Path $PSScriptRoot) "models\nomic-embed-text-v1.5.f16.gguf"
+if (-not (Test-Path $model)) { throw "embed model not found at $model — run .\setup.ps1 (fetches nomic-embed-text-v1.5)" }
 
 $argList = @(
     "-m", $model,
@@ -33,6 +34,8 @@ if ($Detach) {
     $sp = @{ FilePath = $server; ArgumentList = $argList; WindowStyle = "Hidden"; PassThru = $true }
     if ($LogFile) { $sp.RedirectStandardOutput = $LogFile; $sp.RedirectStandardError = "$LogFile.err" }
     $p = Start-Process @sp
+    Start-Sleep -Milliseconds 400   # a doomed launch (bad args / corrupt model / missing dll) exits within this window
+    if ($p.HasExited) { Write-Warning "embed server exited immediately (code $($p.ExitCode))$(if ($LogFile) { "; see $LogFile.err" }) — not writing pid"; return }
     if ($PidFile) { Set-Content $PidFile $p.Id }
     Write-Host "embed server starting in background on http://127.0.0.1:8090 (pid $($p.Id))"
 } else {

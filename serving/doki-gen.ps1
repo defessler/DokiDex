@@ -88,10 +88,11 @@ function Invoke-Gen {
         [string]$Base = 'http://127.0.0.1:7801'
     )
     if ($Kind -eq 'edit' -and -not $InitImage) { throw "-Edit needs -InitImage <path-to-image>" }
+    if ($Upscale -and $Kind -notin @('image', 'edit')) { throw "-Upscale only applies to image/edit gens (got $Kind)" }
     $initB64 = $null
     if ($InitImage) {
-        if (-not (Test-Path $InitImage)) { throw "init image not found: $InitImage" }
-        $initB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $InitImage).Path))
+        if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }
+        $initB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $InitImage).Path))
     }
     # SwarmUI must already be in media mode — don't contend for the GPU / evict the LLM behind the user's back.
     try { Invoke-WebRequest "$Base/" -TimeoutSec 4 -UseBasicParsing | Out-Null }

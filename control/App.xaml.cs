@@ -113,23 +113,38 @@ public partial class App : Application
         };
         Current.MainWindow = win;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
-        win.ContentRendered += (_, _) =>
+
+        // ContentRendered drives the capture; a watchdog guarantees the process still EXITS if the off-screen
+        // compositor never signals it (a headless / RDP / session-0 edge case) instead of hanging forever.
+        var watchdog = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        bool done = false;
+        void Finish(bool capture)
         {
+            if (done) return;
+            done = true;
+            watchdog.Stop();
             try
             {
-                win.UpdateLayout();
-                var rtb = new RenderTargetBitmap(W, H, 96, 96, PixelFormats.Pbgra32);
-                rtb.Render(win);
-                var enc = new PngBitmapEncoder();
-                enc.Frames.Add(BitmapFrame.Create(rtb));
-                var full = System.IO.Path.GetFullPath(path);
-                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
-                using (var fs = System.IO.File.Create(full)) enc.Save(fs);
-                Console.WriteLine($"rendered {full}  ({rtb.PixelWidth}x{rtb.PixelHeight})");
+                if (capture)
+                {
+                    win.UpdateLayout();
+                    var rtb = new RenderTargetBitmap(W, H, 96, 96, PixelFormats.Pbgra32);
+                    rtb.Render(win);
+                    var enc = new PngBitmapEncoder();
+                    enc.Frames.Add(BitmapFrame.Create(rtb));
+                    var full = System.IO.Path.GetFullPath(path);
+                    System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
+                    using (var fs = System.IO.File.Create(full)) enc.Save(fs);
+                    Console.WriteLine($"rendered {full}  ({rtb.PixelWidth}x{rtb.PixelHeight})");
+                }
+                else { Console.Error.WriteLine("render: timed out waiting for ContentRendered"); }
             }
             catch (Exception ex) { LogCrash(ex); }
-            finally { win.Close(); Shutdown(); }
-        };
+            finally { try { win.Close(); } catch { } Shutdown(); }
+        }
+        win.ContentRendered += (_, _) => Finish(true);
+        watchdog.Tick += (_, _) => Finish(false);
+        watchdog.Start();
         win.Show();   // realizes the tree off-screen -> Loaded loads the sample -> ContentRendered captures it
     }
 

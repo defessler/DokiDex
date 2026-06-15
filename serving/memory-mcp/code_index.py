@@ -24,6 +24,8 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "embed")
 
 # nomic-embed-text caps at 2048 tokens PER INPUT; ~4 chars/token, so truncate any single chunk well under
 # that, and cap TOTAL chars per embed request so it never overruns the server's token batch (n_batch).
+# Keep EMBED_BATCH_CHARS <= start-embed.ps1's -b/-ub (2048 tokens) * ~4 chars/token, or longer requests
+# get silently dropped server-side.
 MAX_EMBED_CHARS = 4000
 EMBED_BATCH_CHARS = 6000
 
@@ -83,25 +85,34 @@ def _conn():
 def reset():
     """Drop every indexed chunk (a clean full reindex)."""
     c = _conn()
-    c.execute("DELETE FROM code_chunks")
-    c.commit()
-    c.close()
+    try:
+        c.execute("DELETE FROM code_chunks")
+        c.commit()
+    finally:
+        c.close()
 
 
 def count():
     c = _conn()
-    n = c.execute("SELECT COUNT(*) FROM code_chunks").fetchone()[0]
-    c.close()
-    return n
+    try:
+        return c.execute("SELECT COUNT(*) FROM code_chunks").fetchone()[0]
+    finally:
+        c.close()
 
 
-def embed(texts):
-    """POST to the local embed server (OpenAI /v1/embeddings). texts: list[str] -> list[list[float]]."""
+def embed(texts, timeout=60):
+    """POST to the local embed server (OpenAI /v1/embeddings). texts: list[str] -> list[list[float]].
+    Validates one vector per input: a short/garbage body (server OOM, token overrun) RAISES rather than
+    letting a downstream zip() silently drop the trailing inputs (_embed_batch then retries per item)."""
     body = json.dumps({"model": EMBED_MODEL, "input": texts}).encode()
     req = urllib.request.Request(EMBED_URL, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.load(resp)
-    return [d["embedding"] for d in data["data"]]
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list) or len(items) != len(texts):
+        got = len(items) if isinstance(items, list) else "no"
+        raise ValueError(f"embed server returned {got} vectors for {len(texts)} inputs")
+    return [d["embedding"] for d in items]
 
 
 def _embed_input(text):
@@ -168,11 +179,22 @@ def index_files(paths, root, embed_fn=embed):
 
 
 def search_vec(query_vec, k=5):
-    """Brute-force cosine nearest neighbours over every stored chunk."""
+    """Brute-force cosine nearest neighbours over every stored chunk. Returns [] for a degenerate
+    (zero-norm) query, and skips any stored vector whose dimension differs from the query — a mismatch
+    (index built with a different embed model) would otherwise silently mis-score over a shared prefix."""
+    qdim = len(query_vec)
+    if math.sqrt(sum(x * x for x in query_vec)) == 0:
+        return []
     c = _conn()
-    rows = c.execute("SELECT path,start_line,end_line,content,vec FROM code_chunks").fetchall()
-    c.close()
-    scored = [(_cosine(query_vec, _unpack(r[4])), r) for r in rows]
+    try:
+        rows = c.execute("SELECT path,start_line,end_line,content,vec FROM code_chunks").fetchall()
+    finally:
+        c.close()
+    scored = []
+    for r in rows:
+        v = _unpack(r[4])
+        if len(v) == qdim:
+            scored.append((_cosine(query_vec, v), r))
     scored.sort(key=lambda t: t[0], reverse=True)
     return [{"path": r[0], "start_line": r[1], "end_line": r[2], "content": r[3], "score": round(s, 4)}
             for s, r in scored[:k]]
