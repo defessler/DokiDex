@@ -1,0 +1,5 @@
+{
+  "name": "t14-base-convert",
+  "kind": "tdd-feature",
+  "prompt": "The test suite references App.BaseConverter.ToBase(int n, int b), which isn't implemented yet, so the build currently fails. Create src/App/BaseConverter.cs with `public static string ToBase(int n, int b)` so the whole test suite passes. It converts the non-negative integer n into its representation in base b (2..16), using lowercase digits 0-9 then a-f for 10-15 (e.g. ToBase(255,16) -> \"ff\"). ToBase(0, b) returns \"0\". Throw ArgumentOutOfRangeException when n is negative or when b is outside 2..16. Do not modify the existing tests."
+}
