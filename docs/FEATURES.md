@@ -31,7 +31,7 @@ The inference layer is llama.cpp `llama-server` (native Windows CUDA) behind **l
 | Feature | What it does | How to use |
 |---|---|---|
 | **FIM infill server** `:8012` *(optional)* | Standalone fill-in-the-middle autocomplete; Qwen2.5-Coder-3B Q8 at 16384 ctx, ~4–6.6 GB VRAM. Independent of llama-swap so the editor and the agent can run at once. | `.\doki.ps1 up coexist`. Health `GET :8012/health`; infill `POST :8012/infill`. |
-| **llama.vscode editor autocomplete** *(optional)* | VS Code extension giving live inline FIM completions, with editor-chat pointed at llama-swap. | Launch llama.vscode yourself; run `up coexist`; point the coder at `coder-fast-lite` so both fit in 32 GB. Settings shipped as the partial `harness/llama.vscode-settings.json` (FIM → `:8012`, chat → `:8080/v1`, RAG **off**, Copilot disabled) — `setup.ps1` prompts you to merge it into `Code/User/settings.json`. |
+| **llama.vscode editor autocomplete** *(optional)* | VS Code extension giving live inline FIM completions, with editor-chat pointed at llama-swap. | Launch llama.vscode yourself; run `up coexist`; point the coder at `coder-fast-lite` so both fit in 32 GB. Settings shipped as the partial `harness/llama.vscode-settings.json` (FIM → `:8012`, chat → `:8080/v1`, RAG **on** → `:8090` embed server, Copilot disabled) — `setup.ps1` prompts you to merge it into `Code/User/settings.json`. |
 
 ---
 
@@ -57,6 +57,19 @@ A local FastMCP server (`doki-memory`, over stdio) gives the coding agent memory
 | **Auto-created schema** | Creates the `memories` table, FTS virtual table, and sync triggers on every connection. | Automatic. |
 | **Seed script** | Idempotently loads **14** hard-won DokiDex facts/gotchas (clears prior `seed` notes first) so the agent starts with real project knowledge. | `python serving/memory-mcp/seed.py` |
 | **Config** | DB at `serving/memory-mcp/memory.db`; path overridable via `MEMORY_DB`. Wired in `crush.json` → `mcp.memory` (`uv run --with mcp[cli] server.py`). | Automatic via Crush. |
+
+---
+
+## Codebase RAG (semantic code search)
+
+A pure-Python semantic index over the repo's own source, exposed as a `code_search` tool on the same `doki-memory` MCP server. A small **CPU-only** embed server (`:8090`, `nomic-embed-text-v1.5`) turns code chunks into vectors — `-ngl 0` + `CUDA_VISIBLE_DEVICES=-1` so it claims **0 VRAM** and coexists with the full-size coder; ranking is brute-force cosine in SQLite (no native vector extension needed). Live-verified on this repo.
+
+| Tool / feature | What it does | How to use |
+|---|---|---|
+| `code_search` | Semantic search over indexed source — finds WHERE something is implemented when a literal grep would miss the file (different wording / related concept). Returns path + line range + score. | `code_search(query, limit=5)` (Crush) |
+| **CPU embed server** `:8090` | `nomic-embed-text-v1.5` via `llama-server --embedding`, CPU-only → 0 VRAM; in the `agent` / `coexist` profiles. | Started by `doki up`; model auto-fetched (~260 MB) by `setup.ps1`. |
+| **Indexer** | Chunks source into overlapping line-windows, caps/batches each input to the embed token budget (skips a rejected chunk rather than aborting), stores vectors in a disposable `code_index.db`. | `doki index` (re)builds it. |
+| **Config** | Index DB at `serving/memory-mcp/code_index.db` (gitignored); `EMBED_URL` / `EMBED_MODEL` / `CODE_INDEX_DB` overridable. Wired in `crush.json` → `mcp.memory` (same server). | Automatic via Crush. |
 
 ---
 
@@ -164,23 +177,25 @@ A docker-compose-style manager with **no Docker**, data-driven from a `$Services
 
 | Command | What it does |
 |---|---|
-| `doki up [agent\|coexist\|media]` | Start a profile detached (default `agent`); stops the opposite GPU group first, then waits on each service's health. **Profiles:** `agent` = llama-swap + tts + stt · `coexist` = llama-swap + fim · `media` = media + prompt-rewriter. Skips services whose `requires` path is absent. |
+| `doki up [agent\|coexist\|media]` | Start a profile detached (default `agent`); stops the opposite GPU group first, then waits on each service's health. **Profiles:** `agent` = llama-swap + tts + stt + embed · `coexist` = llama-swap + fim + embed · `media` = media + prompt-rewriter. Skips services whose `requires` path is absent. |
 | `doki down` | Stop every managed service via its tracked PID file (taskkill `/T /F`). |
 | `doki status` | Human-readable service + health table (UP healthy / UP starting / down). |
 | `doki status json` | Machine-readable `{ services, profiles, gpu }` incl. loaded model, configured models, per-service install state, and the GPU gauge (used/total MB, util, temp, watts, fan, activeGroup). Feeds the panel. |
 | `doki restart [profile\|service]` | Restart one named service, or down+up a whole profile. |
-| `doki start <service>` / `stop <service>` | Per-service control, honoring the GPU group exclusion. Services: `llama-swap`, `fim`, `tts`, `stt`, `media`, `prompt-rewriter`. |
+| `doki start <service>` / `stop <service>` | Per-service control, honoring the GPU group exclusion. Services: `llama-swap`, `fim`, `embed`, `tts`, `stt`, `media`, `prompt-rewriter`. |
 | `doki logs <service>` | Live-tails BOTH a service's `.run/<name>.log` and `.run/<name>.log.err` streams (servers like llama-server/uvicorn log mainly to stderr). Seeds the last 20 lines of each, then follows by byte-offset, surviving log rotation/truncation. Ctrl+C to stop. |
 | `doki verify` | Full-stack live smoke test (delegates to `verify.ps1`). |
 | `doki doctor` | Environment + install diagnostics. |
-| `doki test` | Fast no-GPU unit suite — installer helpers + `status json` contract + memory store + control panel (incl. updater). |
+| `doki test` | Fast no-GPU unit suite — installer helpers + `status json` contract + `doki gen` recipes + memory store + codebase-RAG core + control panel (incl. updater). |
 | `doki panel` | Launch the WPF control panel. |
+| `doki gen "<idea>" [-Video\|-Music\|-Edit]` | Text→media one-liner — picks the SwarmUI recipe, expands the idea via the `:8013` rewriter, POSTs `GenerateText2Image`, opens the result. `-Fast` / `-Upscale` / `-InitImage` / `-Raw` / `-Out`. Needs `up media`. |
+| `doki index` | (Re)build the codebase RAG index that backs `code_search` (CPU embed server on `:8090`; never touches the GPU). |
 
 **Lifecycle internals:** PID-file process tracking · untracked-instance detection (reports already-up if a service was started outside doki but its health responds) · HTTP health probe + wait-for-health (≤120 s) · forced PID-tree kill on stop · auto-created `.run/` state dir for `.pid`/`.log` files.
 
-**GPU model:** group mutual-exclusion (`llm` vs `media`) enforced via each service's `group` field · per-service `vramGB` budgeting metadata (llama-swap 26, fim 4, tts 4, stt 1, media 18, prompt-rewriter 3) · GPU telemetry JSON from one `nvidia-smi` call · `activeGroup` detection · install-state detection via the `requires` guard.
+**GPU model:** group mutual-exclusion (`llm` vs `media`) enforced via each service's `group` field · per-service `vramGB` budgeting metadata (llama-swap 26, fim 4, embed 0, tts 4, stt 1, media 18, prompt-rewriter 3) · GPU telemetry JSON from one `nvidia-smi` call · `activeGroup` detection · install-state detection via the `requires` guard.
 
-**Shared launch contract:** every `serving/start-*.ps1` (serving, fim, media, prompt-rewriter, tts, stt) accepts `[-Detach] [-PidFile <p>] [-LogFile <l>]` to run hidden in the background with PID + log files — this is how `doki` launches and tracks each service.
+**Shared launch contract:** every `serving/start-*.ps1` (serving, fim, embed, media, prompt-rewriter, tts, stt) accepts `[-Detach] [-PidFile <p>] [-LogFile <l>]` to run hidden in the background with PID + log files — this is how `doki` launches and tracks each service.
 
 ---
 
