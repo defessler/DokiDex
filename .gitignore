@@ -17,6 +17,7 @@ serving/llama.cpp/
 *.log
 tmp/
 .scratch/
+.tmp-*           # root-level render/verify scratch (e.g. panel `--render .tmp-studio.png`)
 
 # doki control plane runtime (PID files + logs)
 .run/

@@ -12,6 +12,7 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _vm;
     private readonly DashboardView _dashboard;
+    private readonly StudioView _studio;
     private readonly LogsView _logs;
 
     public MainWindow()
@@ -22,8 +23,13 @@ public partial class MainWindow : Window
         _vm.ConfirmRequested += OnConfirmRequested;
 
         _dashboard = new DashboardView { DataContext = _vm };
+        _studio = new StudioView { DataContext = _vm.Studio };   // the Studio page binds its own sub-VM
         _logs = new LogsView { DataContext = _vm };
         PageHost.Content = _dashboard;
+        // --page <name> (paired with --design/--render) opens straight to a page so that surface can be
+        // captured off-GPU without a click. Default stays Dashboard.
+        if (App.StartPage == "studio") { PageHost.Content = _studio; SetNav(NavStudioBtn); }
+        else if (App.StartPage == "logs") { PageHost.Content = _logs; SetNav(NavLogsBtn); }
 
         // WindowChrome + WindowStyle=None covers the taskbar and bleeds past the screen on maximize
         // unless WM_GETMINMAXINFO clamps to the monitor work area (DPI/multi-monitor exact).
@@ -45,8 +51,9 @@ public partial class MainWindow : Window
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
     private void NavDashboard(object sender, RoutedEventArgs e) { PageHost.Content = _dashboard; SetNav(NavDashBtn); }
+    private void NavStudio(object sender, RoutedEventArgs e) { PageHost.Content = _studio; SetNav(NavStudioBtn); }
     private void NavLogs(object sender, RoutedEventArgs e) { PageHost.Content = _logs; SetNav(NavLogsBtn); }
-    private void SetNav(Button on) { NavDashBtn.Tag = null; NavLogsBtn.Tag = null; on.Tag = "active"; }
+    private void SetNav(Button on) { NavDashBtn.Tag = null; NavStudioBtn.Tag = null; NavLogsBtn.Tag = null; on.Tag = "active"; }
 
     private void OnConfirmRequested(ConfirmInfo info)
     {

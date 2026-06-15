@@ -15,6 +15,10 @@ public partial class App : Application
     /// from canned data with no backend/boot/updater — for off-GPU UI/theme iteration + snapshots.</summary>
     public static bool DesignMode { get; private set; }
 
+    /// <summary>Optional initial page for --design / --render (e.g. `--page studio`) so a specific surface
+    /// can be opened or captured off-GPU without a click. Null → Dashboard (the default).</summary>
+    public static string? StartPage { get; private set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -38,6 +42,7 @@ public partial class App : Application
         // no single-instance lock — for off-GPU UI/theme iteration + snapshots.  (dotnet run -- --design)
         // --render <path>: the same canned panel, drawn ONCE fully off-screen to a PNG (honest hero preview +
         // snapshot capture), then exit — never shows a window on a monitor and loads no models.
+        StartPage = ArgValue(e.Args, "--page")?.ToLowerInvariant();
         var renderPath = ArgValue(e.Args, "--render");
         if (renderPath != null) { DesignMode = true; RenderDesignToPng(renderPath); return; }
 

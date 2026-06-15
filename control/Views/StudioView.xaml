@@ -1,0 +1,177 @@
+<UserControl x:Class="DokiDex.Control.Views.StudioView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <UserControl.Resources>
+    <!-- prompt box -->
+    <Style x:Key="PromptBox" TargetType="TextBox">
+      <Setter Property="Background" Value="{StaticResource BgBrush}"/>
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+      <Setter Property="CaretBrush" Value="{StaticResource TealBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush2}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="11,8"/>
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="AcceptsReturn" Value="True"/>
+      <Setter Property="VerticalContentAlignment" Value="Top"/>
+    </Style>
+    <!-- a selectable kind pill: active = cyan ring (the emitting accent), gold = hover only -->
+    <Style x:Key="KindChip" TargetType="ListBoxItem">
+      <Setter Property="Foreground" Value="{StaticResource DimBrush}"/>
+      <Setter Property="Padding" Value="13,5"/>
+      <Setter Property="Margin" Value="0,0,6,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border x:Name="bd" Background="{StaticResource Surface2Brush}" CornerRadius="13"
+                    Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource TealBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- modifier toggle (Fast / Upscale): on = cyan ring -->
+    <Style x:Key="ModToggle" TargetType="ToggleButton">
+      <Setter Property="Foreground" Value="{StaticResource DimBrush}"/>
+      <Setter Property="Padding" Value="12,5"/>
+      <Setter Property="Margin" Value="6,0,0,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="bd" Background="{StaticResource Surface2Brush}" CornerRadius="13"
+                    Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource TealBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- the primary call-to-action: a cyan-filled Generate button -->
+    <Style x:Key="GenerateBtn" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource BgBrush}"/>
+      <Setter Property="Background" Value="{StaticResource TealBrush}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="20,7"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Opacity" Value="0.9"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="bd" Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </UserControl.Resources>
+
+  <DockPanel Background="{StaticResource BgBrush}">
+
+    <!-- ===== compose bar ===== -->
+    <Border DockPanel.Dock="Top" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}"
+            BorderThickness="0,0,0,1" Padding="20,16">
+      <StackPanel>
+        <TextBlock Style="{StaticResource SectionHeader}">
+          <Run Text="DokiGen Studio" Foreground="{StaticResource AmberBrush}"/><Run Text="  ·  describe → generate → remix" Foreground="{StaticResource DimBrush}"/>
+        </TextBlock>
+        <TextBox Style="{StaticResource PromptBox}" Height="60" Margin="0,9,0,0"
+                 Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}"/>
+        <DockPanel Margin="0,12,0,0">
+          <Button DockPanel.Dock="Right" Style="{StaticResource GenerateBtn}" Content="✨ Generate"
+                  Command="{Binding GenerateCommand}" IsEnabled="{Binding CanGenerate}" VerticalAlignment="Center"/>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,14,0">
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Fast" IsChecked="{Binding Fast}"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Upscale" IsChecked="{Binding Upscale}"/>
+          </StackPanel>
+          <ListBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}" Background="Transparent"
+                   BorderThickness="0" ItemContainerStyle="{StaticResource KindChip}" VerticalAlignment="Center"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+          </ListBox>
+        </DockPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- ===== tray (bottom): status + result actions ===== -->
+    <Border DockPanel.Dock="Bottom" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}"
+            BorderThickness="0,1,0,0" Padding="20,9">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                    Visibility="{Binding HasResult, Converter={StaticResource BoolVis}}">
+          <Button Content="↻ remix" Style="{StaticResource IconBtn}" Command="{Binding RemixCommand}" ToolTip="re-generate with a tweak"/>
+          <Button Content="⎘ open" Style="{StaticResource IconBtn}" Command="{Binding OpenResultCommand}"/>
+        </StackPanel>
+        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource DimBrush}" Style="{StaticResource Mono}"
+                   FontSize="11.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+      </DockPanel>
+    </Border>
+
+    <!-- ===== preview (center, fills) ===== -->
+    <Grid>
+      <Border Margin="20" Background="{StaticResource Surface2Brush}" CornerRadius="10"
+              BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1">
+        <Grid>
+          <!-- empty state: an inviting framed canvas until the first result lands -->
+          <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Visibility="{Binding HasResult, Converter={StaticResource InvBoolVis}}">
+            <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="58" Height="58" HorizontalAlignment="Center"
+                  Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.4"/>
+            <TextBlock Text="your generation appears here"
+                       Foreground="{StaticResource DimBrush}" Style="{StaticResource Mono}" FontSize="12"
+                       HorizontalAlignment="Center" Margin="0,16,0,0"/>
+          </StackPanel>
+          <!-- result: a framed square preview card (scales DOWN on small windows, never up) -->
+          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="22"
+                   Visibility="{Binding HasResult, Converter={StaticResource BoolVis}}">
+            <Border Width="540" Height="540" CornerRadius="10" BorderThickness="1"
+                    BorderBrush="{StaticResource BorderBrush2}">
+              <Border.Background>
+                <ImageBrush ImageSource="{Binding ResultPreview}" Stretch="UniformToFill"/>
+              </Border.Background>
+              <!-- Sora-style caption chip: the recipe + resolution, lower-left -->
+              <Border VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="12" Padding="9,4"
+                      CornerRadius="5" Background="#CC080C12">
+                <TextBlock Text="{Binding ResultCaption}" Foreground="{StaticResource TextBrush}"
+                           Style="{StaticResource Mono}" FontSize="11"/>
+              </Border>
+            </Border>
+          </Viewbox>
+        </Grid>
+      </Border>
+      <!-- media-mode guard (hidden when media is active) -->
+      <Border VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,34,0,0" Background="{StaticResource SurfaceBrush}"
+              CornerRadius="6" Padding="14,9" BorderBrush="{StaticResource AmberBrush}" BorderThickness="1"
+              Visibility="{Binding MediaActive, Converter={StaticResource InvBoolVis}}">
+        <TextBlock Foreground="{StaticResource AmberBrush}" FontSize="12" Style="{StaticResource Mono}"
+                   Text="⚠  switch to MEDIA mode to generate  (Dashboard → MEDIA)"/>
+      </Border>
+    </Grid>
+
+  </DockPanel>
+</UserControl>

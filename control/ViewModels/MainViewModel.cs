@@ -26,6 +26,7 @@ public partial class MainViewModel : ObservableObject
     public int TotalServiceCount => LlmServices.Count + MediaServices.Count;
     public GpuViewModel Gpu { get; } = new();
     public LogsViewModel Logs { get; } = new();
+    public StudioViewModel Studio { get; }   // the DokiGen Studio page; shares the one DokiService
 
     [ObservableProperty] private string _activeMode = "none";
     [ObservableProperty] private string _activeGroup = "none";
@@ -58,7 +59,11 @@ public partial class MainViewModel : ObservableObject
     // VM asks the View to confirm a GPU-evicting switch.
     public event Action<ConfirmInfo>? ConfirmRequested;
 
-    public MainViewModel(Dispatcher ui) => _ui = ui;
+    public MainViewModel(Dispatcher ui)
+    {
+        _ui = ui;
+        Studio = new StudioViewModel(_doki);
+    }
 
     public string SwitchExplain => BuildExplain(string.IsNullOrEmpty(HoverMode) ? ActiveMode : HoverMode);
 
@@ -76,6 +81,7 @@ public partial class MainViewModel : ObservableObject
         Apply(SampleData.Status());
         if (_byName.TryGetValue("stt", out var crashed)) { crashed.StateKind = "crashed"; crashed.StateLabel = "running · not responding"; }
         StatusText = "design sample — no backend";
+        Studio.LoadDesignSample();   // populate the Studio page too (overrides MediaActive to the happy-path)
     }
 
     public void Shutdown()
@@ -132,6 +138,7 @@ public partial class MainViewModel : ObservableObject
         ActiveMode = DeriveMode();
         LlmActive = ActiveGroup != "media";
         MediaActive = ActiveGroup == "media";
+        Studio.MediaActive = MediaActive;   // the Studio's generate-guard tracks live media mode
         Logs.SyncServices(doc.Services.Select(x => x.Name));
         LastUpdated = DateTime.Now.ToString("HH:mm:ss");
         if (_actionTicks > 0) _actionTicks--;

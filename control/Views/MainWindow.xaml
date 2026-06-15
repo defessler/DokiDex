@@ -200,6 +200,7 @@
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Text="VIEW" Style="{StaticResource SectionHeader}"/>
           <Button x:Name="NavDashBtn" Content="Dashboard" Style="{StaticResource NavBtn}" Tag="active" Click="NavDashboard"/>
+          <Button x:Name="NavStudioBtn" Content="Studio" Style="{StaticResource NavBtn}" Click="NavStudio"/>
           <Button x:Name="NavLogsBtn" Content="Logs" Style="{StaticResource NavBtn}" Click="NavLogs"/>
         </StackPanel>
 

@@ -29,6 +29,9 @@
     <!-- native splash: shown by unmanaged code before JIT/extraction, so a self-contained
          single-file launch gets instant feedback; it cross-fades into the animated BootWindow -->
     <SplashScreen Include="assets\splash.png" />
+    <!-- DokiGen Studio design-mode preview (embedded, so the single-file exe carries it; loaded via
+         pack:// in StudioViewModel.LoadDesignSample). Regenerate with assets\studio-sample.gen.py. -->
+    <Resource Include="assets\studio-sample.png" />
   </ItemGroup>
 
   <!-- the test project lives under this folder; don't glob its sources into the app -->
