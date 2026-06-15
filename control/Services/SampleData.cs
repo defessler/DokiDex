@@ -22,6 +22,7 @@ internal static class SampleData
             // DokiCode (llm) band — active/bright
             new() { Name = "llama-swap", Group = "llm", Installed = true, Running = true, Healthy = true,  Port = 8080, Ui = "http://127.0.0.1:8080/ui", VramGb = 26, Pid = 12344, Model = "coder-fast", ConfiguredModels = new() { "coder-big", "coder-fast", "coder-fast-lite" }, Version = "llama-swap v224" },
             new() { Name = "fim",        Group = "llm", Installed = true, Running = true, Healthy = false, Port = 8012, VramGb = 5, Pid = 12880, Model = "qwen2.5-coder-3b" },               // degraded -> calm pulse
+            new() { Name = "embed",      Group = "llm", Installed = true, Running = true, Healthy = true,  Port = 8090, VramGb = 0, Pid = 12990, Model = "nomic-embed-text-v1.5" },          // RAG code_search (CPU, 0 VRAM)
             new() { Name = "tts",        Group = "llm", Installed = true, Running = false, Healthy = false, Port = 8004, Ui = "http://127.0.0.1:8004/", VramGb = 4 },                            // installed but stopped -> down (▶ start)
             new() { Name = "stt",        Group = "llm", Installed = true, Running = true, Healthy = false, Port = 8005, VramGb = 1, Pid = 13422, Model = "parakeet" },                         // forced -> crashed (red alarm)
             // DokiGen (media) band — recessed
