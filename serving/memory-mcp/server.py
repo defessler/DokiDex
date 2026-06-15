@@ -47,5 +47,24 @@ def memory_delete(memory_id: int) -> str:
     return f"deleted memory #{memory_id}"
 
 
+@mcp.tool()
+def code_search(query: str, limit: int = 5) -> str:
+    """Semantic search over THIS repository's indexed source code (RAG). Returns the most relevant code
+    chunks with their file path + line range — use it to find WHERE something is implemented when a literal
+    keyword grep would miss the right file (different wording, related concept). Requires the local embed
+    server and a prior index build; returns a hint if either is missing."""
+    try:
+        import code_index
+        rows = code_index.search(query, limit)
+    except Exception as e:  # embed server down / index missing / bad query — never crash the MCP session
+        return (f"code_search unavailable ({type(e).__name__}: {e}). Is the embed server up and the repo "
+                "indexed?  Build the index with:  python serving/memory-mcp/code_index.py")
+    if not rows:
+        return "no matching code chunks — is the index built?  (python serving/memory-mcp/code_index.py)"
+    return "\n\n".join(
+        f"{r['path']}:{r['start_line']}-{r['end_line']}  (score {r['score']})\n{r['content'][:500]}"
+        for r in rows)
+
+
 if __name__ == "__main__":
     mcp.run()

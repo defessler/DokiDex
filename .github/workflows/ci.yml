@@ -59,3 +59,9 @@ jobs:
         run: |
           python tests/memory_db.test.py
           if ($LASTEXITCODE -ne 0) { throw "memory_db.test.py failed (exit $LASTEXITCODE)" }
+
+      - name: Python — codebase RAG core
+        shell: pwsh
+        run: |
+          python tests/code_index.test.py
+          if ($LASTEXITCODE -ne 0) { throw "code_index.test.py failed (exit $LASTEXITCODE)" }

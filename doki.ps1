@@ -379,15 +379,18 @@ switch ($Command) {
                 if ($LASTEXITCODE -ne 0) { $failed = 1 }
             }
         }
-        # 2. persistent-memory store (sqlite + FTS5) — pure-stdlib python; skipped if python absent.
-        $memTest = Join-Path $root "tests\memory_db.test.py"
-        if (Test-Path $memTest) {
-            if (Get-Command python -ErrorAction SilentlyContinue) {
-                Write-Host "`n== memory_db.test.py ==" -ForegroundColor Cyan
-                & python $memTest
-                if ($LASTEXITCODE -ne 0) { $failed = 1 }
-            } else { Write-Host "`n~ memory_db.test.py skipped (python not found)" }
-        }
+        # 2. python suites (pure-stdlib): sqlite/FTS5 memory store + the codebase-RAG core. Skipped if
+        #    python is absent (the rest of the suite still runs).
+        if (Get-Command python -ErrorAction SilentlyContinue) {
+            foreach ($pt in @("tests\memory_db.test.py", "tests\code_index.test.py")) {
+                $ptp = Join-Path $root $pt
+                if (Test-Path $ptp) {
+                    Write-Host "`n== $(Split-Path $ptp -Leaf) ==" -ForegroundColor Cyan
+                    & python $ptp
+                    if ($LASTEXITCODE -ne 0) { $failed = 1 }
+                }
+            }
+        } else { Write-Host "`n~ python tests skipped (python not found)" }
         # 3. control-panel data layer (xUnit).
         $proj = Join-Path $root "control\DokiDex.Control.Tests\DokiDex.Control.Tests.csproj"
         if (Test-Path $proj) {
