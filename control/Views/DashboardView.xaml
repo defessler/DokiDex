@@ -35,20 +35,25 @@
                 <Ellipse.Style>
                   <Style TargetType="Ellipse">
                     <Style.Triggers>
-                      <!-- running-but-not-healthy = starting/loading: a calm pulse signals "working on it" -->
-                      <DataTrigger Binding="{Binding StateKind}" Value="degraded">
-                        <DataTrigger.EnterActions>
+                      <!-- running-but-not-healthy = starting/loading: a calm pulse signals "working on it".
+                           Gated on ClientAreaAnimation so the OS "show animations off" setting yields a still dot. -->
+                      <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                          <Condition Binding="{Binding StateKind}" Value="degraded"/>
+                          <Condition Binding="{Binding Source={x:Static SystemParameters.ClientAreaAnimation}}" Value="True"/>
+                        </MultiDataTrigger.Conditions>
+                        <MultiDataTrigger.EnterActions>
                           <BeginStoryboard Name="Pulse">
                             <Storyboard>
                               <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.3"
                                                Duration="0:0:0.75" AutoReverse="True" RepeatBehavior="Forever"/>
                             </Storyboard>
                           </BeginStoryboard>
-                        </DataTrigger.EnterActions>
-                        <DataTrigger.ExitActions>
+                        </MultiDataTrigger.EnterActions>
+                        <MultiDataTrigger.ExitActions>
                           <StopStoryboard BeginStoryboardName="Pulse"/>
-                        </DataTrigger.ExitActions>
-                      </DataTrigger>
+                        </MultiDataTrigger.ExitActions>
+                      </MultiDataTrigger>
                     </Style.Triggers>
                   </Style>
                 </Ellipse.Style>
@@ -176,12 +181,21 @@
             Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.4" HorizontalAlignment="Center"/>
       <TextBlock Text="reading  doki status …" Style="{StaticResource Mono}" FontSize="12"
                  Foreground="{StaticResource DimBrush}" Margin="0,16,0,0" HorizontalAlignment="Center"/>
+      <!-- loading heartbeat; gated on ClientAreaAnimation (OS "show animations off" -> a still dot) -->
       <Ellipse Width="5" Height="5" Margin="0,12,0,0" HorizontalAlignment="Center" Fill="{StaticResource TealBrush}">
-        <Ellipse.Triggers>
-          <EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard>
-            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.25" To="1" Duration="0:0:0.6" AutoReverse="True" RepeatBehavior="Forever"/>
-          </Storyboard></BeginStoryboard></EventTrigger>
-        </Ellipse.Triggers>
+        <Ellipse.Style>
+          <Style TargetType="Ellipse">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Source={x:Static SystemParameters.ClientAreaAnimation}}" Value="True">
+                <DataTrigger.EnterActions>
+                  <BeginStoryboard><Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.25" To="1" Duration="0:0:0.6" AutoReverse="True" RepeatBehavior="Forever"/>
+                  </Storyboard></BeginStoryboard>
+                </DataTrigger.EnterActions>
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Ellipse.Style>
       </Ellipse>
     </StackPanel>
 
