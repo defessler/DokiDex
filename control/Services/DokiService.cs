@@ -56,6 +56,58 @@ public sealed class DokiService
         { try { Process.Start(new ProcessStartInfo(pathOrUrl) { UseShellExecute = true })?.Dispose(); } catch { } }
     }
 
+    // ---- DokiGen Studio: text->media via `doki gen` (needs media mode; live run verified in a card session) ----
+    private static readonly string GenTempDir = Path.Combine(Path.GetTempPath(), "dokigen");
+    private static readonly string[] AllowedMedia = { ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mp3", ".wav", ".flac" };
+
+    private static int _genSeq;   // process-wide monotonic suffix: makes the path unique even for two gens in the same ms
+
+    // The panel owns the artifact's temp location (so it can both pass -Out and later scope-check the open).
+    public string NewGenOutPath(string kind)
+    {
+        Directory.CreateDirectory(GenTempDir);
+        var seq = Interlocked.Increment(ref _genSeq);
+        return Path.Combine(GenTempDir, $"{kind}-{DateTime.Now:yyyyMMdd-HHmmss}-{seq}{GenRequest.OutExtensionFor(kind)}");
+    }
+
+    // Shell `doki gen …` and wait (gen can take minutes). doki saves the artifact to req.OutPath; success =
+    // exit 0 AND the file landed. On failure, surface doki's last stderr/stdout line. The arg-building
+    // (GenCli.BuildArgs) is pure + unit-tested; this is the thin live shell over it.
+    public async Task<GenResult> RunGenAsync(GenRequest req, CancellationToken ct = default)
+    {
+        var args = GenCli.BuildArgs(req);
+        var (ok, stdout, stderr) = await CaptureFullAsync(args, TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
+        if (ok && !string.IsNullOrEmpty(req.OutPath) && File.Exists(req.OutPath))
+            return new GenResult(true, req.OutPath, "done");
+        var msg = LastMeaningfulLine(stderr) ?? LastMeaningfulLine(stdout) ?? "generation failed";
+        return new GenResult(false, req.OutPath, msg);
+    }
+
+    // Open a media artifact the panel itself generated. Scoped to GenTempDir + an allowlisted media
+    // extension so this can never be coerced into shell-opening an arbitrary path (cf. OpenArtifact's note).
+    public void OpenLocalMedia(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path) || !File.Exists(path)) return;
+        var full = Path.GetFullPath(path);
+        var root = Path.GetFullPath(GenTempDir) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+        if (Array.IndexOf(AllowedMedia, Path.GetExtension(full).ToLowerInvariant()) < 0) return;
+        try { Process.Start(new ProcessStartInfo(full) { UseShellExecute = true })?.Dispose(); } catch { }
+    }
+
+    // last non-blank line, trimmed — doki throws (e.g. "SwarmUI not reachable …") land on stderr.
+    internal static string? LastMeaningfulLine(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        var lines = s.Split('\n');
+        for (int i = lines.Length - 1; i >= 0; i--)
+        {
+            var t = lines[i].Trim();
+            if (t.Length > 0) return t;
+        }
+        return null;
+    }
+
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(8) };
 
     // Warm-load a coder model into llama-swap by sending it a 1-token request — llama-swap
@@ -117,7 +169,38 @@ public sealed class DokiService
         finally { p?.Dispose(); }
     }
 
-    private static ProcessStartInfo NewPsi(string[] args, bool capture)
+    // Like CaptureAsync but returns exit-success + BOTH streams, with a caller-set timeout (gen runs for
+    // minutes, not the 30s status budget). Same pipe-drain discipline so a chatty child can't deadlock.
+    private static async Task<(bool ok, string stdout, string stderr)> CaptureFullAsync(IReadOnlyList<string> args, TimeSpan timeout, CancellationToken ct)
+    {
+        var psi = NewPsi(args, capture: true);
+        Process? p = null;
+        try
+        {
+            p = Process.Start(psi);
+            if (p == null) return (false, "", "could not start pwsh");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(timeout);
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            var errTask = p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+            await Task.WhenAll(outTask, errTask).ConfigureAwait(false);
+            return (p.ExitCode == 0, outTask.Result, errTask.Result);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { }
+            return (false, "", "generation timed out");
+        }
+        catch (Exception ex)
+        {
+            try { if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { }
+            return (false, "", ex.Message);
+        }
+        finally { p?.Dispose(); }
+    }
+
+    private static ProcessStartInfo NewPsi(IReadOnlyList<string> args, bool capture)
     {
         var psi = new ProcessStartInfo
         {

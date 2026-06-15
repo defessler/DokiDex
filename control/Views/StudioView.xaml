@@ -106,9 +106,15 @@
           <Button DockPanel.Dock="Right" Style="{StaticResource GenerateBtn}" Content="✨ Generate"
                   Command="{Binding GenerateCommand}" IsEnabled="{Binding CanGenerate}" VerticalAlignment="Center"/>
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,14,0">
-            <ToggleButton Style="{StaticResource ModToggle}" Content="Fast" IsChecked="{Binding Fast}"/>
-            <ToggleButton Style="{StaticResource ModToggle}" Content="Upscale" IsChecked="{Binding Upscale}"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Fast" IsChecked="{Binding Fast}" ToolTip="LTXV video / fewer image steps"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Upscale" IsChecked="{Binding Upscale}" ToolTip="4× UltraSharp (image / edit)"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Raw" IsChecked="{Binding Raw}" ToolTip="skip the prompt rewriter"/>
           </StackPanel>
+          <!-- source-image picker: only edit / i2v take an init image (-InitImage) -->
+          <Button DockPanel.Dock="Left" Style="{StaticResource IconBtn}" Content="⎘ source"
+                  Command="{Binding PickInitImageCommand}" VerticalAlignment="Center" Margin="0,0,10,0"
+                  ToolTip="{Binding InitImagePath, FallbackValue='pick a source image (edit / i2v)'}"
+                  Visibility="{Binding ShowInitImage, Converter={StaticResource BoolVis}}"/>
           <ListBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}" Background="Transparent"
                    BorderThickness="0" ItemContainerStyle="{StaticResource KindChip}" VerticalAlignment="Center"
                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -124,7 +130,7 @@
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
                     Visibility="{Binding HasResult, Converter={StaticResource BoolVis}}">
-          <Button Content="↻ remix" Style="{StaticResource IconBtn}" Command="{Binding RemixCommand}" ToolTip="re-generate with a tweak"/>
+          <Button Content="↻ remix" Style="{StaticResource IconBtn}" Command="{Binding RemixCommand}" IsEnabled="{Binding CanGenerate}" ToolTip="re-generate (re-seeds)"/>
           <Button Content="⎘ open" Style="{StaticResource IconBtn}" Command="{Binding OpenResultCommand}"/>
         </StackPanel>
         <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource DimBrush}" Style="{StaticResource Mono}"
