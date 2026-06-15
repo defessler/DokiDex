@@ -28,6 +28,14 @@ control panel — all uncensored, all on one box.
 - Make the smallest change that solves the task; don't refactor unrelated code. List a directory
   rather than inventing a path.
 
+## Web
+
+A keyless `websearch` MCP (DuckDuckGo — no AI-cloud traffic) is available:
+
+- `search(query, max_results)` — titles, URLs, snippets.
+- `fetch_content(url)` — fetch a page and extract its main readable text (nav/headers/footers
+  stripped). Use it to actually READ a promising result, not just act on the snippet.
+
 ## Memory
 
 A persistent `memory` MCP is available and survives across sessions — use it:

@@ -20,6 +20,14 @@ One sentence: what this codebase is.
 - Never invent file paths — list the directory if unsure.
 - Follow the existing code style of the file you are editing.
 
+## Web
+
+A `websearch` MCP (DuckDuckGo, keyless) is available:
+
+- `search(query, max_results)` — titles, URLs, snippets.
+- `fetch_content(url)` — fetch a page and extract its main readable text. Use it to READ a result,
+  not just its snippet.
+
 ## Memory
 
 A persistent `memory` MCP is available and survives across sessions — use it:
