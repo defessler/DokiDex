@@ -1,10 +1,11 @@
 {
-  "//": "Copy into VS Code user settings (%APPDATA%\\Code\\User\\settings.json). Points llama.vscode FIM autocomplete at the local FIM server (serving/start-fim.ps1 on :8012) and editor chat at llama-swap (:8080). RAG off — no embeddings server in scope.",
+  "//": "Copy into VS Code user settings (%APPDATA%\\Code\\User\\settings.json). FIM autocomplete -> local FIM server (serving/start-fim.ps1 on :8012); editor chat -> llama-swap (:8080); RAG embeddings -> the CPU embed server (serving/start-embed.ps1 on :8090, started by `doki up`). If your llama.vscode build names the embeddings setting differently, point that setting at :8090.",
   "llama-vscode.endpoint": "http://127.0.0.1:8012",
   "llama-vscode.endpoint_chat": "http://127.0.0.1:8080/v1",
+  "llama-vscode.endpoint_embeddings": "http://127.0.0.1:8090",
   "llama-vscode.api_key": "",
   "llama-vscode.auto": true,
   "llama-vscode.enabled": true,
-  "llama-vscode.rag_enabled": false,
+  "llama-vscode.rag_enabled": true,
   "github.copilot.enable": { "*": false }
 }

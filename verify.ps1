@@ -1,6 +1,6 @@
 # verify.ps1 — full-stack functional smoke test for DokiDex.
 # Cycles the doki modes and checks each capability with a REAL API call:
-#   chat/code (:8080) · autocomplete (:8012) · image + video (:7801)
+#   chat/code (:8080) · autocomplete (:8012) · codebase RAG (:8090) · image + video (:7801)
 # Restores agent mode at the end. Run via:  .\verify.ps1   or   .\doki.ps1 verify
 # -Json emits the results as JSON to stdout (no colored grid) for a machine/panel to consume.
 param([switch]$Json)
@@ -79,6 +79,38 @@ if (-not (Test-Path (Join-Path $root "serving\memory-mcp\memory_db.py"))) {
         $out = python -c "import os,sys; sys.path.insert(0,os.environ['MEMPATH']); import memory_db; memory_db.save('verify probe alpha bravo charlie','test'); r=memory_db.search('bravo'); print('OK' if r and 'alpha bravo' in r[0]['content'] else 'FAIL')" 2>&1 | Select-Object -Last 1
         $results["memory MCP"] = if ("$out" -match "OK") { "PASS  store+search ok" } else { "FAIL  $out" }
     } catch { $results["memory MCP"] = "FAIL  $($_.Exception.Message)" }
+}
+
+# 1e. codebase RAG — the CPU embed server (:8090) + code_search. Indexes two real repo files through the
+#      LIVE embed model, then checks a semantic query returns a real indexed file with positive similarity
+#      (verifies the whole embed->index->cosine pipeline, not just exact ranking). Throwaway index DB so it
+#      never touches the real code_index.db. SKIP cleanly if the embed model isn't fetched.
+Write-Host "[verify] codebase RAG (code_search) ..."
+if (-not (Test-Path (Join-Path $root "models\nomic-embed-text-v1.5.f16.gguf"))) {
+    $results["codebase RAG (:8090)"] = "SKIP  (embed model not installed)"
+} elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    $results["codebase RAG (:8090)"] = "SKIP  (python not found)"
+} elseif (-not (Probe "http://127.0.0.1:8090/health")) {
+    $results["codebase RAG (:8090)"] = "FAIL  embed server not up on :8090 (started by 'up agent')"
+} else {
+    try {
+        $env:CODE_INDEX_DB = Join-Path $env:TEMP "doki_codeidx_verify.db"
+        $env:MEMPATH = Join-Path $root "serving\memory-mcp"
+        Remove-Item $env:CODE_INDEX_DB -ErrorAction SilentlyContinue
+        $py = @"
+import os, sys
+sys.path.insert(0, os.environ['MEMPATH'])
+import code_index
+files = ['serving/start-embed.ps1', 'serving/start-tts.ps1']
+code_index.reset()
+code_index.index_files(files, r'$root')
+hits = code_index.search('speech synthesis and voice cloning', k=1)
+ok = bool(hits) and hits[0]['score'] > 0 and hits[0]['path'] in files
+print('OK' if ok else 'FAIL ' + str(hits[:1]))
+"@
+        $out = python -c $py 2>&1 | Select-Object -Last 1
+        $results["codebase RAG (:8090)"] = if ("$out" -match "OK") { "PASS  embed+index+search ok" } else { "FAIL  $out" }
+    } catch { $results["codebase RAG (:8090)"] = "FAIL  $($_.Exception.Message)" }
 }
 
 # 2. autocomplete — coexist mode, FIM infill

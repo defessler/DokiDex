@@ -104,6 +104,18 @@ Info "LLM assets"
     if (Test-Path (Join-Path $root $_.Key)) { Ok $_.Key } else { Warn "MISSING $($_.Key) -> $($_.Value)" }
 }
 
+# Embed model for the codebase RAG (the code_search MCP tool; CPU-served on :8090). Small (~140MB) and
+# reliable, so — unlike the large out-of-band coders above — it's auto-fetched here for turnkey RAG.
+$embedGguf = Join-Path $root "models\nomic-embed-text-v1.5.f16.gguf"
+if (Test-Path $embedGguf) { Ok "embed model present (nomic-embed-text-v1.5)" }
+else {
+    Info "downloading embed model (nomic-embed-text-v1.5 f16, ~140MB) for code_search ..."
+    New-Item -ItemType Directory -Force (Split-Path $embedGguf) | Out-Null
+    curl.exe -L --fail --retry 3 -o "$embedGguf.part" "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
+    if ($LASTEXITCODE -eq 0) { Move-Item -Force "$embedGguf.part" $embedGguf; Ok "embed model downloaded" }
+    else { Remove-Item "$embedGguf.part" -Force -ErrorAction SilentlyContinue; Warn "embed model download failed — code_search stays off until it's present" }
+}
+
 # ---- TTS stack: uncensored speech + zero-shot voice cloning (Chatterbox) — optional, works with or without -Media ----
 if ($Tts) {
     Info "TTS stack (Chatterbox: uncensored speech + zero-shot voice cloning)"
