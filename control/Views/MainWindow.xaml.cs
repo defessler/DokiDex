@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private readonly DashboardView _dashboard;
     private readonly StudioView _studio;
     private readonly LogsView _logs;
+    private readonly string? _studioVariant;   // --page studio:<variant> design-mode state to snapshot
 
     public MainWindow()
     {
@@ -26,10 +27,13 @@ public partial class MainWindow : Window
         _studio = new StudioView { DataContext = _vm.Studio };   // the Studio page binds its own sub-VM
         _logs = new LogsView { DataContext = _vm };
         PageHost.Content = _dashboard;
-        // --page <name> (paired with --design/--render) opens straight to a page so that surface can be
-        // captured off-GPU without a click. Default stays Dashboard.
-        if (App.StartPage == "studio") { PageHost.Content = _studio; SetNav(NavStudioBtn); }
-        else if (App.StartPage == "logs") { PageHost.Content = _logs; SetNav(NavLogsBtn); }
+        // --page <name>[:variant] (paired with --design/--render) opens straight to a page so that surface
+        // can be captured off-GPU without a click. e.g. "studio:generating". Default stays Dashboard.
+        var page = App.StartPage;
+        var pageName = page?.Split(':', 2)[0];
+        _studioVariant = page != null && page.Contains(':') ? page.Split(':', 2)[1] : null;
+        if (pageName == "studio") { PageHost.Content = _studio; SetNav(NavStudioBtn); }
+        else if (pageName == "logs") { PageHost.Content = _logs; SetNav(NavLogsBtn); }
 
         // WindowChrome + WindowStyle=None covers the taskbar and bleeds past the screen on maximize
         // unless WM_GETMINMAXINFO clamps to the monitor work area (DPI/multi-monitor exact).
@@ -41,7 +45,12 @@ public partial class MainWindow : Window
             MaxBtn.ToolTip = max ? "Restore" : "Maximize"; // keep the affordance in sync with the glyph
         };
 
-        Loaded += (_, _) => { if (App.DesignMode) _vm.LoadDesignSample(); else _vm.Start(); };
+        Loaded += (_, _) =>
+        {
+            if (!App.DesignMode) { _vm.Start(); return; }
+            _vm.LoadDesignSample();
+            if (_studioVariant != null) _vm.Studio.LoadDesignSample(_studioVariant);   // override the Studio state to snapshot
+        };
         Closed += (_, _) => _vm.Shutdown();
     }
 

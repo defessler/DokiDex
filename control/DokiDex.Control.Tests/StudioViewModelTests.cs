@@ -74,4 +74,51 @@ public class StudioViewModelTests
         Assert.False(string.IsNullOrWhiteSpace(vm.PromptText));
         Assert.Equal("image", vm.SelectedKind);
     }
+
+    [Theory]
+    [InlineData("empty", true, false, false)]
+    [InlineData("generating", true, true, false)]
+    [InlineData("guard", false, false, false)]
+    [InlineData("result", true, false, true)]
+    public void Design_variants_set_the_state_each_snapshot_captures(string variant, bool media, bool generating, bool hasResult)
+    {
+        var vm = New();
+        vm.LoadDesignSample(variant);
+        Assert.Equal(media, vm.MediaActive);
+        Assert.Equal(generating, vm.IsGenerating);
+        Assert.Equal(hasResult, vm.HasResult);
+    }
+
+    [Fact]
+    public void ShowInitImage_only_for_edit_and_i2v()
+    {
+        var vm = New();
+        vm.SelectedKind = "image"; Assert.False(vm.ShowInitImage);
+        vm.SelectedKind = "edit";  Assert.True(vm.ShowInitImage);
+        vm.SelectedKind = "i2v";   Assert.True(vm.ShowInitImage);
+        vm.SelectedKind = "video"; Assert.False(vm.ShowInitImage);
+    }
+
+    [Fact]
+    public void SwitchToMedia_invokes_the_host_callback()
+    {
+        var vm = New();
+        int n = 0;
+        vm.SwitchToMediaRequested = () => n++;
+        vm.SwitchToMediaCommand.Execute(null);
+        Assert.Equal(1, n);
+    }
+
+    [Fact]
+    public void SwitchToMedia_is_safe_with_no_host_callback()
+        => New().SwitchToMediaCommand.Execute(null);   // null callback (standalone) must not throw
+
+    [Fact]
+    public void ShowEmpty_only_when_idle_with_no_result()
+    {
+        var vm = New();
+        vm.LoadDesignSample("empty");      Assert.True(vm.ShowEmpty);
+        vm.LoadDesignSample("generating"); Assert.False(vm.ShowEmpty);   // the overlay owns the canvas
+        vm.LoadDesignSample("result");     Assert.False(vm.ShowEmpty);   // the preview owns the canvas
+    }
 }

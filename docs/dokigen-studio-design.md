@@ -70,6 +70,6 @@ A third left-rail nav item **Studio** (beside Dashboard / Logs), hosting one pag
 
 ## Verification
 
-`--design` renders every Studio state (idle / generating / result / media-mode-off) → snapshot;
-`StudioViewModel` arg-building + state transitions unit-tested (xUnit, like `MainViewModelTests`); the live
-gen verified once in a media-mode session (folds into Phase-3 live verification).
+`--render --page studio:<variant>` renders every Studio state (empty / generating / result / guard) — all
+four render-verified off-GPU. `GenCli.BuildArgs` + `StudioViewModel` state transitions are unit-tested
+(96 panel tests). The live gen alone is verified in a media-mode session (folds into Phase-3 live verification).

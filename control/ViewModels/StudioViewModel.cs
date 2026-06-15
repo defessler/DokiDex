@@ -19,6 +19,10 @@ public partial class StudioViewModel : ObservableObject
     private readonly DokiService _doki;
     public StudioViewModel(DokiService doki) => _doki = doki;
 
+    // Set by MainViewModel: lets the media-mode guard flip the GPU to media with one click (reuses the
+    // panel's SwitchMode + its eviction confirm). Null in unit tests / when hosted standalone.
+    public Action? SwitchToMediaRequested { get; set; }
+
     // mirrors `doki gen`'s kinds (serving/doki-gen.ps1 Resolve-GenKind); the picker binds SelectedKind.
     public IReadOnlyList<string> Kinds { get; } = GenRequest.Kinds;
 
@@ -28,17 +32,18 @@ public partial class StudioViewModel : ObservableObject
     [ObservableProperty] private bool _upscale;
     [ObservableProperty] private bool _raw;                 // skip the :8013 prompt rewriter
     [ObservableProperty] private string? _initImagePath;    // -InitImage (required for edit; optional for i2v)
-    [ObservableProperty][NotifyPropertyChangedFor(nameof(CanGenerate))] private bool _isGenerating;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(CanGenerate))][NotifyPropertyChangedFor(nameof(ShowEmpty))] private bool _isGenerating;
     [ObservableProperty] private string _statusText = "describe something to generate";
     // GPU in media mode? gen needs it (the panel keeps LLM/media mutually exclusive); the guard banner shows
     // when false. Updated from MainViewModel each poll. Wiring the one-click switch is Phase 2.
     [ObservableProperty][NotifyPropertyChangedFor(nameof(CanGenerate))] private bool _mediaActive;
-    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasResult))] private string? _resultPath;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasResult))][NotifyPropertyChangedFor(nameof(ShowEmpty))] private string? _resultPath;
     [ObservableProperty] private string? _resultCaption;
     [ObservableProperty] private ImageSource? _resultPreview;   // the inline image (design sample now; live artifact in Phase 2)
 
     public bool HasResult => !string.IsNullOrEmpty(ResultPath);
     public bool CanGenerate => MediaActive && !IsGenerating;
+    public bool ShowEmpty => !HasResult && !IsGenerating;           // the inviting canvas: idle + nothing yet
     public bool ShowInitImage => SelectedKind is "edit" or "i2v";   // these kinds can take a source still
 
     // Generate / Remix: shell `doki gen` and show the artifact inline. Remix just re-runs the same request —
@@ -63,6 +68,9 @@ public partial class StudioViewModel : ObservableObject
     {
         if (HasResult && ResultPath != "(sample)") _doki.OpenLocalMedia(ResultPath!);
     }
+
+    // the guard banner's one-click "Switch to MEDIA" — hands off to MainViewModel.SwitchMode("media").
+    [RelayCommand] private void SwitchToMedia() => SwitchToMediaRequested?.Invoke();
 
     private async Task RunAsync()
     {
@@ -121,18 +129,39 @@ public partial class StudioViewModel : ObservableObject
         catch { return null; }
     }
 
-    // design/sample state so `--design` / `--render` shows the Studio populated (no backend, no GPU).
-    // The prompt is written to honestly match the bundled abstract placeholder (studio-sample.png).
-    internal void LoadDesignSample()
+    // design/sample state so `--design` / `--render --page studio[:variant]` shows the Studio in any of its
+    // states with no backend/GPU. variant ∈ result (default) | empty | generating | guard — one per UI state
+    // the design doc promises to snapshot. The prompt matches the bundled placeholder (studio-sample.png).
+    internal void LoadDesignSample(string variant = "result")
     {
-        PromptText = "a coil of living light — teal to molten gold, drifting embers, volumetric haze through rain";
         SelectedKind = "image";
-        MediaActive = true;
-        IsGenerating = false;
-        StatusText = "done · Z-Image Turbo · 1024² in 4.2s";
-        ResultPath = "(sample)";
+        Fast = Upscale = Raw = false;
+        PromptText = "a coil of living light — teal to molten gold, drifting embers, volumetric haze through rain";
         ResultCaption = "Z-Image Turbo · 1024²";
-        ResultPreview = LoadBundled("assets/studio-sample.png");
+        switch (variant)
+        {
+            case "empty":      // media on, nothing generated yet -> the inviting empty canvas
+                MediaActive = true; IsGenerating = false; PromptText = "";
+                StatusText = "describe something to generate";
+                ResultPath = null; ResultPreview = null;
+                break;
+            case "generating": // a run in flight -> the generating overlay over the canvas
+                MediaActive = true; IsGenerating = true;
+                StatusText = "generating image…  (needs media mode)";
+                ResultPath = null; ResultPreview = null;
+                break;
+            case "guard":      // GPU not in media mode -> the one-click switch banner
+                MediaActive = false; IsGenerating = false;
+                StatusText = "media mode is off";
+                ResultPath = null; ResultPreview = null;
+                break;
+            default:           // "result": the happy path with an inline preview
+                MediaActive = true; IsGenerating = false;
+                StatusText = "done · Z-Image Turbo · 1024² in 4.2s";
+                ResultPath = "(sample)";
+                ResultPreview = LoadBundled("assets/studio-sample.png");
+                break;
+        }
     }
 
     // Load an embedded image resource (pack://). Guarded: returns null when no WPF Application is running

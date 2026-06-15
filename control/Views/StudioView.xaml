@@ -145,7 +145,7 @@
         <Grid>
           <!-- empty state: an inviting framed canvas until the first result lands -->
           <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Visibility="{Binding HasResult, Converter={StaticResource InvBoolVis}}">
+                      Visibility="{Binding ShowEmpty, Converter={StaticResource BoolVis}}">
             <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="58" Height="58" HorizontalAlignment="Center"
                   Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.4"/>
             <TextBlock Text="your generation appears here"
@@ -168,14 +168,31 @@
               </Border>
             </Border>
           </Viewbox>
+          <!-- generating overlay: a scrim over the canvas while a run is in flight -->
+          <Border Visibility="{Binding IsGenerating, Converter={StaticResource BoolVis}}"
+                  Background="#E6080C12" CornerRadius="10">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="46" Height="46" HorizontalAlignment="Center"
+                    Stroke="{StaticResource TealBrush}" StrokeThickness="1.5" Opacity="0.85"/>
+              <TextBlock Text="generating…" Foreground="{StaticResource TextBrush}" Style="{StaticResource Mono}"
+                         FontSize="12.5" HorizontalAlignment="Center" Margin="0,14,0,0"/>
+              <ProgressBar IsIndeterminate="True" Width="160" Height="3" Margin="0,12,0,0"
+                           Background="Transparent" Foreground="{StaticResource TealBrush}" BorderThickness="0"/>
+            </StackPanel>
+          </Border>
         </Grid>
       </Border>
-      <!-- media-mode guard (hidden when media is active) -->
+      <!-- media-mode guard (hidden when media is active): a calm banner + a one-click switch to MEDIA -->
       <Border VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,34,0,0" Background="{StaticResource SurfaceBrush}"
-              CornerRadius="6" Padding="14,9" BorderBrush="{StaticResource AmberBrush}" BorderThickness="1"
+              CornerRadius="8" Padding="16,11" BorderBrush="{StaticResource AmberBrush}" BorderThickness="1"
               Visibility="{Binding MediaActive, Converter={StaticResource InvBoolVis}}">
-        <TextBlock Foreground="{StaticResource AmberBrush}" FontSize="12" Style="{StaticResource Mono}"
-                   Text="⚠  switch to MEDIA mode to generate  (Dashboard → MEDIA)"/>
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Foreground="{StaticResource AmberBrush}" FontSize="12.5" Style="{StaticResource Mono}"
+                     VerticalAlignment="Center" Text="⚠  the GPU isn't in media mode"/>
+          <Button Content="Switch to MEDIA" Style="{StaticResource GenerateBtn}" Margin="14,0,0,0" Padding="14,5"
+                  FontSize="12" Command="{Binding SwitchToMediaCommand}"
+                  ToolTip="Stop the LLM group and start SwarmUI (asks to confirm the GPU switch)."/>
+        </StackPanel>
       </Border>
     </Grid>
 

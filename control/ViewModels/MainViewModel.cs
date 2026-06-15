@@ -63,6 +63,7 @@ public partial class MainViewModel : ObservableObject
     {
         _ui = ui;
         Studio = new StudioViewModel(_doki);
+        Studio.SwitchToMediaRequested = () => SwitchMode("media");   // the Studio guard's one-click switch
     }
 
     public string SwitchExplain => BuildExplain(string.IsNullOrEmpty(HoverMode) ? ActiveMode : HoverMode);
