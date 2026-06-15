@@ -10,11 +10,13 @@ Good news: once it's installed, **daily use is basically two commands** — turn
 >
 > All commands are run from the **DokiDex folder** in PowerShell.
 
+> 🖥️ **Prefer a GUI?** First run `.\control.bat` once (it builds the panel + creates a console‑free **DokiDex.lnk** launcher); after that just double‑click **DokiDex.lnk** for the cinematic boot + the **DokiDex** control panel — live status, GPU trust‑meter, one‑click mode switching (**DokiCode** = chat+code / **DokiGen** = image+video), logs, per‑service ⚡tests, and in‑app auto‑update. Or run `.\doki.ps1 panel`.
+
 ## The 30‑second version
 
 ```powershell
 # 1. Turn on the brain (the inference server). Run once; leave it running.
-.\serving\start-serving.ps1 -Detach
+.\doki.ps1 up
 
 # 2. Go to your project and talk to the agent.
 cd C:\path\to\your\project
@@ -28,17 +30,18 @@ Now just type what you want in plain English — *"fix the failing test in cart.
 ## Step 1 — Turn on the brain 🧠
 
 ```powershell
-.\serving\start-serving.ps1 -Detach
+.\doki.ps1 up            # default 'agent' profile: llama-swap (:8080) + speech (TTS :8004, STT :8005)
 ```
 
-This starts **llama‑swap** (the "receptionist" from [page 2](2-the-moving-parts.md)) listening on **http://127.0.0.1:8080**. Drop the `-Detach` to run it in the foreground and watch the logs.
+This is the **control plane**: it starts **llama‑swap** (the "receptionist" from [page 2](2-the-moving-parts.md)) on **http://127.0.0.1:8080** plus the speech servers, tracks their PIDs/logs, and enforces the GPU's one‑group‑at‑a‑time rule. For editor autocomplete too, use `.\doki.ps1 up coexist`. (The low‑level path `.\serving\start-serving.ps1 -Detach` starts just llama‑swap, outside doki's tracking.)
 
 - You **don't** pick a model here. The brains load **on demand** — the first time something asks for `coder-fast`, llama‑swap loads it; ask for `coder-big` later and it swaps. So the *first* message to a brain is slow while it loads (coder‑fast ≈ 7 seconds, coder‑big ≈ a minute to load 60 GB), then it's fast.
 
 **Check it's alive** (optional):
 
 ```powershell
-.\serving\test-toolcall.ps1 -Model coder-fast      # expect: TOOLCALL OK + a speed readout
+.\doki.ps1 status                                  # every service: installed / running / healthy + GPU
+.\serving\test-toolcall.ps1 -Model coder-fast      # a real tool-call: expect TOOLCALL OK + a speed readout
 ```
 
 …or open the dashboard in a browser: **http://127.0.0.1:8080/ui**
@@ -81,7 +84,7 @@ Crush starts on **coder‑fast** (the default). To use another, switch models in
 Want Copilot‑style "finish my line" suggestions in VS Code, locally?
 
 ```powershell
-.\serving\start-fim.ps1 -Detach     # starts the tiny FIM brain on :8012
+.\doki.ps1 up coexist     # the agent + the tiny FIM autocomplete brain on :8012 (low-level: serving\start-fim.ps1)
 ```
 
 One‑time setup: install the **llama.vscode** extension and copy `harness\llama.vscode-settings.json` into your VS Code user settings (`%APPDATA%\Code\User\settings.json`). It points the extension at `:8012` and turns Copilot off.
@@ -119,13 +122,10 @@ These are what make a *local* brain reliable — see [page 3](3-a-task-step-by-s
 ## Stopping it 🛑
 
 ```powershell
-# Foreground server: just press Ctrl+C in its window.
-
-# Background (-Detach) servers: stop the processes.
-Get-Process llama-swap, llama-server -ErrorAction SilentlyContinue | Stop-Process
+.\doki.ps1 down      # stops every managed service (llama-swap, FIM, TTS, STT, media) and frees the GPU
 ```
 
-(Stopping `llama-swap` also stops whichever agent brain it had loaded. The FIM autocomplete server is a separate `llama-server` on `:8012`.)
+(`doki down` is the clean stop — it tears down everything `doki up` started, including the TTS/STT servers, so nothing is left holding a GPU slot. A raw foreground server stops with Ctrl+C in its own window.)
 
 ---
 
@@ -133,7 +133,7 @@ Get-Process llama-swap, llama-server -ErrorAction SilentlyContinue | Stop-Proces
 
 | Symptom | Fix |
 |---------|-----|
-| Agent says nothing / can't connect | Is `start-serving` running? Check **http://127.0.0.1:8080/ui**. |
+| Agent says nothing / can't connect | Run `.\doki.ps1 status` (or check **http://127.0.0.1:8080/ui**). |
 | First message to coder‑big hangs ~a minute | That's the 60 GB model loading. Later turns are fast. |
 | Tool calls misfire / flaky edits | Lower the **temperature** in the harness model options *before* blaming the brain. |
 | "Out of memory" on the GPU | Use a smaller context (coder‑fast‑lite) or step down a quant — see [design doc](../TDD.md) §6.1. |

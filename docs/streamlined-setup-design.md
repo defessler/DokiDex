@@ -47,14 +47,17 @@ full node graph underneath, **one tool for both image and video**, and **no cont
 filter**. .NET is already present (used by the eval sandbox); SwarmUI auto-provisions
 its own ComfyUI + Python backend. Served on `:7801`, installed under repo `media/`.
 
+> **As-built note:** the lists below were the design intent; the shipped installer's actual
+> model set is **Z-Image Turbo + Wan 2.1 1.3B** (lean) with Z-Image Base / Chroma / Wan 2.2 /
+> LTXV-2b / Qwen-Image-Edit / ACE-Step added by `-Models full`. See `docs/media-recipes.md`.
+
 **Image models** (open-weight, unfiltered):
-- **Chroma** (uncensored, FLUX-based) and/or **FLUX.1-dev** — flagship realism
-- an **SDXL** community checkpoint (Juggernaut XL / Illustrious) — variety
+- **Z-Image Turbo** (FP8) — the lean default: fast, fits with headroom
+- **Z-Image Base** + **Chroma** (uncensored, FLUX-based) — added by `-Models full`
 
 **Video models** (open-weight, unfiltered):
-- **LTX-Video 13B** — default: fastest, fits 32 GB comfortably
-- **Wan 2.7** / **HunyuanVideo 1.5** — quality leaders, run quantized (fp8/gguf) +
-  offload; slower, tighter VRAM. Opt-in.
+- **Wan 2.1 1.3B** — the lean default: small, fast, fits 32 GB comfortably
+- **Wan 2.2** (14B/5B) + **LTXV-2b** (distilled, fast) — added by `-Models full`; quality/speed leaders
 
 **Unrestricted:** local tooling imposes no filter and these models are unfiltered.
 The only hard lines are legal, not platform censorship — **no CSAM; no sexual imagery
@@ -73,11 +76,11 @@ model bundles):
 3. Deploy configs: `harness/crush.json` → `~/.config/crush/`, llama.vscode settings → VS Code.
 4. Media (`-Media`): clone + build SwarmUI under `media/`; download models straight into
    `media/SwarmUI/Models/**` (scripted — no GUI wizard). Bundles selectable with sizes
-   shown; lean default = LTX-Video + one image model; Wan/Hunyuan opt-in.
+   shown; lean default = Z-Image Turbo + Wan 2.1 1.3B; `-Models full` adds Wan 2.2 / LTXV-2b / Qwen-Image-Edit / ACE-Step.
 5. Verify LLM assets present (llama.cpp/llama-swap binaries, GGUFs) — guided fetch if missing.
 6. Smoke checks (`test-toolcall.ps1`, media `/` probe).
 
-**Reproducibility:** `versions.lock` pins every component + model (name, version, size).
+**Reproducibility:** components are pinned by the installer; the as-built model set is documented in `docs/media-recipes.md` and the README Status section.
 
 ## Out of scope (now)
 
