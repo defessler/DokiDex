@@ -1,0 +1,5 @@
+{
+  "name": "t12-duration-humanize",
+  "kind": "tdd-feature",
+  "prompt": "The test suite references App.DurationFormatter.Humanize(int totalSeconds), which isn't implemented yet, so the build currently fails. Create src/App/DurationFormatter.cs with `public static string Humanize(int totalSeconds)` so the whole test suite passes. Spec: split the total into days (86400 s), hours (3600 s), minutes (60 s) and seconds, then return ONLY the non-zero units, largest-first, each formatted as \"<n><suffix>\" with suffixes d/h/m/s, joined by single spaces — e.g. 3661 -> \"1h 1m 1s\", 3601 -> \"1h 1s\" (the zero minutes is omitted), 90061 -> \"1d 1h 1m 1s\". Return \"0s\" when totalSeconds is 0. Throw ArgumentOutOfRangeException when totalSeconds is negative. Do not modify the existing tests."
+}

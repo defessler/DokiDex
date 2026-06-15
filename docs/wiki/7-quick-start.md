@@ -98,7 +98,7 @@ One‑time setup: install the **llama.vscode** extension and copy `harness\llama
 Changed a model, a setting, or the harness? Run the **driving test** ([page 5](5-why-its-built-this-way.md)) and compare the score to last time. The motto: *never tune blind.*
 
 ```powershell
-# Full 11-task suite -> writes a scorecard into docs\scorecards\
+# Full 12-task suite -> writes a scorecard into docs\scorecards\
 .\evals\run-suite.ps1 -Harness crush -Model coder-fast
 
 # Or just one task while you're iterating:
