@@ -21,6 +21,9 @@ public partial class MainViewModel : ObservableObject
 
     public ObservableCollection<ServiceViewModel> LlmServices { get; } = new();
     public ObservableCollection<ServiceViewModel> MediaServices { get; } = new();
+    // Gates the dashboard's "reading doki status …" empty-state on BOTH bands, not just LLM: a media-only
+    // first poll would otherwise paint the loading sigil over live MEDIA cards. Notified in Apply().
+    public int TotalServiceCount => LlmServices.Count + MediaServices.Count;
     public GpuViewModel Gpu { get; } = new();
     public LogsViewModel Logs { get; } = new();
 
@@ -109,6 +112,7 @@ public partial class MainViewModel : ObservableObject
         MediaActive = ActiveGroup == "media";
         Logs.SyncServices(doc.Services.Select(x => x.Name));
         LastUpdated = DateTime.Now.ToString("HH:mm:ss");
+        OnPropertyChanged(nameof(TotalServiceCount));   // collapse the empty-state once either band has cards
         OnPropertyChanged(nameof(SwitchExplain));
     }
 

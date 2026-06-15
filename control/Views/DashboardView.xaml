@@ -6,8 +6,8 @@
 
     <!-- ============ service card ============ -->
     <DataTemplate x:Key="ServiceCard" DataType="{x:Type vm:ServiceViewModel}">
-      <Border Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource BorderBrush2}"
-              BorderThickness="1" CornerRadius="6" Margin="0,0,12,12" Width="318">
+      <Border Background="{StaticResource Surface2Brush}" BorderBrush="#1A243140"
+              BorderThickness="1" CornerRadius="8" Margin="0,0,14,14" Width="336">
         <Border.Style>
           <Style TargetType="Border">
             <Style.Triggers>
@@ -22,15 +22,15 @@
         </Border.Style>
         <Grid>
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="3"/>
+            <ColumnDefinition Width="2"/>
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
-          <Border Grid.Column="0" CornerRadius="6,0,0,6" Background="{Binding Group, Converter={StaticResource GroupAccent}}"/>
-          <StackPanel Grid.Column="1" Margin="13,11,13,11">
+          <Border Grid.Column="0" CornerRadius="8,0,0,8" Background="{Binding Group, Converter={StaticResource GroupAccent}}"/>
+          <StackPanel Grid.Column="1" Margin="16,14,16,14">
 
             <!-- header: dot + name + port -->
             <DockPanel>
-              <Ellipse Width="10" Height="10" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,1,9,0"
+              <Ellipse Width="8" Height="8" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,1,9,0"
                        Fill="{Binding StateKind, Converter={StaticResource StateBrush}}">
                 <Ellipse.Style>
                   <Style TargetType="Ellipse">
@@ -112,6 +112,7 @@
     </DataTemplate>
   </UserControl.Resources>
 
+  <Grid>
   <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,18,14,18">
     <StackPanel>
 
@@ -122,19 +123,16 @@
                 Command="{Binding StopAllCommand}" VerticalAlignment="Top"/>
         <WrapPanel>
           <Button Tag="agent" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="agent"
-                  Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=agent}"
                   MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="chat + code (llama-swap + tts)">
-            <StackPanel><TextBlock Text="◉ AGENT" FontWeight="SemiBold"/><TextBlock Text="chat + code" FontSize="10" Foreground="{StaticResource InfoBrush}"/></StackPanel>
+            <StackPanel><TextBlock Text="AGENT" FontWeight="SemiBold"/><TextBlock Text="chat + code" FontSize="10" Foreground="{StaticResource DimBrush}"/></StackPanel>
           </Button>
           <Button Tag="coexist" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="coexist"
-                  Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=coexist}"
                   MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="chat + code + editor autocomplete (llama-swap + fim)">
-            <StackPanel><TextBlock Text="◉ COEXIST" FontWeight="SemiBold"/><TextBlock Text="+ autocomplete" FontSize="10" Foreground="{StaticResource InfoBrush}"/></StackPanel>
+            <StackPanel><TextBlock Text="COEXIST" FontWeight="SemiBold"/><TextBlock Text="+ autocomplete" FontSize="10" Foreground="{StaticResource DimBrush}"/></StackPanel>
           </Button>
           <Button Tag="media" Style="{StaticResource ModeBtn}" Command="{Binding SwitchModeCommand}" CommandParameter="media"
-                  Background="{Binding ActiveMode, Converter={StaticResource ModeActiveBrush}, ConverterParameter=media}"
                   MouseEnter="ModeHover" MouseLeave="ModeUnhover" ToolTip="image + video (SwarmUI + prompt-rewriter). Stops the LLM.">
-            <StackPanel><TextBlock Text="◉ MEDIA" FontWeight="SemiBold"/><TextBlock Text="image + video" FontSize="10" Foreground="{StaticResource InfoBrush}"/></StackPanel>
+            <StackPanel><TextBlock Text="MEDIA" FontWeight="SemiBold"/><TextBlock Text="image + video" FontSize="10" Foreground="{StaticResource DimBrush}"/></StackPanel>
           </Button>
         </WrapPanel>
       </DockPanel>
@@ -145,15 +143,16 @@
 
       <!-- ===== LLM band ===== -->
       <StackPanel Opacity="{Binding LlmActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
-        <TextBlock Text="LLM group" Style="{StaticResource SectionHeader}" Foreground="{StaticResource TealBrush}" Margin="2,0,0,8"/>
+        <TextBlock Text="LLM group" Style="{StaticResource SectionHeader}" FontSize="10.5" Foreground="{StaticResource ReactorDimBrush}" Margin="2,0,0,8"/>   <!-- structural etched cyan (boot ring), NOT the emitting TealBrush -->
+
         <ItemsControl ItemsSource="{Binding LlmServices}" ItemTemplate="{StaticResource ServiceCard}">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>
 
       <!-- ===== MEDIA band ===== -->
-      <StackPanel Margin="0,8,0,0" Opacity="{Binding MediaActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
-        <TextBlock Text="MEDIA group" Style="{StaticResource SectionHeader}" Foreground="{StaticResource AmberBrush}" Margin="2,0,0,8"/>
+      <StackPanel Margin="0,24,0,0" Opacity="{Binding MediaActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
+        <TextBlock Text="MEDIA group" Style="{StaticResource SectionHeader}" FontSize="10.5" Foreground="{StaticResource AmberBrush}" Margin="2,0,0,8"/>
         <ItemsControl ItemsSource="{Binding MediaServices}" ItemTemplate="{StaticResource ServiceCard}">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
@@ -161,4 +160,21 @@
 
     </StackPanel>
   </ScrollViewer>
+
+  <!-- empty / loading state — echoes the boot's "doki status json" pre-flight; collapses once cards arrive -->
+  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+              Visibility="{Binding TotalServiceCount, Converter={StaticResource ZeroToVis}}">
+    <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="40" Height="40"
+          Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.4" HorizontalAlignment="Center"/>
+    <TextBlock Text="reading  doki status …" Style="{StaticResource Mono}" FontSize="12"
+               Foreground="{StaticResource DimBrush}" Margin="0,16,0,0" HorizontalAlignment="Center"/>
+    <Ellipse Width="5" Height="5" Margin="0,12,0,0" HorizontalAlignment="Center" Fill="{StaticResource TealBrush}">
+      <Ellipse.Triggers>
+        <EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard>
+          <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.25" To="1" Duration="0:0:0.6" AutoReverse="True" RepeatBehavior="Forever"/>
+        </Storyboard></BeginStoryboard></EventTrigger>
+      </Ellipse.Triggers>
+    </Ellipse>
+  </StackPanel>
+  </Grid>
 </UserControl>

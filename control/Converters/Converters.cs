@@ -112,3 +112,20 @@ public sealed class WarnFlagToBrushConverter : IValueConverter
         => (value is bool b && b) ? Ink.Amber : Ink.Dim;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
 }
+
+// (ActiveMode, CommandParameter) -> true when equal. Drives the mode switcher's active cyan edge
+// WITHOUT touching Tag (ModeHover needs it) and WITHOUT ModeActiveBrush's frozen-brush equality trap.
+public sealed class ModeMatchConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type t, object? p, CultureInfo c)
+        => values.Length == 2 && string.Equals(values[0] as string, values[1] as string, StringComparison.OrdinalIgnoreCase);
+    public object[] ConvertBack(object? v, Type[] t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+// collection count == 0 -> Visible (the boot-voiced empty/loading state), else Collapsed.
+public sealed class ZeroToVisConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c)
+        => (value is int n && n == 0) ? Visibility.Visible : Visibility.Collapsed;
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
+}

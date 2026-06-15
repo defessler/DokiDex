@@ -1,15 +1,72 @@
 <Window x:Class="DokiCode.Control.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="DokiCode Control" Height="760" Width="1100"
         MinHeight="560" MinWidth="900"
+        WindowStyle="None" ResizeMode="CanResize"
         Background="{StaticResource BgBrush}"
         WindowStartupLocation="CenterScreen"
         TextOptions.TextFormattingMode="Display"
         UseLayoutRounding="True">
 
+  <!-- Custom chrome: WindowChrome keeps native resize / Aero Snap / Win+Arrow / double-click-maximize
+       while replacing the grey OS caption. AllowsTransparency stays FALSE (keep ClearType for the dense
+       mono telemetry — only BootWindow needs True, for its opacity fade). -->
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="36" ResizeBorderThickness="6" CornerRadius="0"
+                        GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+  </shell:WindowChrome.WindowChrome>
+
+  <Window.Resources>
+    <!-- SigilGeo (the boot hexagram) is shared from Palette.xaml; used here as the caption brand mark -->
+    <Style x:Key="CaptionBtn" TargetType="Button">
+      <Setter Property="Width" Value="46"/><Setter Property="Height" Value="36"/>
+      <Setter Property="Foreground" Value="{StaticResource DimBrush}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+      <Setter Property="FontSize" Value="10"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#14E6EEF6"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="bd" Property="Opacity" Value="0.7"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="CaptionCloseBtn" TargetType="Button" BasedOn="{StaticResource CaptionBtn}">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#2EFF6B6B"/>
+                <Setter Property="Foreground" Value="{StaticResource DangerBrightBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="bd" Property="Opacity" Value="0.7"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
   <Grid>
     <Grid.RowDefinitions>
+      <RowDefinition Height="36"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
@@ -18,36 +75,55 @@
       <ColumnDefinition Width="*"/>
     </Grid.ColumnDefinitions>
 
-    <!-- ============ LEFT RAIL ============ -->
+    <!-- ===== CAPTION (Row 0) — split at the 216 column so rail + content each read as ONE surface ===== -->
+    <!-- left zone = SurfaceBrush, continuous with the rail; the brand lives here (draggable) -->
     <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource SurfaceBrush}"
             BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,1,0">
-      <DockPanel Margin="14,14,14,12">
+      <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+        <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="16" Height="16"
+              Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.85" VerticalAlignment="Center"/>
+        <TextBlock Text="D O K I C O D E" Margin="11,0,0,0" VerticalAlignment="Center"
+                   FontFamily="Segoe UI Variable Display, Segoe UI Light, Segoe UI"
+                   FontWeight="Thin" FontSize="12.5" Foreground="{StaticResource TextBrush}" Opacity="0.92"/>
+      </StackPanel>
+    </Border>
+    <!-- right zone = BgBrush, continuous with the content; drag region + window controls -->
+    <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource BgBrush}"
+            BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button x:Name="MinBtn"   Style="{StaticResource CaptionBtn}"      Content="&#xE921;" Click="OnMinimize"  ToolTip="Minimize"/>
+          <Button x:Name="MaxBtn"   Style="{StaticResource CaptionBtn}"      Content="&#xE922;" Click="OnMaxRestore" ToolTip="Maximize"/>
+          <Button x:Name="CloseBtn" Style="{StaticResource CaptionCloseBtn}" Content="&#xE8BB;" Click="OnClose"      ToolTip="Close"/>
+        </StackPanel>
+        <Grid/>
+      </DockPanel>
+    </Border>
 
-        <!-- brand wordmark — the splash voice: light, hair-spaced (no FontStretch/ScaleX) -->
-        <TextBlock DockPanel.Dock="Top" Text="D O K I C O D E" FontWeight="Thin" FontSize="19"
-                   FontFamily="Segoe UI Variable Display, Segoe UI Light, Segoe UI" Foreground="{StaticResource TextBrush}"/>
-        <TextBlock DockPanel.Dock="Top" Text="local intelligence stack" Foreground="{StaticResource DimBrush}"
-                   FontSize="10.5" Margin="0,1,0,16"/>
+    <!-- ===== LEFT RAIL (Row 1) — wordmark moved to the caption; GPU meter is first ===== -->
+    <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource SurfaceBrush}"
+            BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,1,0">
+      <DockPanel Margin="14,16,14,12">
 
         <!-- GPU meter -->
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,18">
           <TextBlock Text="{Binding Gpu.GroupLabel}" Foreground="{StaticResource DimBrush}" FontSize="10.5" Margin="0,0,0,5" TextTrimming="CharacterEllipsis"/>
-          <Border Height="18" Background="{StaticResource BgBrush}" CornerRadius="4"
-                  BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" Padding="1">
+          <TextBlock Text="{Binding Gpu.Headline}" Style="{StaticResource Mono}" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <Border Height="4" Background="{StaticResource BgBrush}" CornerRadius="2">
             <ProgressBar Minimum="0" Maximum="{Binding Gpu.TotalMB}" Value="{Binding Gpu.UsedMB}"
                          Background="Transparent" BorderThickness="0"
                          Foreground="{Binding Gpu.ActiveGroup, Converter={StaticResource GroupAccent}}"/>
           </Border>
-          <TextBlock Text="{Binding Gpu.Headline}" Style="{StaticResource Mono}" FontSize="13" FontWeight="SemiBold" Margin="0,6,0,0"/>
           <TextBlock Text="{Binding Gpu.SubLine}" Foreground="{Binding Gpu.Warn, Converter={StaticResource WarnBrush}}"
-                     Style="{StaticResource Mono}" FontSize="11" Margin="0,2,0,0"/>
+                     Style="{StaticResource Mono}" FontSize="11" Margin="0,5,0,0"/>
+          <TextBlock Text="local intelligence stack" Foreground="{StaticResource DimBrush}" FontSize="10.5" Margin="0,10,0,0"/>
         </StackPanel>
 
         <!-- nav -->
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Text="VIEW" Style="{StaticResource SectionHeader}"/>
-          <Button Content="▸  Dashboard" Style="{StaticResource NavBtn}" Click="NavDashboard"/>
-          <Button Content="▸  Logs" Style="{StaticResource NavBtn}" Click="NavLogs"/>
+          <Button x:Name="NavDashBtn" Content="Dashboard" Style="{StaticResource NavBtn}" Tag="active" Click="NavDashboard"/>
+          <Button x:Name="NavLogsBtn" Content="Logs" Style="{StaticResource NavBtn}" Click="NavLogs"/>
         </StackPanel>
 
         <!-- global actions (bottom) -->
@@ -57,10 +133,11 @@
                   ToolTip="Check for newer SwarmUI (git) + llama-swap (GitHub) releases."/>
           <Button Content="✓  Verify stack" Style="{StaticResource NavBtn}" Command="{Binding VerifyCommand}"
                   ToolTip="Full-stack smoke test (opens a console)."/>
-          <Button Content="⏻  Stop All" Style="{StaticResource NavBtn}" Foreground="{StaticResource DangerBrightBrush}"
-                  Command="{Binding StopAllCommand}" ToolTip="Stop every service and free the GPU."/>
+          <Button Content="⏻  Stop All" Style="{StaticResource NavBtn}"
+                  Command="{Binding StopAllCommand}" ToolTip="Stop every service and free the GPU."/>   <!-- DimBrush idle: red is reserved for crashed-state alarm, not a standing rail action -->
 
-          <!-- panel version + its own auto-updater (separate from the SwarmUI/llama-swap check above) -->
+
+          <!-- panel version + its own auto-updater -->
           <Border Margin="0,12,0,0" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0" Padding="2,8,0,0">
             <StackPanel>
               <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}" FontSize="10.5">
@@ -83,17 +160,19 @@
       </DockPanel>
     </Border>
 
-    <!-- ============ CONTENT ============ -->
-    <ContentControl Grid.Row="0" Grid.Column="1" x:Name="PageHost"/>
+    <!-- ===== CONTENT ===== -->
+    <ContentControl Grid.Row="1" Grid.Column="1" x:Name="PageHost"/>
 
-    <!-- ============ STATUS STRIP ============ -->
-    <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Background="{StaticResource SurfaceBrush}"
+    <!-- ===== STATUS STRIP (Row 2) — leading live pip bound Gpu.ActiveGroup (grey/cyan/gold) ===== -->
+    <Border Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Background="{StaticResource SurfaceBrush}"
             BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0">
-      <DockPanel Margin="14,7">
+      <DockPanel Margin="14,6">
         <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource DimBrush}" FontSize="11" VerticalAlignment="Center">
           <Run Text="updated "/><Run Text="{Binding LastUpdated}"/>
         </TextBlock>
-        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource InfoBrush}" FontSize="12"
+        <Ellipse Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,8,0"
+                 Fill="{Binding Gpu.ActiveGroup, Converter={StaticResource GroupAccent}}"/>
+        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource TextBrush}" Opacity="0.85" FontSize="12"
                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
       </DockPanel>
     </Border>
