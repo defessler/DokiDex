@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -34,9 +35,25 @@ public sealed class DokiService
     public void StopService(string svc) => Spawn(new[] { "stop", svc });
     public void RestartService(string svc) => Spawn(new[] { "restart", svc });
 
+    // Launch an http(s) URL only. UseShellExecute resolves the string against Windows protocol/file
+    // associations, so anything non-http(s) (file://, UNC \\host\share, ms-msdt:/search-ms:/vscode: handlers)
+    // could execute code or leak NTLM — reject all of it. Every service UI in $Services is an http loopback URL.
     public void OpenUi(string url)
     {
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose(); } catch { }
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u)) return;
+        if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps) return;
+        try { Process.Start(new ProcessStartInfo(u.AbsoluteUri) { UseShellExecute = true })?.Dispose(); } catch { }
+    }
+
+    // Open a generated artifact: an http(s) URL (a SwarmUI image) or a fully-qualified local file the panel
+    // itself wrote (a TTS/STT temp .wav). Kept separate so the http(s) guard above needn't special-case files.
+    public void OpenArtifact(string pathOrUrl)
+    {
+        if (Uri.TryCreate(pathOrUrl, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+        { OpenUi(pathOrUrl); return; }
+        if (Path.IsPathFullyQualified(pathOrUrl) && File.Exists(pathOrUrl)
+            && string.Equals(Path.GetExtension(pathOrUrl), ".wav", StringComparison.OrdinalIgnoreCase))
+        { try { Process.Start(new ProcessStartInfo(pathOrUrl) { UseShellExecute = true })?.Dispose(); } catch { } }
     }
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(8) };

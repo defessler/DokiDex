@@ -98,6 +98,53 @@ public class UpdaterTests
         finally { Cleanup(dir); }
     }
 
+    [Fact]
+    public void IsSelfUpdatableHost_true_for_apphost_false_for_dotnet_and_others()
+    {
+        Assert.True(Updater.IsSelfUpdatableHost(@"C:\repo\control\bin\Release\net9.0-windows\DokiDex.Control.exe"));
+        Assert.False(Updater.IsSelfUpdatableHost(@"C:\Users\me\AppData\Local\Microsoft\dotnet\dotnet.exe"));   // dotnet host under `dotnet run`
+        Assert.False(Updater.IsSelfUpdatableHost(@"C:\some\testhost.exe"));   // not the apphost
+        Assert.False(Updater.IsSelfUpdatableHost(""));
+        Assert.False(Updater.IsSelfUpdatableHost(null));
+    }
+
+    // v99.x are unambiguously newer than running (whatever RunningVersion resolves to under the test host);
+    // v0.0.x are unambiguously older — so these don't depend on the exact running version.
+    [Fact]
+    public void FindStagedUpdateIn_picks_highest_tag_regardless_of_file_order()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            FakeExe(Path.Combine(dir, "DokiDex-v99.0.0-win-x64.exe"), 0x10);
+            FakeExe(Path.Combine(dir, "DokiDex-v99.2.0-win-x64.exe"), 0x12);
+            FakeExe(Path.Combine(dir, "DokiDex-v99.1.0-win-x64.exe"), 0x11);
+            File.WriteAllText(Path.Combine(dir, "notes.txt"), "ignored");   // foreign file must be skipped
+            var best = Updater.FindStagedUpdateIn(dir);
+            Assert.NotNull(best);
+            Assert.Equal("v99.2.0", best!.Value.tag);                       // highest, NOT first GetFiles hit
+            Assert.EndsWith("DokiDex-v99.2.0-win-x64.exe", best.Value.path);
+        }
+        finally { Cleanup(dir); }
+    }
+
+    [Fact]
+    public void FindStagedUpdateIn_returns_null_when_nothing_newer_than_running()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            FakeExe(Path.Combine(dir, "DokiDex-v0.0.1-win-x64.exe"), 0x01);
+            FakeExe(Path.Combine(dir, "DokiDex-v0.0.9-win-x64.exe"), 0x09);
+            Assert.Null(Updater.FindStagedUpdateIn(dir));
+        }
+        finally { Cleanup(dir); }
+    }
+
+    [Fact]
+    public void FindStagedUpdateIn_returns_null_for_missing_dir()
+        => Assert.Null(Updater.FindStagedUpdateIn(Path.Combine(Path.GetTempPath(), "doki-no-such-" + Guid.NewGuid().ToString("N"))));
+
     static string NewTempDir()
     {
         var d = Path.Combine(Path.GetTempPath(), "doki-upd-" + Guid.NewGuid().ToString("N").Substring(0, 8));

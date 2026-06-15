@@ -10,11 +10,16 @@ public partial class ServiceViewModel : ObservableObject
 {
     private readonly DokiService _doki;
     private readonly TestGenService _test;
+    private readonly Func<DateTime> _now;
     private DateTime? _unhealthySince;   // first poll a running service was seen unhealthy -> grace before "crashed"
 
     public ServiceViewModel(DokiService doki, TestGenService test, ServiceStatus s)
+        : this(doki, test, s, () => DateTime.UtcNow) { }
+
+    // Test ctor: inject a clock so the degraded->crashed 90s escalation is unit-testable (InternalsVisibleTo).
+    internal ServiceViewModel(DokiService doki, TestGenService test, ServiceStatus s, Func<DateTime> now)
     {
-        _doki = doki; _test = test;
+        _doki = doki; _test = test; _now = now;
         Name = s.Name;
         Sync(s);
     }
@@ -75,8 +80,8 @@ public partial class ServiceViewModel : ObservableObject
         if (s.Healthy) { StateKind = "healthy"; StateLabel = "healthy"; _unhealthySince = null; }
         else if (s.Running)
         {
-            _unhealthySince ??= DateTime.UtcNow;
-            if (DateTime.UtcNow - _unhealthySince > TimeSpan.FromSeconds(90))
+            _unhealthySince ??= _now();
+            if (_now() - _unhealthySince > TimeSpan.FromSeconds(90))
                 { StateKind = "crashed"; StateLabel = "running · not responding"; }
             else
                 { StateKind = "degraded"; StateLabel = "running · health failing"; }
@@ -96,7 +101,7 @@ public partial class ServiceViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStart))] private void Restart() => _doki.RestartService(Name);
     [RelayCommand] private void OpenUi() { if (!string.IsNullOrEmpty(Ui)) _doki.OpenUi(Ui!); }
     [RelayCommand] private void SwapModel(string? model) { if (!string.IsNullOrEmpty(model) && model != Model) _doki.WarmLoadModel(model!); }
-    [RelayCommand] private void OpenTestFile() { if (!string.IsNullOrEmpty(TestFile)) _doki.OpenUi(TestFile!); }
+    [RelayCommand] private void OpenTestFile() { if (!string.IsNullOrEmpty(TestFile)) _doki.OpenArtifact(TestFile!); }
 
     private bool CanTest => Healthy && !TestRunning;
 

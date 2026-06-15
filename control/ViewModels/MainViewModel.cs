@@ -102,7 +102,7 @@ public partial class MainViewModel : ObservableObject
         finally { _pollGate.Release(); }
     }
 
-    private void Apply(StatusDoc doc)
+    internal void Apply(StatusDoc doc)   // internal: MainViewModelTests drives this directly (InternalsVisibleTo)
     {
         StatusUnavailable = false;   // a poll succeeded
         _profiles = doc.Profiles ?? new();
@@ -131,7 +131,7 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SwitchExplain));
     }
 
-    private string DeriveMode()
+    internal string DeriveMode()
     {
         bool Run(string n) => _byName.TryGetValue(n, out var v) && v.Running;
         if (Run("media") || Run("prompt-rewriter")) return "media";
@@ -227,12 +227,7 @@ public partial class MainViewModel : ObservableObject
     // ---- self-update: check this panel's own GitHub releases, download + swap + relaunch ----
     // Self-update only makes sense for a real published apphost exe — never under `dotnet run`, where
     // Environment.ProcessPath is the SHARED dotnet host (swapping it would corrupt the SDK).
-    private static bool CanSelfUpdate()
-    {
-        var p = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(p)) return false;
-        return !System.IO.Path.GetFileNameWithoutExtension(p).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool CanSelfUpdate() => Updater.IsSelfUpdatableHost();   // single source of truth; also gates App.OnStartup
 
     private async Task CheckSelfUpdate()
     {

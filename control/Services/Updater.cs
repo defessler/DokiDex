@@ -100,13 +100,16 @@ public static class Updater
 
     /// <summary>The staged update with the HIGHEST tag newer than running, else null. (Highest, not the
     /// first Directory.GetFiles hit, so a stale older-but-still-newer leftover can't shadow a fresh one.)</summary>
-    public static (string path, string tag)? FindStagedUpdate()
+    public static (string path, string tag)? FindStagedUpdate() => FindStagedUpdateIn(UpdateDir);
+
+    // Internal seam so tests can drive a temp dir (the param-less version uses the real %LocalAppData% dir).
+    internal static (string path, string tag)? FindStagedUpdateIn(string dir)
     {
-        if (!Directory.Exists(UpdateDir)) return null;
+        if (!Directory.Exists(dir)) return null;
         var running = RunningVersion();
         (string path, string tag)? best = null;
         string[] files;
-        try { files = Directory.GetFiles(UpdateDir, $"{AssetPrefix}v*{AssetSuffix}"); }
+        try { files = Directory.GetFiles(dir, $"{AssetPrefix}v*{AssetSuffix}"); }
         catch { return null; }   // locked/redirected LocalAppData, PathTooLong, IO — never strand the launch
         foreach (var f in files)
         {
@@ -204,8 +207,19 @@ public static class Updater
     /// <summary>Apply the highest staged update IN PLACE and return that path to relaunch, or null if
     /// nothing is staged / the swap failed. The running exe is never left missing (see TryApplyStaged).
     /// The ".old" sidecar is swept by <see cref="CleanUpSuperseded"/> next launch.</summary>
+    /// <summary>True only when the running image is the real DokiDex apphost — never the shared dotnet host
+    /// under `dotnet run` (swapping it would corrupt a user-writable SDK), nor any other muxer/launcher.
+    /// Gates the in-place swap on BOTH the launch (App.OnStartup) and interactive (MainViewModel) paths.</summary>
+    public static bool IsSelfUpdatableHost(string? currentExe = null)
+    {
+        var p = currentExe ?? Environment.ProcessPath;
+        if (string.IsNullOrEmpty(p)) return false;
+        return Path.GetFileNameWithoutExtension(p).StartsWith("DokiDex", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string? ApplyInPlaceNow(string currentExe)
     {
+        if (!IsSelfUpdatableHost(currentExe)) return null;   // never swap dotnet.exe / a non-apphost launcher
         var staged = FindStagedUpdate();
         if (staged == null) return null;
         if (!TryApplyStaged(staged.Value.path, currentExe)) return null;

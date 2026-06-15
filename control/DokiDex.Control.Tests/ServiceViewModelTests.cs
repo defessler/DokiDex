@@ -64,4 +64,54 @@ public class ServiceViewModelTests
         var vm = Make(new ServiceStatus { Name = "x", Installed = true, ConfiguredModels = new() { "only" } });
         Assert.False(vm.HasModelSwap);
     }
+
+    // --- crashed-state escalation (degraded -> crashed after a 90s grace), via the injected clock seam ---
+    private static ServiceStatus Unhealthy() => new() { Name = "media", Group = "media", Installed = true, Running = true, Healthy = false };
+    private static ServiceStatus Recovered() => new() { Name = "media", Group = "media", Installed = true, Running = true, Healthy = true };
+    private static ServiceViewModel Clocked(ServiceStatus s, System.Func<System.DateTime> now)
+        => new(new DokiService(), new TestGenService(), s, now);
+
+    [Fact]
+    public void Stays_degraded_within_the_grace_window()
+    {
+        var t = new System.DateTime(2026, 1, 1, 0, 0, 0, System.DateTimeKind.Utc);
+        var vm = Clocked(Unhealthy(), () => t);
+        Assert.Equal("degraded", vm.StateKind);            // elapsed 0s
+        t = t.AddSeconds(80); vm.Sync(Unhealthy());
+        Assert.Equal("degraded", vm.StateKind);            // 80s < 90s grace
+    }
+
+    [Fact]
+    public void Escalates_to_crashed_past_the_grace_window()
+    {
+        var t = new System.DateTime(2026, 1, 1, 0, 0, 0, System.DateTimeKind.Utc);
+        var vm = Clocked(Unhealthy(), () => t);
+        t = t.AddSeconds(91); vm.Sync(Unhealthy());
+        Assert.Equal("crashed", vm.StateKind);
+        Assert.Contains("not responding", vm.StateLabel);
+    }
+
+    [Fact]
+    public void Recovery_resets_the_grace_clock()
+    {
+        var t = new System.DateTime(2026, 1, 1, 0, 0, 0, System.DateTimeKind.Utc);
+        var vm = Clocked(Unhealthy(), () => t);
+        t = t.AddSeconds(91); vm.Sync(Unhealthy());
+        Assert.Equal("crashed", vm.StateKind);
+        vm.Sync(Recovered());
+        Assert.Equal("healthy", vm.StateKind);             // recovery clears _unhealthySince
+        t = t.AddSeconds(10); vm.Sync(Unhealthy());
+        Assert.Equal("degraded", vm.StateKind);            // grace restarts; does NOT immediately re-crash
+    }
+
+    [Fact]
+    public void Flap_restarts_the_grace_so_it_does_not_prematurely_crash()
+    {
+        var t = new System.DateTime(2026, 1, 1, 0, 0, 0, System.DateTimeKind.Utc);
+        var vm = Clocked(Unhealthy(), () => t);            // unhealthy @0
+        t = t.AddSeconds(10); vm.Sync(Recovered());        // healthy @10 -> resets
+        t = t.AddSeconds(10); vm.Sync(Unhealthy());        // unhealthy @20 -> grace restarts here
+        t = t.AddSeconds(60); vm.Sync(Unhealthy());        // @80: only 60s since the restart -> still degraded
+        Assert.Equal("degraded", vm.StateKind);
+    }
 }

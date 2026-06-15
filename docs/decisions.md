@@ -394,10 +394,20 @@ its **unhappy paths unsafe**; the 17 findings were fixed before any release tag.
   downloads are rejected at download via `Content-Length`), *then* same-volume renames
   (running image → `.old`, `.new` → exe) that can't fail mid-stream. The running exe is **never left
   missing**. The swap runs **off the UI thread** (the copy is tens of MB).
-- **Guards:** self-update is gated to a real apphost (never swaps `dotnet.exe` under `dotnet run`);
-  `FindStagedUpdate` picks the highest tag and staging is pruned; apply-on-launch falls through to the
-  normal boot if relaunch fails (never vanishes the app). **17 `UpdaterTests`** pin the swap
-  success/reject/sweep + `IsNewer`/`TagFromAssetFile` (41 panel tests total, was 24).
+- **Guards:** the in-place swap is gated to a real `DokiDex*` apphost via `Updater.IsSelfUpdatableHost`
+  on **both** the launch (`App.OnStartup`) and interactive paths, so it can never overwrite the shared
+  `dotnet.exe` host under `dotnet run` (which would corrupt a user-writable SDK — the guard previously
+  held only on the interactive path). `FindStagedUpdate` picks the highest tag and staging is pruned;
+  apply-on-launch falls through to the normal boot if relaunch fails (never vanishes the app).
+  `UpdaterTests` pin the swap success/reject/sweep, `IsNewer`/`TagFromAssetFile`, the highest-tag
+  selection, and the host guard (**56 panel tests total**, was 41).
+- **Trust model (stated honestly):** the download is authenticated only by **HTTPS to the owner's
+  *private* GitHub repo**; the `MZ`+size check is corruption/truncation protection, **not** an
+  authenticity check. There is no Authenticode-signature verification, so the trust anchor is "whoever
+  can publish a release to `defessler/DokiDex`." For a single-user private repo this is an accepted,
+  bounded risk (GitHub account security + the repo being private). To harden, enable release signing
+  (`CODESIGN_PFX_BASE64` in `release.yml`) and pin the signer's certificate thumbprint before the swap.
+  Surfaced by a defensive-security ultracode pass.
 - **Repo-coupling, stated honestly:** the released exe is the auto-update payload and must live inside
   a cloned repo (the panel shells `doki.ps1`); standalone use elsewhere is unsupported — noted in the
   release workflow. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`.

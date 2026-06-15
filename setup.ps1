@@ -124,9 +124,11 @@ if ($Tts) {
         Pip $tpy install protobuf==4.25.5
         New-Item -ItemType File -Force $tok | Out-Null   # all deps verified — safe to skip next run
     } else { Ok "TTS venv present" }
-    # Use the public ORIGINAL model — the server's default 'chatterbox-turbo' repo is gated.
+    # Use the public ORIGINAL model — the server's default 'chatterbox-turbo' repo is gated. ALSO pin the
+    # bind to loopback: Chatterbox ships host: 0.0.0.0 (auth off), which would expose the voice-clone +
+    # speech API to the whole LAN — every sibling DokiDex server is 127.0.0.1, so match them.
     $cfg = Join-Path $ttsRoot "config.yaml"
-    if (Test-Path $cfg) { (Get-Content $cfg) -replace 'repo_id: chatterbox-turbo', 'repo_id: chatterbox' | Set-Content $cfg }
+    if (Test-Path $cfg) { (Get-Content $cfg) -replace 'repo_id: chatterbox-turbo', 'repo_id: chatterbox' -replace '(?m)^(\s*)host:\s*0\.0\.0\.0', '${1}host: 127.0.0.1' | Set-Content $cfg }
     # Strip the Perth watermark in every chatterbox model file (genuinely unmarked, uncensored output).
     $cbDir = Join-Path $ttsRoot ".venv\Lib\site-packages\chatterbox"
     foreach ($f in "tts.py", "mtl_tts.py", "tts_turbo.py", "vc.py") {
