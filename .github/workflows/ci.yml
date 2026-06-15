@@ -48,6 +48,12 @@ jobs:
           pwsh -NoProfile -File tests/doki-statusjson.test.ps1
           if ($LASTEXITCODE -ne 0) { throw "doki-statusjson.test.ps1 failed (exit $LASTEXITCODE)" }
 
+      - name: PowerShell — doki gen recipe/arg resolution
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tests/doki-gen.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "doki-gen.test.ps1 failed (exit $LASTEXITCODE)" }
+
       - name: Python — memory store
         shell: pwsh
         run: |

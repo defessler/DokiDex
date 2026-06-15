@@ -5,13 +5,21 @@
 #   .\doki.ps1 status                      show services + health
 #   .\doki.ps1 restart [profile]           down, then up
 #   .\doki.ps1 logs <llama-swap|fim|media> tail a service log
+#   .\doki.ps1 gen "<idea>" [-Video|-Music|-Edit]  text->image/video/music (SwarmUI; needs `up media`)
 #
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor")][string]$Command = "status",
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg,
-    [switch]$Clear   # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
+    [switch]$Clear,  # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
+    # `doki gen "<idea>" ...` — text->media via SwarmUI (needs `doki up media`). Kind: -Video | -Music | -Edit
+    # (default = still image). Modifiers: -Fast (LTXV video / fewer image steps), -Upscale (4x-UltraSharp),
+    # -InitImage <png> (required for -Edit; img2img otherwise), -Raw (skip the :8013 rewriter),
+    # -Out <file> (save a copy), -NoOpen (don't open the result).
+    [switch]$Video, [switch]$Music, [switch]$Edit,
+    [switch]$Fast, [switch]$Upscale, [switch]$Raw, [switch]$NoOpen,
+    [string]$InitImage, [string]$Out
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -352,12 +360,18 @@ switch ($Command) {
         else { TailLogs $Arg }
     }
     "verify" { & (Join-Path $root "verify.ps1") }
+    "gen" {
+        if (-not $Arg) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit] [-Fast] [-Upscale] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
+        . (Join-Path $serving "doki-gen.ps1")
+        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit
+        Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Raw:$Raw -NoOpen:$NoOpen -InitImage $InitImage -Out $Out | Out-Null
+    }
     "test" {
         # unit tests (no GPU compute; fast). Live capability smokes are `doki verify`.
         $failed = 0
         # 1. PowerShell suites — installer failure-recovery helpers + the `status json` contract
         #    the panel parses. Each runs in a child pwsh so its `exit` can't tear down this run.
-        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\doki-statusjson.test.ps1")) {
+        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\doki-statusjson.test.ps1", "tests\doki-gen.test.ps1")) {
             $tp = Join-Path $root $rel
             if (Test-Path $tp) {
                 Write-Host "== $(Split-Path $tp -Leaf) ==" -ForegroundColor Cyan
