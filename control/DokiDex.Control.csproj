@@ -13,7 +13,7 @@
     <ApplicationIcon>assets\dokidex.ico</ApplicationIcon>
     <!-- Baseline version for the in-app auto-updater (Services/Updater.cs reports the entry-assembly
          version; the release CI overrides this with -p:Version from the pushed vX.Y.Z tag). -->
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
