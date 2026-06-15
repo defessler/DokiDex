@@ -7,7 +7,7 @@ the TTS/STT services; memory via the MCP tools.
 > Switch the GPU first: **`.\doki.ps1 up media`** for image/video/audio, **`up agent`** for
 > chat/speech. They're mutually exclusive on 32 GB.
 >
-> **One-liner:** `.\doki.ps1 gen "<idea>" [-Video|-Music|-Edit] [-Fast] [-Upscale]` wraps the calls
+> **One-liner:** `.\doki.ps1 gen "<idea>" [-Video|-Music|-Edit|-I2v|-Foley] [-Fast] [-Upscale]` wraps the calls
 > below — it picks the recipe, wraps the idea in `<mpprompt:…>` for the `:8013` rewriter, POSTs to
 > SwarmUI, and opens the result. The tables here are the underlying API; `doki gen` is the shortcut.
 

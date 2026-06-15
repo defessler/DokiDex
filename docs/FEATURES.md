@@ -189,7 +189,7 @@ A docker-compose-style manager with **no Docker**, data-driven from a `$Services
 | `doki doctor` | Environment + install diagnostics. |
 | `doki test` | Fast no-GPU unit suite — installer helpers + `status json` contract + `doki gen` recipes + memory store + codebase-RAG core + control panel (incl. updater). |
 | `doki panel` | Launch the WPF control panel. |
-| `doki gen "<idea>" [-Video\|-Music\|-Edit]` | Text→media one-liner — picks the SwarmUI recipe, expands the idea via the `:8013` rewriter, POSTs `GenerateText2Image`, opens the result. `-Fast` / `-Upscale` / `-InitImage` / `-Raw` / `-Out`. Needs `up media`. |
+| `doki gen "<idea>" [-Video\|-Music\|-Edit\|-I2v\|-Foley]` | Text→media one-liner — picks the SwarmUI recipe, expands the idea via the `:8013` rewriter, POSTs `GenerateText2Image`, opens the result. `-I2v` animates a still (+`-InitImage`), `-Foley` adds synced SFX; plus `-Fast` / `-Upscale` / `-InitImage` / `-Raw` / `-Out`. Needs `up media`. |
 | `doki index` | (Re)build the codebase RAG index that backs `code_search` (CPU embed server on `:8090`; never touches the GPU). |
 
 **Lifecycle internals:** PID-file process tracking · untracked-instance detection (reports already-up if a service was started outside doki but its health responds) · HTTP health probe + wait-for-health (≤120 s) · forced PID-tree kill on stop · auto-created `.run/` state dir for `.pid`/`.log` files.

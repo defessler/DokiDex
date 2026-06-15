@@ -19,6 +19,8 @@ Assert ((Resolve-GenKind) -eq 'image')        "no switch -> image (default)"
 Assert ((Resolve-GenKind -Video) -eq 'video') "-Video -> video"
 Assert ((Resolve-GenKind -Music) -eq 'music') "-Music -> music"
 Assert ((Resolve-GenKind -Edit)  -eq 'edit')  "-Edit  -> edit"
+Assert ((Resolve-GenKind -I2v)   -eq 'i2v')   "-I2v   -> i2v"
+Assert ((Resolve-GenKind -Foley) -eq 'foley') "-Foley -> foley"
 $ambiguous = $false
 try { Resolve-GenKind -Video -Music | Out-Null } catch { $ambiguous = $true }
 Assert $ambiguous                             "-Video -Music -> throws (ambiguous)"
@@ -44,6 +46,12 @@ Assert ($mus.textaudioduration -eq 10)                             "music -> 10s
 $edt = Get-GenRecipe -Kind edit
 Assert ($edt.model -eq 'qwen_image_edit_2511_fp8mixed.safetensors') "edit -> Qwen-Image-Edit"
 Assert ($edt.cfgscale -eq 2.5)                                     "edit -> cfg 2.5"
+
+$i2v = Get-GenRecipe -Kind i2v
+Assert ($i2v.videomodel -eq 'wan2.2_ti2v_5B_fp16.safetensors' -and $i2v.videoframes -eq 25) "i2v -> videomodel + 25 frames (animate)"
+Assert ($i2v.videoresolution -eq 'Image' -and $i2v.videosteps -eq 20) "i2v -> videoresolution=Image + videosteps (the I2V trigger trio)"
+$fol = Get-GenRecipe -Kind foley
+Assert ($fol.comfyuicustomworkflow -eq 'WanFoley' -and $fol.seed -eq -1) "foley -> WanFoley custom workflow + seed -1"
 
 $up = Get-GenRecipe -Kind image -Upscale
 Assert ($up.refinermethod -eq 'PostApply' -and $up.refinerupscalemethod -eq 'model-4x-UltraSharp.pth') "image -Upscale -> 4x-UltraSharp refiner"
