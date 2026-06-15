@@ -90,6 +90,17 @@ public class StudioViewModelTests
     }
 
     [Fact]
+    public void PromptIsEmpty_tracks_the_prompt_for_the_placeholder()
+    {
+        var vm = New();
+        Assert.True(vm.PromptIsEmpty);          // fresh -> placeholder shows
+        vm.PromptText = "a koi";
+        Assert.False(vm.PromptIsEmpty);
+        vm.PromptText = "   ";                   // whitespace-only still counts as empty
+        Assert.True(vm.PromptIsEmpty);
+    }
+
+    [Fact]
     public void ShowInitImage_only_for_edit_and_i2v()
     {
         var vm = New();

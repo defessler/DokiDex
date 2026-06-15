@@ -27,7 +27,7 @@ public partial class StudioViewModel : ObservableObject
     public IReadOnlyList<string> Kinds { get; } = GenRequest.Kinds;
 
     [ObservableProperty][NotifyPropertyChangedFor(nameof(ShowInitImage))] private string _selectedKind = "image";
-    [ObservableProperty] private string _promptText = "";
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(PromptIsEmpty))] private string _promptText = "";
     [ObservableProperty] private bool _fast;
     [ObservableProperty] private bool _upscale;
     [ObservableProperty] private bool _raw;                 // skip the :8013 prompt rewriter
@@ -42,6 +42,7 @@ public partial class StudioViewModel : ObservableObject
     [ObservableProperty] private ImageSource? _resultPreview;   // the inline image (design sample now; live artifact in Phase 2)
 
     public bool HasResult => !string.IsNullOrEmpty(ResultPath);
+    public bool PromptIsEmpty => string.IsNullOrWhiteSpace(PromptText);   // drives the prompt-box placeholder
     public bool CanGenerate => MediaActive && !IsGenerating;
     public bool ShowEmpty => !HasResult && !IsGenerating;           // the inviting canvas: idle + nothing yet
     public bool ShowInitImage => SelectedKind is "edit" or "i2v";   // these kinds can take a source still

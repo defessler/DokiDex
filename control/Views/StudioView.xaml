@@ -100,8 +100,20 @@
         <TextBlock Style="{StaticResource SectionHeader}">
           <Run Text="DokiGen Studio" Foreground="{StaticResource AmberBrush}"/><Run Text="  ·  describe → generate → remix" Foreground="{StaticResource DimBrush}"/>
         </TextBlock>
-        <TextBox Style="{StaticResource PromptBox}" Height="60" Margin="0,9,0,0"
-                 Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}"/>
+        <Grid Margin="0,9,0,0">
+          <TextBox Style="{StaticResource PromptBox}" Height="60"
+                   Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}">
+            <TextBox.InputBindings>
+              <!-- Ctrl+Enter submits (plain Enter inserts a newline — the box is multiline) -->
+              <KeyBinding Modifiers="Ctrl" Key="Return" Command="{Binding GenerateCommand}"/>
+            </TextBox.InputBindings>
+          </TextBox>
+          <!-- placeholder: shown only while the prompt is empty; clicks pass through to the TextBox -->
+          <TextBlock Text="describe what to generate…   (Ctrl+Enter)" IsHitTestVisible="False"
+                     Foreground="{StaticResource DimBrush}" FontSize="13.5" Margin="12,9,0,0"
+                     VerticalAlignment="Top" HorizontalAlignment="Left"
+                     Visibility="{Binding PromptIsEmpty, Converter={StaticResource BoolVis}}"/>
+        </Grid>
         <DockPanel Margin="0,12,0,0">
           <Button DockPanel.Dock="Right" Style="{StaticResource GenerateBtn}" Content="✨ Generate"
                   Command="{Binding GenerateCommand}" IsEnabled="{Binding CanGenerate}" VerticalAlignment="Center"/>
