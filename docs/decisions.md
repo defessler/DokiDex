@@ -411,3 +411,18 @@ its **unhappy paths unsafe**; the 17 findings were fixed before any release tag.
 - **Repo-coupling, stated honestly:** the released exe is the auto-update payload and must live inside
   a cloned repo (the panel shells `doki.ps1`); standalone use elsewhere is unsupported — noted in the
   release workflow. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+## 2026-06-15 — Codebase RAG embedder: nomic-embed-text kept (Qwen3-Embedding eval'd → no win)
+
+The `code_search` MCP tool (a sqlite brute-force-cosine RAG over the repo) embeds via a CPU-only
+nomic-embed-text-v1.5 server (`:8090`, 0 VRAM). Two retrieval tunings, both **measured** on
+`evals/rag-eval.py` (a 14-query recall benchmark — the RAG analogue of the golden-task coder suite, so
+retrieval is never tuned blind): a code-preference re-rank (code outranks docs/config/tests — a doc that
+*describes* a feature was out-cosining the file that *implements* it) and prepending each chunk's file
+path to its embed input (so "auto-updater" matches `Updater.cs`). Combined: **recall@1 6→10, recall@3 9→12**.
+
+- **Embedder bake-off (2026-06-15):** Qwen3-Embedding-0.6B-Q8 (a top general-retrieval model — 1024-dim,
+  last-token pooling) scored recall@1 **10** / @3 **12** / @5 **12** — it **ties** the tuned nomic at
+  @1/@3 and **loses** at @5, while being ~4× larger (markedly slower CPU embed) and needing
+  instruction-prefixed queries. So the lighter 137M nomic stays. Re-run `evals/rag-eval.py` to re-decide
+  if a *code-specific* embedder with a clean llama.cpp GGUF (bge-code-v1, a nomic-embed-code, …) appears.
