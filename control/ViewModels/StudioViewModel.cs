@@ -37,11 +37,14 @@ public partial class StudioViewModel : ObservableObject
     // GPU in media mode? gen needs it (the panel keeps LLM/media mutually exclusive); the guard banner shows
     // when false. Updated from MainViewModel each poll. Wiring the one-click switch is Phase 2.
     [ObservableProperty][NotifyPropertyChangedFor(nameof(CanGenerate))] private bool _mediaActive;
-    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasResult))][NotifyPropertyChangedFor(nameof(ShowEmpty))] private string? _resultPath;
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasResult))][NotifyPropertyChangedFor(nameof(ShowEmpty))][NotifyPropertyChangedFor(nameof(ResultGlyph))] private string? _resultPath;
     [ObservableProperty] private string? _resultCaption;
-    [ObservableProperty] private ImageSource? _resultPreview;   // the inline image (design sample now; live artifact in Phase 2)
+    [ObservableProperty][NotifyPropertyChangedFor(nameof(HasInlinePreview))] private ImageSource? _resultPreview;   // inline image (image/edit); null for video/music -> glyph card
 
     public bool HasResult => !string.IsNullOrEmpty(ResultPath);
+    public bool HasInlinePreview => ResultPreview != null;                // image/edit show inline; video/music show a glyph + Open
+    public string ResultGlyph => System.IO.Path.GetExtension(ResultPath ?? "").ToLowerInvariant()
+        is ".mp3" or ".wav" or ".flac" ? "♪" : "▶";                       // audio vs play, for the non-inline result card
     public bool PromptIsEmpty => string.IsNullOrWhiteSpace(PromptText);   // drives the prompt-box placeholder
     public bool CanGenerate => MediaActive && !IsGenerating;
     public bool ShowEmpty => !HasResult && !IsGenerating;           // the inviting canvas: idle + nothing yet
@@ -155,6 +158,13 @@ public partial class StudioViewModel : ObservableObject
                 MediaActive = false; IsGenerating = false;
                 StatusText = "media mode is off";
                 ResultPath = null; ResultPreview = null;
+                break;
+            case "result-video": // a video/music result -> glyph card (no inline frame), Open to play
+                MediaActive = true; IsGenerating = false; SelectedKind = "video";
+                StatusText = "done · Wan 2.2 · 832×480 in 41s";
+                ResultCaption = "Wan 2.2 · 832×480";
+                ResultPath = "(sample).mp4";   // .mp4 -> ▶ glyph; ResultPreview null -> non-inline card
+                ResultPreview = null;
                 break;
             default:           // "result": the happy path with an inline preview
                 MediaActive = true; IsGenerating = false;

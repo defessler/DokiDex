@@ -170,14 +170,25 @@
             <Border Width="540" Height="540" CornerRadius="10" BorderThickness="1"
                     BorderBrush="{StaticResource BorderBrush2}">
               <Border.Background>
+                <!-- image/edit fill the card; video/music leave it dark + show the glyph below -->
                 <ImageBrush ImageSource="{Binding ResultPreview}" Stretch="UniformToFill"/>
               </Border.Background>
-              <!-- Sora-style caption chip: the recipe + resolution, lower-left -->
-              <Border VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="12" Padding="9,4"
-                      CornerRadius="5" Background="#CC080C12">
-                <TextBlock Text="{Binding ResultCaption}" Foreground="{StaticResource TextBrush}"
-                           Style="{StaticResource Mono}" FontSize="11"/>
-              </Border>
+              <Grid>
+                <!-- non-inline result (video/music/foley): a play/audio glyph + an Open hint -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="{Binding HasInlinePreview, Converter={StaticResource InvBoolVis}}">
+                  <TextBlock Text="{Binding ResultGlyph}" Foreground="{StaticResource TealBrush}" FontSize="56"
+                             HorizontalAlignment="Center" Opacity="0.9"/>
+                  <TextBlock Text="ready · use Open below" Foreground="{StaticResource DimBrush}" Style="{StaticResource Mono}"
+                             FontSize="12" HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                </StackPanel>
+                <!-- Sora-style caption chip: the recipe + resolution, lower-left -->
+                <Border VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="12" Padding="9,4"
+                        CornerRadius="5" Background="#CC080C12">
+                  <TextBlock Text="{Binding ResultCaption}" Foreground="{StaticResource TextBrush}"
+                             Style="{StaticResource Mono}" FontSize="11"/>
+                </Border>
+              </Grid>
             </Border>
           </Viewbox>
           <!-- generating overlay: a scrim over the canvas while a run is in flight -->

@@ -80,6 +80,7 @@ public class StudioViewModelTests
     [InlineData("generating", true, true, false)]
     [InlineData("guard", false, false, false)]
     [InlineData("result", true, false, true)]
+    [InlineData("result-video", true, false, true)]
     public void Design_variants_set_the_state_each_snapshot_captures(string variant, bool media, bool generating, bool hasResult)
     {
         var vm = New();
@@ -98,6 +99,25 @@ public class StudioViewModelTests
         Assert.False(vm.PromptIsEmpty);
         vm.PromptText = "   ";                   // whitespace-only still counts as empty
         Assert.True(vm.PromptIsEmpty);
+    }
+
+    [Fact]
+    public void Result_glyph_is_audio_or_play_by_extension()
+    {
+        var vm = New();
+        vm.ResultPath = @"C:\out\clip.mp4"; Assert.Equal("▶", vm.ResultGlyph);
+        vm.ResultPath = @"C:\out\song.mp3"; Assert.Equal("♪", vm.ResultGlyph);
+        vm.ResultPath = @"C:\out\song.wav"; Assert.Equal("♪", vm.ResultGlyph);
+        vm.ResultPath = @"C:\out\pic.png";  Assert.Equal("▶", vm.ResultGlyph);   // non-audio -> play glyph
+    }
+
+    [Fact]
+    public void Video_result_has_no_inline_preview_so_the_glyph_card_shows()
+    {
+        var vm = New();
+        vm.LoadDesignSample("result-video");
+        Assert.True(vm.HasResult);
+        Assert.False(vm.HasInlinePreview);   // no inline image -> the ▶ glyph card, not an empty frame
     }
 
     [Fact]
