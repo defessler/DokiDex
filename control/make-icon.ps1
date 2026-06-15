@@ -1,13 +1,13 @@
-# control/make-icon.ps1 — generate the DokiCode arc-reactor app icon (assets/dokicode.ico).
+# control/make-icon.ps1 — generate the DokiDex arc-reactor app icon (assets/dokidex.ico).
 # Pure GDI+: renders the reactor at several sizes and packs PNG frames into a multi-res .ico
-# (Vista+ reads PNG-compressed frames). Also writes assets/dokicode-preview.png for inspection.
+# (Vista+ reads PNG-compressed frames). Also writes assets/dokidex-preview.png for inspection.
 # Run:  pwsh -NoProfile -File control\make-icon.ps1
 param([string]$OutDir = (Join-Path $PSScriptRoot "assets"))
 Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = "Stop"
 New-Item -ItemType Directory -Force $OutDir | Out-Null
-$icoPath = Join-Path $OutDir "dokicode.ico"
-$pngPath = Join-Path $OutDir "dokicode-preview.png"
+$icoPath = Join-Path $OutDir "dokidex.ico"
+$pngPath = Join-Path $OutDir "dokidex-preview.png"
 
 $cyan = [System.Drawing.Color]::FromArgb(255, 53, 224, 240)    # #35E0F0 reactor
 $gold = [System.Drawing.Color]::FromArgb(255, 232, 199, 122)   # #E8C77A

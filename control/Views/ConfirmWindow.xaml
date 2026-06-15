@@ -1,4 +1,4 @@
-<Window x:Class="DokiCode.Control.Views.ConfirmWindow"
+<Window x:Class="DokiDex.Control.Views.ConfirmWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Confirm switch" SizeToContent="Height" Width="520"

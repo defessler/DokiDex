@@ -1,7 +1,7 @@
-using DokiCode.Control.ViewModels;
+using DokiDex.Control.ViewModels;
 using Xunit;
 
-namespace DokiCode.Control.Tests;
+namespace DokiDex.Control.Tests;
 
 // Log severity is colour-coded by CONTENT, not by stream (the bug I fixed: llama-server logs
 // to stderr, so treating stderr as 'error' painted everything red).

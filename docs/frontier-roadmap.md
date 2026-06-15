@@ -1,4 +1,4 @@
-# DokiCode Frontier-Gap Roadmap
+# DokiDex Frontier-Gap Roadmap
 
 What's missing to close the distance to the two frontier bookends — **code = the Mythos
 bar** (Anthropic's frontier reasoning/code model) and **media = the Sora-2 bar** — ranked by

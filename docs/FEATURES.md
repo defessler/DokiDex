@@ -1,6 +1,6 @@
-# DokiCode — Feature Index
+# DokiDex — Feature Index
 
-**DokiCode is a fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows 11 **native** (no Docker, no WSL). It does agentic coding, chat, autocomplete, web search, persistent agent memory, speech in/out, and image/video/music/audio generation + editing — **all uncensored, with nothing leaving the box at runtime** (the only network egress is keyless web search). One PowerShell script (`doki.ps1`) runs the whole thing like docker-compose, without Docker. This is the scannable feature index; for the full architecture see [`docs/how-it-works.md`](docs/how-it-works.md), and for exact API calls see [`docs/media-recipes.md`](docs/media-recipes.md).
+**DokiDex is a fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows 11 **native** (no Docker, no WSL). It does agentic coding, chat, autocomplete, web search, persistent agent memory, speech in/out, and image/video/music/audio generation + editing — **all uncensored, with nothing leaving the box at runtime** (the only network egress is keyless web search). One PowerShell script (`doki.ps1`) runs the whole thing like docker-compose, without Docker. This is the scannable feature index; for the full architecture see [`docs/how-it-works.md`](docs/how-it-works.md), and for exact API calls see [`docs/media-recipes.md`](docs/media-recipes.md).
 
 > **The one rule that shapes everything:** 32 GB of VRAM can't hold the coding brain *and* the image/video models at once, so services split into two mutually-exclusive **GPU groups** — `llm` and `media` — and `doki` switches between them. The `llm` group has small always-on riders (TTS ~4 GB, STT on CPU) that fit alongside the coder. This single constraint is enforced on every start and is why most of the control plane exists.
 
@@ -55,7 +55,7 @@ A local FastMCP server (`doki-memory`, over stdio) gives the coding agent memory
 | `memory_delete` | Delete a memory by id when a fact goes stale. | `memory_delete(memory_id)` |
 | **FTS5 backend + LIKE fallback** | Relevance-ranked FTS5 (`mem_fts` synced via triggers); degrades gracefully to a `LIKE` scan if FTS5 is unavailable. | Automatic. |
 | **Auto-created schema** | Creates the `memories` table, FTS virtual table, and sync triggers on every connection. | Automatic. |
-| **Seed script** | Idempotently loads **14** hard-won DokiCode facts/gotchas (clears prior `seed` notes first) so the agent starts with real project knowledge. | `python serving/memory-mcp/seed.py` |
+| **Seed script** | Idempotently loads **14** hard-won DokiDex facts/gotchas (clears prior `seed` notes first) so the agent starts with real project knowledge. | `python serving/memory-mcp/seed.py` |
 | **Config** | DB at `serving/memory-mcp/memory.db`; path overridable via `MEMORY_DB`. Wired in `crush.json` → `mcp.memory` (`uv run --with mcp[cli] server.py`). | Automatic via Crush. |
 
 ---
@@ -185,7 +185,7 @@ A docker-compose-style manager with **no Docker**, data-driven from a `$Services
 
 ## Control panel (WPF cockpit) *(optional)*
 
-A single-process **WPF cockpit on .NET 9** (premium void/cyan/gold theme; native splash + a cinematic boot sequence) — a reactive face over `doki status json` that never re-implements control logic. Launch via `control.bat` (double-click; first run builds Release **and** creates a console-free `DokiCode.lnk` launcher with the arc-reactor icon), the `DokiCode.lnk` shortcut thereafter, or `doki panel`.
+A single-process **WPF cockpit on .NET 9** (premium void/cyan/gold theme; native splash + a cinematic boot sequence) — a reactive face over `doki status json` that never re-implements control logic. Launch via `control.bat` (double-click; first run builds Release **and** creates a console-free `DokiDex.lnk` launcher with the arc-reactor icon), the `DokiDex.lnk` shortcut thereafter, or `doki panel`.
 
 | Area | What it does |
 |---|---|
@@ -199,9 +199,9 @@ A single-process **WPF cockpit on .NET 9** (premium void/cyan/gold theme; native
 | **Live logs** | Tails `.run/<name>.log[.err]` by byte-offset (1 s, handles rotation, caps 2500 lines, auto-scroll); per-service tabs + an "All" merge; regex/substring filter; pause toggle; stderr toggle; **content-based** severity coloring (not stream-based). |
 | **Global actions** | Check Updates (SwarmUI via git, llama-swap via GitHub release → card badges) · Verify stack (visible console) · Stop All. |
 | **Cinematic boot + native splash** | A native `<SplashScreen>` PNG shows instantly, cross-fading into an animated **"THE SEAL IGNITES"** boot — a gold FF summoning hexagram = Iron Man arc-reactor faceplate → fires a cyan packet to a Star Trek LCARS rail populated from real `doki status json`. Skippable (key/click), reduced-motion aware; a curtain timer always opens the panel even if every probe fails. (`Views/BootWindow.xaml.cs`, shown first by `App.xaml.cs`.) |
-| **In-app self-updater** | Checks the panel's OWN GitHub releases (`defessler/DokiCode`); shows a "panel update available" banner, then downloads + PE-verifies + swaps the exe **in place** (copy-beside → same-volume rename-and-relaunch, no admin/installer), and auto-applies a staged update at next launch. Gated so it never runs under `dotnet run`. Distinct from the per-service "Check Updates" above. (`Services/Updater.cs`.) |
-| **Arc-reactor icon + `DokiCode.lnk`** | First-run `control.bat` / `doki panel` generates the multi-res arc-reactor app icon (`make-icon.ps1` → `assets/dokicode.ico`) and a console-free `DokiCode.lnk` shortcut to the WinExe (`make-shortcut.ps1`) — the day-to-day entry point. |
-| **Theme & tests** | Premium void/cyan/gold theme (`Themes/Palette.xaml`) + value converters; **21 xUnit test methods** across 5 classes — status parsing (3), GPU view-model (3), service view-model (6), log classification (2), updater (7) — which expand to **41 cases** via `InlineData` (`dotnet test control\DokiCode.Control.Tests`). |
+| **In-app self-updater** | Checks the panel's OWN GitHub releases (`defessler/DokiDex`); shows a "panel update available" banner, then downloads + PE-verifies + swaps the exe **in place** (copy-beside → same-volume rename-and-relaunch, no admin/installer), and auto-applies a staged update at next launch. Gated so it never runs under `dotnet run`. Distinct from the per-service "Check Updates" above. (`Services/Updater.cs`.) |
+| **Arc-reactor icon + `DokiDex.lnk`** | First-run `control.bat` / `doki panel` generates the multi-res arc-reactor app icon (`make-icon.ps1` → `assets/dokidex.ico`) and a console-free `DokiDex.lnk` shortcut to the WinExe (`make-shortcut.ps1`) — the day-to-day entry point. |
+| **Theme & tests** | Premium void/cyan/gold theme (`Themes/Palette.xaml`) + value converters; **21 xUnit test methods** across 5 classes — status parsing (3), GPU view-model (3), service view-model (6), log classification (2), updater (7) — which expand to **41 cases** via `InlineData` (`dotnet test control\DokiDex.Control.Tests`). |
 
 ---
 
@@ -212,7 +212,7 @@ A single-process **WPF cockpit on .NET 9** (premium void/cyan/gold theme; native
 | **`doki verify`** — full-stack smoke test | Cycles GPU modes (agent → coexist → media), runs live capability smokes with a real API call each, prints a PASS/SKIP/FAIL table, restores `agent` (the default resting state), and exits 0 only if zero failures. **15 result rows: 5 always run, 10 SKIP cleanly when a full-tier model is absent.** | `.\doki.ps1 verify` |
 | **`doki doctor`** — diagnostics | ok/warn/miss marks across: GPU hardware (nvidia-smi) · disk free (warn <20 GB) · toolchain (pwsh/dotnet/git required; python/uv/gh/crush/ffprobe optional) · LLM model inventory · media kit (lean + full) · per-service install+port · memory store · control-panel build. | `.\doki.ps1 doctor` |
 | **`doki test`** — unit tests | Runs the fast no-GPU suite: installer-helper + `status json`-contract PowerShell tests (AST-extracted from the real scripts), the sqlite/FTS5 memory tests, and the control-panel xUnit incl. the auto-updater (~118 assertions total). | `.\doki.ps1 test` |
-| **Releases & auto-update** | Push a `v*` tag (`git tag v0.2.0 && git push origin v0.2.0`) → `.github/workflows/release.yml` builds a self-contained single-file `DokiCode-v0.2.0-win-x64.exe`, embeds the version, and publishes it as a GitHub release — the payload the panel's in-app updater downloads and swaps in place. `workflow_dispatch` builds/validates only. The exe must live inside a cloned repo (it shells `doki.ps1`). | `git tag v* && git push --tags` |
+| **Releases & auto-update** | Push a `v*` tag (`git tag v0.2.0 && git push origin v0.2.0`) → `.github/workflows/release.yml` builds a self-contained single-file `DokiDex-v0.2.0-win-x64.exe`, embeds the version, and publishes it as a GitHub release — the payload the panel's in-app updater downloads and swaps in place. `workflow_dispatch` builds/validates only. The exe must live inside a cloned repo (it shells `doki.ps1`). | `git tag v* && git push --tags` |
 
 **Always-run smokes (5):** chat/code (`:8080`, real completion), memory MCP (exercises the `memory_db` store/search core directly on a temp DB — the stdio MCP wrapper itself is exercised by Crush, not verify), autocomplete/FIM infill (`:8012`), image (Z-Image Turbo), video (Wan 2.1 1.3B).
 
@@ -240,7 +240,7 @@ Idempotent, 100% headless bootstrap. Core install is flagless; everything else i
 
 | Feature | What it does | How to use |
 |---|---|---|
-| **Root `AGENTS.md`** (the project's own brief) | DokiCode's filled-in agent brief: the build/test/run commands, the **PowerShell-not-bash / no-Docker / no-WSL** rule, the one-GPU-group rule, the "new service ⇒ add to `$Services`/`$Profiles` + a `start-*.ps1` + a guarded `verify.ps1` smoke" rule, the git-ignore list (weights/build output), the smallest-change discipline, and the persistent-memory protocol. | Already in the repo root; agents read it automatically. |
+| **Root `AGENTS.md`** (the project's own brief) | DokiDex's filled-in agent brief: the build/test/run commands, the **PowerShell-not-bash / no-Docker / no-WSL** rule, the one-GPU-group rule, the "new service ⇒ add to `$Services`/`$Profiles` + a `start-*.ps1` + a guarded `verify.ps1` smoke" rule, the git-ignore list (weights/build output), the smallest-change discipline, and the persistent-memory protocol. | Already in the repo root; agents read it automatically. |
 | **`harness/AGENTS.md` template** | The blank per-repo version of the same brief to drop into other working repos. | Copy `harness/AGENTS.md` into each working repo and fill in. |
 
 **Eval gate & rejected-model history:** Crush won the coder bake-off; the docs record the losers — Claw Code (45%, flaky tool calls), Nemotron-Cascade-2 (45%), Qwen3-Coder-Next-REAP (broken tool calls). Qwen3-Coder-30B is the measured best 32 GB fit. The golden-task suite (`evals/`) is the gate for any future model swap.

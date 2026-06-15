@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Project** | DokiCode infrastructure |
+| **Project** | DokiDex infrastructure |
 | **Status** | Approved |
 | **Author** | Doug Fessler (with Claude) |
 | **Date** | 2026-06-12 |

@@ -1,9 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using DokiCode.Control.ViewModels;
+using DokiDex.Control.ViewModels;
 
-namespace DokiCode.Control.Views;
+namespace DokiDex.Control.Views;
 
 public partial class DashboardView : UserControl
 {

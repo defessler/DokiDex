@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
-using DokiCode.Control.Models;
+using DokiDex.Control.Models;
 
-namespace DokiCode.Control.ViewModels;
+namespace DokiDex.Control.ViewModels;
 
 // Boot-sequence telemetry. Rows are seeded with dim "· · ·" placeholders the instant the window
 // shows, then SNAP to real `doki status json` values the moment the background probe lands — so

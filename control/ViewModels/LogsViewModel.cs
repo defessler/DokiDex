@@ -5,7 +5,7 @@ using System.Windows.Data;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace DokiCode.Control.ViewModels;
+namespace DokiDex.Control.ViewModels;
 
 public sealed class LogLine
 {

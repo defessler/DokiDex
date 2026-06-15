@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using DokiCode.Control.Models;
+using DokiDex.Control.Models;
 
-namespace DokiCode.Control.ViewModels;
+namespace DokiDex.Control.ViewModels;
 
 // The trust instrument. One 32 GB card attributed to the active group (per-process VRAM is
 // [N/A] on this WDDM driver). Headroom is a first-class number; amber under 2 GB.

@@ -2,10 +2,10 @@ using System.Collections.ObjectModel;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using DokiCode.Control.Models;
-using DokiCode.Control.Services;
+using DokiDex.Control.Models;
+using DokiDex.Control.Services;
 
-namespace DokiCode.Control.ViewModels;
+namespace DokiDex.Control.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {

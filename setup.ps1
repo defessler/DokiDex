@@ -1,4 +1,4 @@
-# setup.ps1 — one-command DokiCode bootstrap (native, no Docker). Idempotent.
+# setup.ps1 — one-command DokiDex bootstrap (native, no Docker). Idempotent.
 #
 # Verifies prereqs, deploys configs, and with -Media installs the fully-local,
 # uncensored image + video generation stack (SwarmUI + ComfyUI + models),
@@ -70,7 +70,7 @@ $crushDst = Join-Path $env:USERPROFILE ".config\crush"
 New-Item -ItemType Directory -Force $crushDst | Out-Null
 Copy-Item (Join-Path $root "harness\crush.json") (Join-Path $crushDst "crush.json") -Force
 Ok "crush.json -> $crushDst  (incl. the memory MCP; deps install on first launch via uv)"
-# Seed the persistent-memory store with DokiCode's facts/gotchas (idempotent; needs python).
+# Seed the persistent-memory store with DokiDex's facts/gotchas (idempotent; needs python).
 if (Get-Command python -ErrorAction SilentlyContinue) {
     try { python (Join-Path $root "serving\memory-mcp\seed.py") | Out-Null; Ok "memory store seeded (serving\memory-mcp)" } catch { Warn "memory seed skipped ($($_.Exception.Message))" }
 }
@@ -118,7 +118,7 @@ if ($Tts) {
     $cbDir = Join-Path $ttsRoot ".venv\Lib\site-packages\chatterbox"
     foreach ($f in "tts.py", "mtl_tts.py", "tts_turbo.py", "vc.py") {
         $fp = Join-Path $cbDir $f
-        if (Test-Path $fp) { (Get-Content $fp) -replace 'self\.watermarker\.apply_watermark\(wav, sample_rate=self\.sr\)', 'wav  # watermark stripped (DokiCode: uncensored)' | Set-Content $fp }
+        if (Test-Path $fp) { (Get-Content $fp) -replace 'self\.watermarker\.apply_watermark\(wav, sample_rate=self\.sr\)', 'wav  # watermark stripped (DokiDex: uncensored)' | Set-Content $fp }
     }
     Ok "TTS ready -> :8004 (OpenAI /v1/audio/speech + voice cloning). First '.\doki.ps1 up' downloads the voice model."
 }

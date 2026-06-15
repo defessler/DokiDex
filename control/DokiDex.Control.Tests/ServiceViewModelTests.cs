@@ -1,9 +1,9 @@
-using DokiCode.Control.Models;
-using DokiCode.Control.Services;
-using DokiCode.Control.ViewModels;
+using DokiDex.Control.Models;
+using DokiDex.Control.Services;
+using DokiDex.Control.ViewModels;
 using Xunit;
 
-namespace DokiCode.Control.Tests;
+namespace DokiDex.Control.Tests;
 
 public class ServiceViewModelTests
 {

@@ -1,7 +1,7 @@
-using DokiCode.Control.Services;
+using DokiDex.Control.Services;
 using Xunit;
 
-namespace DokiCode.Control.Tests;
+namespace DokiDex.Control.Tests;
 
 // The panel's entire data flow depends on parsing `doki status json` correctly (camelCase
 // keys, nulls, the gpu object, the profiles map). These pin that contract.

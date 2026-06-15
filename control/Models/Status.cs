@@ -1,4 +1,4 @@
-namespace DokiCode.Control.Models;
+namespace DokiDex.Control.Models;
 
 // Mirrors the JSON emitted by `doki.ps1 status json`. One source of truth: every field
 // here is produced by doki's StatusJson/GpuJson, so a new service in $Services appears in

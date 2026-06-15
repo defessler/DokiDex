@@ -1,6 +1,6 @@
-# DokiCode Control Panel — Design & Build Plan
+# DokiDex Control Panel — Design & Build Plan
 
-Build-ready design for the DokiCode control panel app, distilled from the multi-agent
+Build-ready design for the DokiDex control panel app, distilled from the multi-agent
 design workflow (judged stack → UX spec → backend integration), with every environment
 fact verified live on this box (2026-06-14).
 
@@ -52,7 +52,7 @@ a rewrite.
 ## Architecture
 
 ```
-DokiCode.Control (WPF, net9, single process)
+DokiDex.Control (WPF, net9, single process)
   Views (XAML)          ViewModels (CommunityToolkit.Mvvm)     Services (plain C#)
   MainWindow      <───  MainViewModel                    ┌──► DokiService    (shell doki.ps1)
    ├ DashboardView <──   ObservableCollection<ServiceVM>  ├──► GpuService     (from status json)
@@ -146,7 +146,7 @@ as a card with zero UI code.
 Root: **`D:\Projects\DokiCode\control\`** (new). Launched via `control.bat` (regenerated to
 run the built exe / `dotnet run` in dev) and via **`doki.ps1 panel`**.
 
-- **Phase 1 — skeleton + status board (read-only MVP):** `DokiCode.Control.csproj`,
+- **Phase 1 — skeleton + status board (read-only MVP):** `DokiDex.Control.csproj`,
   `App.xaml(.cs)`, `Models/` (the records), `Services/DokiService.cs` +
   `RegistryService.cs`, `ViewModels/MainViewModel.cs` + `ServiceViewModel.cs` +
   `GpuViewModel.cs`, `Views/MainWindow.xaml(.cs)` + `DashboardView`, `Themes/Palette.xaml`.

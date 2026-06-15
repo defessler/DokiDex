@@ -366,7 +366,7 @@ Anthropic-minimal · a from-scratch fusion → 3 judges each → synthesis) pick
   Functional **amber/red are deliberately KEPT** in the dashboard — telling you a service is *down*
   is the panel's job (the boot stays monochrome; the dashboard is where alarms live).
 - **Launch:** an arc-reactor **app icon** (`make-icon.ps1`, GDI+ multi-res `.ico`), a native
-  `<SplashScreen>` still shown *before* JIT (`make-splash.ps1`), and a **console-free `DokiCode.lnk`**
+  `<SplashScreen>` still shown *before* JIT (`make-splash.ps1`), and a **console-free `DokiDex.lnk`**
   straight to the WinExe (`make-shortcut.ps1`, auto-created by `control.bat`/`doki panel`). `.lnk` is
   machine-specific → gitignored.
 - **WPF calls that bit:** `AllowsTransparency=True` is load-bearing — WPF *ignores* `Window.Opacity`
@@ -384,8 +384,8 @@ The control panel is now published as a **self-contained single-file Windows exe
 the owner's D4Scanner pattern. A combined ultracode review found the updater architecture sound but
 its **unhappy paths unsafe**; the 17 findings were fixed before any release tag.
 
-- **In-place, not versioned-rename:** DokiCode's exe has a stable path inside the cloned repo
-  (`RepoPaths` walks up to `doki.ps1`) and `DokiCode.lnk` points at it, so the update swaps the exe
+- **In-place, not versioned-rename:** DokiDex's exe has a stable path inside the cloned repo
+  (`RepoPaths` walks up to `doki.ps1`) and `DokiDex.lnk` points at it, so the update swaps the exe
   **in place** (same name) rather than D4Scanner's versioned-sibling model, which would have orphaned
   the shortcut and the repo walk.
 - **Safe-swap order (the key fix):** copy the staged bytes to a `.new` *beside* the running exe

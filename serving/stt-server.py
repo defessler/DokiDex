@@ -1,4 +1,4 @@
-# DokiCode STT — fully-local speech-to-text on :8005.
+# DokiDex STT — fully-local speech-to-text on :8005.
 # NVIDIA Parakeet (TDT 0.6B v2) via onnx-asr — an OpenAI-compatible
 # /v1/audio/transcriptions endpoint. CPU execution provider by default (no VRAM),
 # so it coexists with the coder in agent mode; set STT_PROVIDER=cuda to use the GPU.
@@ -16,7 +16,7 @@ import onnx_asr
 MODEL_ID = os.environ.get("STT_MODEL", "nemo-parakeet-tdt-0.6b-v2")
 PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"] if os.environ.get("STT_PROVIDER") == "cuda" else ["CPUExecutionProvider"]
 
-app = FastAPI(title="DokiCode STT")
+app = FastAPI(title="DokiDex STT")
 _model = None
 _model_lock = threading.Lock()
 
@@ -35,7 +35,7 @@ def model():
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "DokiCode STT", "model": MODEL_ID, "providers": PROVIDERS}
+    return {"status": "ok", "service": "DokiDex STT", "model": MODEL_ID, "providers": PROVIDERS}
 
 
 @app.get("/health")

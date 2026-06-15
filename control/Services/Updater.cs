@@ -2,11 +2,11 @@ using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 
-namespace DokiCode.Control.Services;
+namespace DokiDex.Control.Services;
 
 /// <summary>
-/// Silent in-place auto-updater for the DokiCode control panel. Checks
-/// github.com/defessler/DokiCode/releases for a newer panel build, downloads it to a staging dir,
+/// Silent in-place auto-updater for the DokiDex control panel. Checks
+/// github.com/defessler/DokiDex/releases for a newer panel build, downloads it to a staging dir,
 /// and swaps it into place by copying the verified bytes BESIDE the running exe, then doing
 /// same-volume renames — so the expensive/failable (cross-volume) copy happens while the running
 /// image is still intact, and the actual swap is just renames that can't fail mid-stream. No helper
@@ -15,18 +15,18 @@ namespace DokiCode.Control.Services;
 /// </summary>
 public static class Updater
 {
-    public const string Repo = "defessler/DokiCode";
-    public const string AssetPrefix = "DokiCode-";
+    public const string Repo = "defessler/DokiDex";
+    public const string AssetPrefix = "DokiDex-";
     public const string AssetSuffix = "-win-x64.exe";
 
     static readonly string UpdateDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dokicode", "update");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dokidex", "update");
 
     static readonly HttpClient Http = CreateHttp();
     static HttpClient CreateHttp()
     {
         var h = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        h.DefaultRequestHeaders.UserAgent.ParseAdd("dokicode-control");
+        h.DefaultRequestHeaders.UserAgent.ParseAdd("dokidex-control");
         return h;
     }
 
@@ -47,7 +47,7 @@ public static class Updater
         static string Core(string tag) => tag.TrimStart('v', 'V').Split('-')[0];
     }
 
-    /// <summary>Extract the FULL release tag from a staged asset filename ("DokiCode-{tag}-win-x64.exe"),
+    /// <summary>Extract the FULL release tag from a staged asset filename ("DokiDex-{tag}-win-x64.exe"),
     /// INCLUDING any hyphenated pre-release suffix (a naive Split('-') truncates "v1.0.0-rc1").</summary>
     public static string? TagFromAssetFile(string path)
     {

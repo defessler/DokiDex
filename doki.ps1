@@ -1,4 +1,4 @@
-# doki.ps1 — DokiCode native control plane (docker-compose-style, no Docker).
+# doki.ps1 — DokiDex native control plane (docker-compose-style, no Docker).
 #
 #   .\doki.ps1 up [agent|coexist|media]   start a profile detached (default: agent)
 #   .\doki.ps1 down                        stop all managed services
@@ -81,7 +81,7 @@ function WaitHealth($n, $timeout = 120) {
 }
 function ShowStatus {
     Write-Host ""
-    Write-Host "DokiCode services"
+    Write-Host "DokiDex services"
     Write-Host "-----------------"
     foreach ($n in $Services.Keys) {
         $h = Probe $Services[$n].health
@@ -207,7 +207,7 @@ function Doctor {
         Write-Host ("{0}  {1,-20} {2}" -f $mark, $label, $detail) -ForegroundColor $color
     }
     Write-Host ""
-    Write-Host "DokiCode doctor — environment + install diagnostics"
+    Write-Host "DokiDex doctor — environment + install diagnostics"
     Write-Host "===================================================="
 
     Write-Host "`nHardware"
@@ -260,7 +260,7 @@ function Doctor {
     Write-Host "`nExtras"
     $memdb = Join-Path $root "serving\memory-mcp\memory.db"
     DL "memory store" $(if (Test-Path $memdb) { "ok" } else { "warn" }) $(if (Test-Path $memdb) { "seeded ($([math]::Round((Get-Item $memdb).Length/1KB)) KB)" } else { "empty — run serving\memory-mcp\seed.py" })
-    DL "control panel" $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe")) { "ok" } else { "warn" }) $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe")) { "built" } else { "not built — dotnet build control\DokiCode.Control.csproj -c Release" })
+    DL "control panel" $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiDex.Control.exe")) { "ok" } else { "warn" }) $(if (Test-Path (Join-Path $root "control\bin\Release\net9.0-windows\DokiDex.Control.exe")) { "built" } else { "not built — dotnet build control\DokiDex.Control.csproj -c Release" })
     Write-Host ""
 }
 function TailLogs($name) {
@@ -292,15 +292,15 @@ function TailLogs($name) {
     }
 }
 function LaunchPanel {
-    $exe = Join-Path $root "control\bin\Release\net9.0-windows\DokiCode.Control.exe"
-    $proj = Join-Path $root "control\DokiCode.Control.csproj"
+    $exe = Join-Path $root "control\bin\Release\net9.0-windows\DokiDex.Control.exe"
+    $proj = Join-Path $root "control\DokiDex.Control.csproj"
     if (Test-Path $exe) {
-        # ensure the premium console-free launcher exists (DokiCode.lnk -> exe, arc-reactor icon)
-        if (-not (Test-Path (Join-Path $root "DokiCode.lnk"))) { try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {} }
+        # ensure the premium console-free launcher exists (DokiDex.lnk -> exe, arc-reactor icon)
+        if (-not (Test-Path (Join-Path $root "DokiDex.lnk"))) { try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {} }
         Start-Process $exe
     }
     elseif (Test-Path $proj) { Write-Host "launching control panel (dev) ..."; Start-Process "dotnet" -ArgumentList @("run", "--project", "`"$proj`"", "-c", "Release") }
-    else { Write-Host "control panel not built. Build it with:  dotnet build control\DokiCode.Control.csproj -c Release" }
+    else { Write-Host "control panel not built. Build it with:  dotnet build control\DokiDex.Control.csproj -c Release" }
 }
 
 switch ($Command) {
@@ -341,7 +341,7 @@ switch ($Command) {
             } else { Write-Host "`n~ memory_db.test.py skipped (python not found)" }
         }
         # 3. control-panel data layer (xUnit).
-        $proj = Join-Path $root "control\DokiCode.Control.Tests\DokiCode.Control.Tests.csproj"
+        $proj = Join-Path $root "control\DokiDex.Control.Tests\DokiDex.Control.Tests.csproj"
         if (Test-Path $proj) {
             Write-Host "`n== control-panel unit tests ==" -ForegroundColor Cyan
             & dotnet test $proj

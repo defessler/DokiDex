@@ -3,10 +3,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
-using DokiCode.Control.Models;
-using DokiCode.Control.ViewModels;
+using DokiDex.Control.Models;
+using DokiDex.Control.ViewModels;
 
-namespace DokiCode.Control.Views;
+namespace DokiDex.Control.Views;
 
 public partial class MainWindow : Window
 {

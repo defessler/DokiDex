@@ -8,7 +8,7 @@ Good news: once it's installed, **daily use is basically two commands** — turn
 
 > 🧰 **This is the *driving* guide, not the *building* guide.** It assumes the one‑time setup is done — models downloaded, Crush installed, configs in place. If you're starting from a bare machine, the full build steps are in the [design doc](../TDD.md) (§6–7). There's a setup checklist at the [bottom of this page](#one-time-setup-checklist-if-not-already-done).
 >
-> All commands are run from the **DokiCode folder** in PowerShell.
+> All commands are run from the **DokiDex folder** in PowerShell.
 
 ## The 30‑second version
 

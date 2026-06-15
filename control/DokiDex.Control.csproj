@@ -7,10 +7,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>DokiCode.Control</AssemblyName>
-    <RootNamespace>DokiCode.Control</RootNamespace>
-    <Title>DokiCode Control</Title>
-    <ApplicationIcon>assets\dokicode.ico</ApplicationIcon>
+    <AssemblyName>DokiDex.Control</AssemblyName>
+    <RootNamespace>DokiDex.Control</RootNamespace>
+    <Title>DokiDex Control</Title>
+    <ApplicationIcon>assets\dokidex.ico</ApplicationIcon>
     <!-- Baseline version for the in-app auto-updater (Services/Updater.cs reports the entry-assembly
          version; the release CI overrides this with -p:Version from the pushed vX.Y.Z tag). -->
     <Version>0.1.0</Version>
@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <!-- let the test project exercise the updater's internal swap/rollback path -->
-    <InternalsVisibleTo Include="DokiCode.Control.Tests" />
+    <InternalsVisibleTo Include="DokiDex.Control.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,10 +33,10 @@
 
   <!-- the test project lives under this folder; don't glob its sources into the app -->
   <ItemGroup>
-    <Compile Remove="DokiCode.Control.Tests\**" />
-    <Page Remove="DokiCode.Control.Tests\**" />
-    <None Remove="DokiCode.Control.Tests\**" />
-    <ApplicationDefinition Remove="DokiCode.Control.Tests\**" />
+    <Compile Remove="DokiDex.Control.Tests\**" />
+    <Page Remove="DokiDex.Control.Tests\**" />
+    <None Remove="DokiDex.Control.Tests\**" />
+    <ApplicationDefinition Remove="DokiDex.Control.Tests\**" />
   </ItemGroup>
 
 </Project>

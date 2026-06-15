@@ -1,9 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using DokiCode.Control.Models;
-using DokiCode.Control.Services;
+using DokiDex.Control.Models;
+using DokiDex.Control.Services;
 
-namespace DokiCode.Control.ViewModels;
+namespace DokiDex.Control.ViewModels;
 
 // One service card. Updated wholesale from each poll's ServiceStatus; commands shell doki.
 public partial class ServiceViewModel : ObservableObject

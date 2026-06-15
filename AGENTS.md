@@ -1,4 +1,4 @@
-# AGENTS.md — DokiCode
+# AGENTS.md — DokiDex
 
 ## Project
 
@@ -14,7 +14,7 @@ control panel — all uncensored, all on one box.
 - Full-stack test (run before declaring done): `.\doki.ps1 verify`  (cycles modes, hits every
   capability with a real API call; expects all-green). Panel unit tests: `.\doki.ps1 test`.
 - Install/bootstrap: `.\setup.ps1 [-Media -Models full] [-Tts] [-Stt]`
-- Control panel (C# WPF): `dotnet build control\DokiCode.Control.csproj -c Release`
+- Control panel (C# WPF): `dotnet build control\DokiDex.Control.csproj -c Release`
 
 ## Rules
 

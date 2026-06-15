@@ -1,8 +1,8 @@
 using System.IO;
 
-namespace DokiCode.Control.Services;
+namespace DokiDex.Control.Services;
 
-// Locates the DokiCode repo root by walking up from the exe (works for both the published
+// Locates the DokiDex repo root by walking up from the exe (works for both the published
 // exe under control\bin\... and `dotnet run`). Falls back to the known install path.
 public static class RepoPaths
 {

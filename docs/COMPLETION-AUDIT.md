@@ -1,6 +1,6 @@
-# DokiCode — 6-Phase Completion Audit
+# DokiDex — 6-Phase Completion Audit
 
-> **Method:** multi-agent workflow (`dokicode-completion-audit`) — 6 read-only verifiers (one per phase) run in parallel against the live repo + running services, every fail/uncertain finding adversarially re-checked by an independent agent, then synthesized. 12 agents, ~350k tokens, ~3.5 min.
+> **Method:** multi-agent workflow (`dokidex-completion-audit`) — 6 read-only verifiers (one per phase) run in parallel against the live repo + running services, every fail/uncertain finding adversarially re-checked by an independent agent, then synthesized. 12 agents, ~350k tokens, ~3.5 min.
 
 > **Resolution (2026-06-12):** the audit found the plan **functionally complete** with 5 doc/git-hygiene gaps. All 5 were closed in the same commit that adds this file:
 > 1. Phase-0 disk measurement → recorded in `benchmarks.md` ✅

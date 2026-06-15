@@ -2,9 +2,9 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
-using DokiCode.Control.Models;
+using DokiDex.Control.Models;
 
-namespace DokiCode.Control.Services;
+namespace DokiDex.Control.Services;
 
 // The panel's only path to the control plane: shells out to doki.ps1. doki stays
 // authoritative (group exclusion, .run\* lifecycle) — the panel never re-implements it.

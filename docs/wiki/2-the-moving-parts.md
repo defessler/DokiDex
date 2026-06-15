@@ -4,7 +4,7 @@
 
 ---
 
-DokiCode is made of a few pieces that each do one job. Here's the whole machine as a picture, then each part explained with a simple analogy.
+DokiDex is made of a few pieces that each do one job. Here's the whole machine as a picture, then each part explained with a simple analogy.
 
 ```
         YOU type a request in the terminal
@@ -38,7 +38,7 @@ Let's meet them one at a time.
 
 ## 🧠 The Brains — the AI models
 
-The "brain" is the AI model — the thing that actually does the thinking. DokiCode keeps **three** of them, because no single brain is best at everything. Think of it like a small crew:
+The "brain" is the AI model — the thing that actually does the thinking. DokiDex keeps **three** of them, because no single brain is best at everything. Think of it like a small crew:
 
 ### The everyday brain — `coder-fast`
 - **Who it is:** a model called *Qwen3‑Coder‑30B* (the "30B" means ~30 billion of those knobs from page 1).
@@ -64,7 +64,7 @@ The "brain" is the AI model — the thing that actually does the thinking. DokiC
 A brain (the AI model) is just a giant file sitting on your disk. Something has to actually **run** it — load it onto the graphics card and feed it your questions. That's the engine room, and it's two tools working together:
 
 - **llama.cpp** is *the engine* — the program that takes a brain file and runs it on the graphics card, as fast as the hardware allows.
-- **llama-swap** is *the receptionist*. You have three brains but can't run them all at full size at once (not enough desk space — see VRAM below). So the receptionist sits at the front desk with one phone number, and when you ask for "the fast brain," it puts the fast brain on the desk; ask for "the big brain," it swaps them. The rest of DokiCode only ever has to call **one phone number** and say which brain it wants.
+- **llama-swap** is *the receptionist*. You have three brains but can't run them all at full size at once (not enough desk space — see VRAM below). So the receptionist sits at the front desk with one phone number, and when you ask for "the fast brain," it puts the fast brain on the desk; ask for "the big brain," it swaps them. The rest of DokiDex only ever has to call **one phone number** and say which brain it wants.
 
 > 🗄️ **Why "desk space" matters (VRAM).** A graphics card has a fixed amount of super‑fast memory called **VRAM** — here, 32 GB. A brain has to physically fit in VRAM to run fast, like papers fitting on a desk. The everyday brain fills about half the desk; the big brain doesn't fit at all and has to stack overflow papers on a slower shelf nearby (your RAM). This "what fits on the desk" math is the single biggest constraint in the whole project.
 
@@ -74,7 +74,7 @@ A brain (the AI model) is just a giant file sitting on your disk. Something has 
 
 The brain can *think*, but it can't *touch* anything. It can't open a file or run a test on its own — it's just a very clever text predictor. The **harness** is the body around the brain: the eyes and hands.
 
-DokiCode uses a harness called **Crush**. When you give DokiCode a task, Crush:
+DokiDex uses a harness called **Crush**. When you give DokiDex a task, Crush:
 
 - 👀 **Shows the brain your files** when it needs to read them
 - ✍️ **Makes the edits** the brain decides on
@@ -83,17 +83,17 @@ DokiCode uses a harness called **Crush**. When you give DokiCode a task, Crush:
 
 The way the brain "asks" the hands to do something is called a **tool call** — basically the brain filling out a little request form: *"Please run `dotnet test` and tell me what happens."* The hands carry it out and report back. This back‑and‑forth, many times in a row, is how a task gets done. [Page 3](3-a-task-step-by-step.md) shows it in slow motion.
 
-> 🤝 There's a backup set of hands too, called **OpenCode**. DokiCode held a little contest between them (page 5) and Crush won the daily‑driver job, but OpenCode is kept around as a challenger.
+> 🤝 There's a backup set of hands too, called **OpenCode**. DokiDex held a little contest between them (page 5) and Crush won the daily‑driver job, but OpenCode is kept around as a challenger.
 
 ---
 
 ## 📇 The Library Card — web search
 
-Sometimes the brain needs to know something that happened after it was built — today's news, a library's latest version. So DokiCode gives it a **library card**: a connection to **DuckDuckGo** web search.
+Sometimes the brain needs to know something that happened after it was built — today's news, a library's latest version. So DokiDex gives it a **library card**: a connection to **DuckDuckGo** web search.
 
 When the brain hits a question it can't answer from memory, it makes a tool call — *"search the web for X"* — and the hands fetch the results. Crucially, **only your search words go out, never your code,** and it's plain search, not an AI service in the cloud. It's the same as the robot quickly Googling something for you.
 
-The tech that connects an outside tool (like search) to the robot is called **MCP** — think of it as a *universal adapter* for plugging tools into AI assistants. DokiCode deliberately plugs in **just the one** (search), because — funny but true — giving a smaller brain *too many* tools makes it worse at picking the right one. Fewer, sharper tools beats a cluttered toolbox. (More on that on [page 5](5-why-its-built-this-way.md).)
+The tech that connects an outside tool (like search) to the robot is called **MCP** — think of it as a *universal adapter* for plugging tools into AI assistants. DokiDex deliberately plugs in **just the one** (search), because — funny but true — giving a smaller brain *too many* tools makes it worse at picking the right one. Fewer, sharper tools beats a cluttered toolbox. (More on that on [page 5](5-why-its-built-this-way.md).)
 
 ---
 
@@ -101,7 +101,7 @@ The tech that connects an outside tool (like search) to the robot is called **MC
 
 One more piece, and it's low‑tech but powerful. In each project you work on, you leave the robot a short note called **`AGENTS.md`** — house rules. Things like *"the test command is `dotnet test`,"* *"always run the tests before saying you're done,"* and *"make the smallest change that works."*
 
-Why it matters: a smaller brain is more **literal** and needs the ground rules spelled out, where a giant cloud brain might guess them. A good `AGENTS.md` is like a sticky note on the new assistant's desk — it's the single cheapest way to make DokiCode dramatically more reliable.
+Why it matters: a smaller brain is more **literal** and needs the ground rules spelled out, where a giant cloud brain might guess them. A good `AGENTS.md` is like a sticky note on the new assistant's desk — it's the single cheapest way to make DokiDex dramatically more reliable.
 
 ---
 

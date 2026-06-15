@@ -3,11 +3,11 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
-using DokiCode.Control.Models;
-using DokiCode.Control.Services;
-using DokiCode.Control.ViewModels;
+using DokiDex.Control.Models;
+using DokiDex.Control.Services;
+using DokiDex.Control.ViewModels;
 
-namespace DokiCode.Control.Views;
+namespace DokiDex.Control.Views;
 
 // The boot sequence — "THE SEAL IGNITES". A magitek sigil = the arc-reactor faceplate = powers an
 // LCARS rail booted from REAL `doki status json`. The status probe is fired BEFORE any pixel moves

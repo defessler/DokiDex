@@ -1,9 +1,9 @@
 using System;
 using System.IO;
-using DokiCode.Control.Services;
+using DokiDex.Control.Services;
 using Xunit;
 
-namespace DokiCode.Control.Tests;
+namespace DokiDex.Control.Tests;
 
 // The updater's swap/rollback/version logic is the hardest-to-reverse code in the app — these pin
 // the safety guarantee the review demanded: a bad/incomplete staged file is NEVER promoted, and the
@@ -22,15 +22,15 @@ public class UpdaterTests
         => Assert.Equal(expected, Updater.IsNewer(latest, running));
 
     [Theory]
-    [InlineData("DokiCode-v1.0.0-win-x64.exe", "v1.0.0")]
-    [InlineData("DokiCode-v1.0.0-rc1-win-x64.exe", "v1.0.0-rc1")]   // keeps the hyphenated pre-release suffix
-    [InlineData(@"C:\x\DokiCode-v2.3.4-win-x64.exe", "v2.3.4")]
+    [InlineData("DokiDex-v1.0.0-win-x64.exe", "v1.0.0")]
+    [InlineData("DokiDex-v1.0.0-rc1-win-x64.exe", "v1.0.0-rc1")]   // keeps the hyphenated pre-release suffix
+    [InlineData(@"C:\x\DokiDex-v2.3.4-win-x64.exe", "v2.3.4")]
     public void TagFromAssetFile_roundtrips_including_prerelease(string file, string expectedTag)
         => Assert.Equal(expectedTag, Updater.TagFromAssetFile(file));
 
     [Theory]
     [InlineData("SomethingElse.exe")]
-    [InlineData("DokiCode--win-x64.exe")]   // empty tag between prefix/suffix
+    [InlineData("DokiDex--win-x64.exe")]   // empty tag between prefix/suffix
     [InlineData("notes.txt")]
     public void TagFromAssetFile_rejects_foreign_names(string file)
         => Assert.Null(Updater.TagFromAssetFile(file));

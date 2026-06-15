@@ -51,11 +51,11 @@ desktop.ini
 [Oo]bj/
 
 # control-panel generated previews / screen captures — NOT the tracked build inputs.
-# control/assets/dokicode.ico and control/assets/splash.png ARE required (ApplicationIcon +
+# control/assets/dokidex.ico and control/assets/splash.png ARE required (ApplicationIcon +
 # native SplashScreen) and must stay committed; only the heavy/throwaway renders are ignored.
 control/assets/boot-capture.png
 control/assets/*-preview.png
 
 # generated, machine-specific launcher shortcut (created per-machine by control.bat / `doki panel`,
 # with an absolute TargetPath) — never commit it.
-DokiCode.lnk
+DokiDex.lnk

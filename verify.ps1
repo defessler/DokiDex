@@ -1,4 +1,4 @@
-# verify.ps1 — full-stack functional smoke test for DokiCode.
+# verify.ps1 — full-stack functional smoke test for DokiDex.
 # Cycles the doki modes and checks each capability with a REAL API call:
 #   chat/code (:8080) · autocomplete (:8012) · image + video (:7801)
 # Restores agent mode at the end. Run via:  .\verify.ps1   or   .\doki.ps1 verify
@@ -8,7 +8,7 @@ $results = [ordered]@{}
 function Doki($cmd, $arg) { & (Join-Path $root "doki.ps1") $cmd $arg | Out-Null }
 function Probe($u) { try { Invoke-WebRequest $u -TimeoutSec 5 -UseBasicParsing | Out-Null; $true } catch { $false } }
 
-Write-Host "=== DokiCode full-stack verify ===" -ForegroundColor Cyan
+Write-Host "=== DokiDex full-stack verify ===" -ForegroundColor Cyan
 
 # 1. chat / code — agent mode, real chat completion
 Write-Host "[verify] chat/code ..."
@@ -25,7 +25,7 @@ if (-not (Test-Path (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\py
     $results["speech/TTS (:8004)"] = "SKIP  (not installed; -Tts)"
 } else {
     try {
-        $tb = @{ model = "chatterbox"; input = "DokiCode speech test, fully local and unfiltered."; voice = "Emily.wav"; response_format = "wav" } | ConvertTo-Json
+        $tb = @{ model = "chatterbox"; input = "DokiDex speech test, fully local and unfiltered."; voice = "Emily.wav"; response_format = "wav" } | ConvertTo-Json
         $ttmp = Join-Path $env:TEMP "doki_tts_verify.wav"
         Invoke-WebRequest "http://127.0.0.1:8004/v1/audio/speech" -Method Post -ContentType "application/json" -Body $tb -OutFile $ttmp -TimeoutSec 180
         $tsz = (Get-Item $ttmp).Length

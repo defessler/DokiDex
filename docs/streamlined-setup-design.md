@@ -7,7 +7,7 @@
 
 ## Goal
 
-Make the whole DokiCode stack **one-command to set up and run** on Windows, fully
+Make the whole DokiDex stack **one-command to set up and run** on Windows, fully
 reproducible, with **no Docker/WSL**, and add **local, unrestricted image + video
 generation**. The only things launched by hand are the three the user excluded:
 Crush (CLI), Chatbox (chat), llama.vscode (editor).

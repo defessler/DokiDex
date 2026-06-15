@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 
-namespace DokiCode.Control.Services;
+namespace DokiDex.Control.Services;
 
 public sealed record UpdateInfo(string Service, string Version, string Update);
 

@@ -1,7 +1,7 @@
 using System.Windows;
-using DokiCode.Control.Models;
+using DokiDex.Control.Models;
 
-namespace DokiCode.Control.Views;
+namespace DokiDex.Control.Views;
 
 public partial class ConfirmWindow : Window
 {

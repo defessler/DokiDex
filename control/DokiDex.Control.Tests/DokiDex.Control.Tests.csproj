@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DokiCode.Control.csproj" />
+    <ProjectReference Include="..\DokiDex.Control.csproj" />
   </ItemGroup>
 
 </Project>

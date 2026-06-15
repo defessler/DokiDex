@@ -4,7 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 
-namespace DokiCode.Control.Services;
+namespace DokiDex.Control.Services;
 
 public sealed record TestResult(bool Ok, string Summary, long Ms, string? FilePath = null);
 
@@ -66,7 +66,7 @@ public sealed class TestGenService
 
     private static async Task<TestResult> Tts(Stopwatch sw)
     {
-        var body = new { model = "chatterbox", input = "DokiCode speech test, fully local and unfiltered.", voice = "Emily.wav", response_format = "wav" };
+        var body = new { model = "chatterbox", input = "DokiDex speech test, fully local and unfiltered.", voice = "Emily.wav", response_format = "wav" };
         using var r = await Http.PostAsJsonAsync("http://127.0.0.1:8004/v1/audio/speech", body);
         var bytes = await r.Content.ReadAsByteArrayAsync();
         var path = Path.Combine(Path.GetTempPath(), "doki_panel_tts.wav");

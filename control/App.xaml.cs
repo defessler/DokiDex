@@ -1,7 +1,7 @@
 using System.Windows;
-using DokiCode.Control.Views;
+using DokiDex.Control.Views;
 
-namespace DokiCode.Control;
+namespace DokiDex.Control;
 
 public partial class App : Application
 {

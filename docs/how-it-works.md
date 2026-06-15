@@ -1,11 +1,11 @@
-# How DokiCode Works — the whole system, end to end
+# How DokiDex Works — the whole system, end to end
 
 The authoritative, as-built walkthrough of the entire stack: what each piece is, how they fit,
 how a request flows, and why it's built this way. (For the original design rationale see
 [`TDD.md`](TDD.md); for the friendly ELI5 version see [`wiki/Home.md`](wiki/Home.md); for the exact
 API call of every capability see [`media-recipes.md`](media-recipes.md).)
 
-DokiCode is a **fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows
+DokiDex is a **fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows
 11 **native** (no Docker, no WSL). It does agentic coding, chat, autocomplete, web search, speech
 in and out, image/video/music generation and editing, and gives the coding agent persistent
 memory — all uncensored, nothing leaving the box at runtime. One PowerShell script (`doki.ps1`)
@@ -36,7 +36,7 @@ runs the whole thing like docker-compose, without Docker.
           └──────────────────────────┘   └──────────────────────────────┘
                           ▲
           ┌───────────────┴──────────────┐        ┌─────────────────────────┐
-          │ doki.ps1 — the control plane  │◄───────│ DokiCode Control (WPF)  │
+          │ doki.ps1 — the control plane  │◄───────│ DokiDex Control (WPF)  │
           │ up/down/status/verify/doctor… │ status │ live cards, GPU meter,  │
           │ $Services + $Profiles + GPU   │  json  │ mode switch, logs, tests │
           │ group-exclusion              │───────►│ (doki panel)            │
@@ -129,7 +129,7 @@ Three clients, all pointed at the local endpoint:
 - **llama.vscode** — editor autocomplete → the FIM server `:8012`.
 
 The single highest-leverage artifact for local-model quality is **`AGENTS.md`** in each repo
-(build/test commands, rules, "use the memory MCP") — DokiCode ships a filled-in root `AGENTS.md`
+(build/test commands, rules, "use the memory MCP") — DokiDex ships a filled-in root `AGENTS.md`
 and a template (`harness/AGENTS.md`).
 
 ---
@@ -249,7 +249,7 @@ These cost real debugging and are seeded into the memory store:
 | `serving/` | `start-*.ps1` launch scripts, `llama-swap.yaml`, `memory-mcp/`, `stt-server.py` |
 | `harness/` | `crush.json`, `AGENTS.md` template, editor/chat configs |
 | `media-assets/` | the committed ComfyUI custom workflows (e.g. `WanFoley.json`) |
-| `control/` | the WPF control panel + its `DokiCode.Control.Tests` |
+| `control/` | the WPF control panel + its `DokiDex.Control.Tests` |
 | `docs/` | this doc, `TDD.md`, `media-recipes.md`, `benchmarks.md`, `decisions.md`, `frontier-roadmap.md`, the `wiki/` |
 | `models/` · `media/` · `tts/` · `stt/` | model weights & local installs — **git-ignored** |
 

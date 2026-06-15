@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 
-namespace DokiCode.Control.Converters;
+namespace DokiDex.Control.Converters;
 
 internal static class Ink
 {

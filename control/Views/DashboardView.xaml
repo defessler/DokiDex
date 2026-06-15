@@ -1,7 +1,7 @@
-<UserControl x:Class="DokiCode.Control.Views.DashboardView"
+<UserControl x:Class="DokiDex.Control.Views.DashboardView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="clr-namespace:DokiCode.Control.ViewModels">
+             xmlns:vm="clr-namespace:DokiDex.Control.ViewModels">
   <UserControl.Resources>
 
     <!-- ============ service card ============ -->
@@ -141,18 +141,22 @@
         <TextBlock Text="{Binding SwitchExplain}" Foreground="{StaticResource TextBrush}" FontSize="12" TextWrapping="Wrap"/>
       </Border>
 
-      <!-- ===== LLM band ===== -->
+      <!-- ===== DokiCode band (the coding / LLM subsystem) ===== -->
       <StackPanel Opacity="{Binding LlmActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
-        <TextBlock Text="LLM group" Style="{StaticResource SectionHeader}" FontSize="10.5" Foreground="{StaticResource ReactorDimBrush}" Margin="2,0,0,8"/>   <!-- structural etched cyan (boot ring), NOT the emitting TealBrush -->
+        <TextBlock Style="{StaticResource SectionHeader}" FontSize="10.5" Margin="2,0,0,8">
+          <Run Text="DokiCode" Foreground="{StaticResource ReactorDimBrush}"/><Run Text="  ·  chat + code" Foreground="{StaticResource DimBrush}"/>
+        </TextBlock>   <!-- coding sub-brand; structural etched cyan (boot ring), NOT the emitting TealBrush -->
 
         <ItemsControl ItemsSource="{Binding LlmServices}" ItemTemplate="{StaticResource ServiceCard}">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>
 
-      <!-- ===== MEDIA band ===== -->
+      <!-- ===== DokiGen band (the image/video subsystem) ===== -->
       <StackPanel Margin="0,24,0,0" Opacity="{Binding MediaActive, Converter={StaticResource BoolOpacity}, ConverterParameter=0.55}">
-        <TextBlock Text="MEDIA group" Style="{StaticResource SectionHeader}" FontSize="10.5" Foreground="{StaticResource AmberBrush}" Margin="2,0,0,8"/>
+        <TextBlock Style="{StaticResource SectionHeader}" FontSize="10.5" Margin="2,0,0,8">
+          <Run Text="DokiGen" Foreground="{StaticResource AmberBrush}"/><Run Text="  ·  image + video" Foreground="{StaticResource DimBrush}"/>
+        </TextBlock>   <!-- media sub-brand; etched gold -->
         <ItemsControl ItemsSource="{Binding MediaServices}" ItemTemplate="{StaticResource ServiceCard}">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>

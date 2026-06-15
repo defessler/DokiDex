@@ -1,7 +1,7 @@
 # control/make-splash.ps1 — render the native <SplashScreen> still (assets/splash.png).
 # WPF shows this PNG instantly via unmanaged code BEFORE any JIT/extraction, so a self-contained
 # single-file launch gets immediate feedback; it cross-fades into the animated BootWindow. A frozen
-# frame of the boot: void field, arc-reactor crest, DOKICODE wordmark. Run: pwsh -File control\make-splash.ps1
+# frame of the boot: void field, arc-reactor crest, DOKIDEX wordmark. Run: pwsh -File control\make-splash.ps1
 param([string]$Out = (Join-Path $PSScriptRoot "assets\splash.png"))
 Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = "Stop"
@@ -50,7 +50,7 @@ $fontD = New-Object System.Drawing.Font("Segoe UI Light", 26, [System.Drawing.Fo
 $fontS = New-Object System.Drawing.Font("Cascadia Mono", 10, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
 $brT = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 234, 246, 255))
 $brD = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(180, 126, 140, 153))
-$g.DrawString("D O K I C O D E", $fontD, $brT, 250, 122)
+$g.DrawString("D O K I D E X", $fontD, $brT, 250, 122)
 $g.DrawString("local intelligence stack", $fontS, $brD, 252, 158)
 
 $g.Dispose()

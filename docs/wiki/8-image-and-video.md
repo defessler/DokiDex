@@ -4,7 +4,7 @@
 
 ---
 
-DokiCode also makes **pictures, short videos (now with sound), and turns a lazy one-line
+DokiDex also makes **pictures, short videos (now with sound), and turns a lazy one-line
 prompt into a cinematic one automatically** — fully local, no filter, on the same RTX 5090.
 
 ## The one rule first
@@ -61,7 +61,7 @@ small enough to run **alongside** the image/video model, so switching to media m
 
 ## "No filter" — and the one real limit
 
-Like the rest of DokiCode, this is **local and unfiltered**: SwarmUI/ComfyUI impose no
+Like the rest of DokiDex, this is **local and unfiltered**: SwarmUI/ComfyUI impose no
 content filter and the models are uncensored. Your prompts and images/videos never
 leave the machine. The only hard limits are the law — no CSAM, and no sexual imagery
 of real, identifiable people without consent. (Same framing as

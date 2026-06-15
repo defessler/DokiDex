@@ -1,4 +1,4 @@
-# Publish docs/wiki/*.md to the GitHub project wiki (defessler/DokiCode.wiki).
+# Publish docs/wiki/*.md to the GitHub project wiki (defessler/DokiDex.wiki).
 #
 # GitHub wikis are a separate git repo with their own link rules, so this script
 # transforms the in-repo Markdown before pushing:
@@ -10,8 +10,8 @@
 #
 # Usage:  .\docs\wiki\publish-to-github-wiki.ps1
 param(
-    [string]$WikiRemote = "git@github.com:defessler/DokiCode.wiki.git",
-    [string]$BlobBase   = "https://github.com/defessler/DokiCode/blob/main/docs"
+    [string]$WikiRemote = "git@github.com:defessler/DokiDex.wiki.git",
+    [string]$BlobBase   = "https://github.com/defessler/DokiDex/blob/main/docs"
 )
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false   # we branch on git exit codes
@@ -45,7 +45,7 @@ foreach ($p in $pages) {
 
 # --- Sidebar nav --------------------------------------------------------------
 @'
-### DokiCode Wiki
+### DokiDex Wiki
 
 **Read in order**
 
@@ -72,4 +72,4 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 Write-Host ""
-Write-Host "Wiki published -> https://github.com/defessler/DokiCode/wiki"
+Write-Host "Wiki published -> https://github.com/defessler/DokiDex/wiki"
