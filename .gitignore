@@ -51,8 +51,9 @@ desktop.ini
 [Oo]bj/
 
 # control-panel generated previews / screen captures — NOT the tracked build inputs.
-# control/assets/dokidex.ico and control/assets/splash.png ARE required (ApplicationIcon +
-# native SplashScreen) and must stay committed; only the heavy/throwaway renders are ignored.
+# control/assets/dokidex.ico, splash.png and panel-hero.png ARE required/curated (ApplicationIcon +
+# native SplashScreen + README hero, regenerated via `dotnet run -- --render`) and must stay committed;
+# only the heavy/throwaway *-preview.png / boot-capture renders are ignored.
 control/assets/boot-capture.png
 control/assets/*-preview.png
 

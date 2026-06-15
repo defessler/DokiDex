@@ -1,6 +1,8 @@
 using System.Linq;
 using System.Threading;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using DokiDex.Control.Views;
 
 namespace DokiDex.Control;
@@ -34,6 +36,11 @@ public partial class App : Application
 
         // DESIGN MODE: render the populated panel from canned sample data — no backend, no boot, no updater,
         // no single-instance lock — for off-GPU UI/theme iteration + snapshots.  (dotnet run -- --design)
+        // --render <path>: the same canned panel, drawn ONCE fully off-screen to a PNG (honest hero preview +
+        // snapshot capture), then exit — never shows a window on a monitor and loads no models.
+        var renderPath = ArgValue(e.Args, "--render");
+        if (renderPath != null) { DesignMode = true; RenderDesignToPng(renderPath); return; }
+
         if (e.Args.Any(a => a.Equals("--design", StringComparison.OrdinalIgnoreCase))
             || Environment.GetEnvironmentVariable("DOKI_SAMPLE") == "1")
         {
@@ -81,6 +88,49 @@ public partial class App : Application
         }
 
         new BootWindow().Show();
+    }
+
+    // value following `name` in argv (so `--render out.png` -> "out.png"), or null.
+    private static string? ArgValue(string[] args, string name)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+        return null;
+    }
+
+    // Draw the populated --design panel ONCE to a PNG, parked far off any monitor (never visible, no models
+    // loaded), then shut down. Drives the same MainWindow + LoadDesignSample path the live panel uses, so the
+    // committed hero shot can't drift from what the panel actually renders. (dotnet run -- --render <path>)
+    private void RenderDesignToPng(string path)
+    {
+        const int W = 1280, H = 880;
+        var win = new Views.MainWindow
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -32000, Top = -32000,    // off every monitor; ShowInTaskbar=false -> truly invisible
+            ShowInTaskbar = false,
+            Width = W, Height = H,
+        };
+        Current.MainWindow = win;
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        win.ContentRendered += (_, _) =>
+        {
+            try
+            {
+                win.UpdateLayout();
+                var rtb = new RenderTargetBitmap(W, H, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(win);
+                var enc = new PngBitmapEncoder();
+                enc.Frames.Add(BitmapFrame.Create(rtb));
+                var full = System.IO.Path.GetFullPath(path);
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
+                using (var fs = System.IO.File.Create(full)) enc.Save(fs);
+                Console.WriteLine($"rendered {full}  ({rtb.PixelWidth}x{rtb.PixelHeight})");
+            }
+            catch (Exception ex) { LogCrash(ex); }
+            finally { win.Close(); Shutdown(); }
+        };
+        win.Show();   // realizes the tree off-screen -> Loaded loads the sample -> ContentRendered captures it
     }
 
     // Best-effort crash log next to the update staging dir (%LocalAppData%\dokidex\crash.log).
