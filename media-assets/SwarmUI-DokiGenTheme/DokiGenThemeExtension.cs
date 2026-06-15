@@ -23,12 +23,13 @@ public class DokiGenThemeExtension : Extension
     {
         // Layer the DokiGen variables ON TOP of the modern.css base (fonts/layout/
         // color-mix derivations). Order matters: later file overrides earlier.
-        // Core path "/css/themes/modern.css" uses a LEADING slash here (extension
-        // context); the extension file uses /ExtensionFile/<Name>/... . isDark: true.
+        // SwarmUI theme paths are ROOT-RELATIVE (no leading slash): every built-in theme
+        // (WebServer.cs) uses "css/themes/..." and extension files use "ExtensionFile/<Name>/..."
+        // (Extension.cs) — kept relative so the UI also works behind a subpath reverse proxy. isDark: true.
         Program.Web.RegisterTheme(new(
             "dokigen",
             "DokiGen Void",
-            ["/css/themes/modern.css", $"/ExtensionFile/{ExtensionName}/Assets/dokigen.css"],
+            ["css/themes/modern.css", $"ExtensionFile/{ExtensionName}/Assets/dokigen.css"],
             true));
         Logs.Info("DokiGen Void theme registered.");
     }

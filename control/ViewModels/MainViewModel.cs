@@ -17,7 +17,7 @@ public partial class MainViewModel : ObservableObject
     private Dictionary<string, List<string>> _profiles = new();
     private readonly Dictionary<string, UpdateInfo> _lastUpdates = new();
     private CancellationTokenSource? _cts;
-    private volatile bool _polling;
+    private readonly SemaphoreSlim _pollGate = new(1, 1);   // coalesces polls: the loop skips if busy, Retry waits its turn
 
     public ObservableCollection<ServiceViewModel> LlmServices { get; } = new();
     public ObservableCollection<ServiceViewModel> MediaServices { get; } = new();
@@ -82,23 +82,24 @@ public partial class MainViewModel : ObservableObject
         {
             await PollOnce(ct);
             while (await timer.WaitForNextTickAsync(ct))
-            {
-                if (!_polling) await PollOnce(ct);
-            }
+                await PollOnce(ct, skipIfBusy: true);
         }
         catch (OperationCanceledException) { }
     }
 
-    private async Task PollOnce(CancellationToken ct)
+    private async Task PollOnce(CancellationToken ct, bool skipIfBusy = false)
     {
-        _polling = true;
+        // Coalesce: the 2s loop skips a tick whose poll is still running (skipIfBusy); an explicit Retry
+        // waits its turn so it never launches a duplicate `doki status` subprocess.
+        if (skipIfBusy) { if (!await _pollGate.WaitAsync(0, ct).ConfigureAwait(false)) return; }
+        else            { await _pollGate.WaitAsync(ct).ConfigureAwait(false); }
         try
         {
             var doc = await _doki.GetStatusAsync(ct).ConfigureAwait(false);
             if (doc == null) { _ui.Invoke(() => { StatusUnavailable = true; StatusText = "doki status unavailable"; }); return; }
             _ui.Invoke(() => Apply(doc));
         }
-        finally { _polling = false; }
+        finally { _pollGate.Release(); }
     }
 
     private void Apply(StatusDoc doc)
