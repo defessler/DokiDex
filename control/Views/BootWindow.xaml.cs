@@ -87,8 +87,21 @@ public partial class BootWindow : Window
         StartCurtain(1300);
     }
 
-    private void OnKeySkip(object sender, KeyEventArgs e) => HandOff();
+    // Only intended skip keys hand off — DON'T swallow Alt+F4 (a real quit gesture) into a launch.
+    private void OnKeySkip(object sender, KeyEventArgs e)
+    {
+        if (e.Key is Key.Escape or Key.Space or Key.Enter) HandOff();
+    }
     private void OnMouseSkip(object sender, MouseButtonEventArgs e) => HandOff();
+
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        // If Boot closes for any reason OTHER than the handoff (e.g. Alt+F4 to quit on the splash), shut
+        // the app down: under OnExplicitShutdown, closing the sole window does NOT terminate the process,
+        // so we'd otherwise leak a zombie.
+        if (!_handedOff) Application.Current.Shutdown();
+    }
 
     // Idempotent — skip, the curtain timer, and any completion all converge on exactly one clean
     // "engage" dissolve (never an abort/hard cut). Shows MainWindow FIRST so it is already lit under
@@ -101,8 +114,17 @@ public partial class BootWindow : Window
         _curtain?.Stop();
         foreach (var t in _rowTimers) t.Stop();      // stop any unfired row-reveal timers
 
-        var main = new MainWindow();
-        main.Show();
+        MainWindow main;
+        try { main = new MainWindow(); main.Show(); }
+        catch (Exception ex)
+        {
+            // A MainWindow ctor failure must not strand the Topmost splash forever (curtain already
+            // stopped, _handedOff blocks retry). Surface it and quit explicitly — ShutdownMode is still
+            // OnExplicitShutdown here, so a bare Close() would not terminate the process.
+            MessageBox.Show(ex.Message, "DokiDex failed to open", MessageBoxButton.OK, MessageBoxImage.Error);
+            Application.Current.Shutdown();
+            return;
+        }
         Application.Current.MainWindow = main;
         Application.Current.ShutdownMode = ShutdownMode.OnMainWindowClose;
 

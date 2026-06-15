@@ -10,6 +10,7 @@ public partial class ServiceViewModel : ObservableObject
 {
     private readonly DokiService _doki;
     private readonly TestGenService _test;
+    private DateTime? _unhealthySince;   // first poll a running service was seen unhealthy -> grace before "crashed"
 
     public ServiceViewModel(DokiService doki, TestGenService test, ServiceStatus s)
     {
@@ -59,6 +60,7 @@ public partial class ServiceViewModel : ObservableObject
         if (!s.Installed)
         {
             StateKind = "notinstalled"; StateLabel = "not installed";
+            _unhealthySince = null;
             Detail = Name switch
             {
                 "tts" => "run  setup.ps1 -Tts",
@@ -67,9 +69,19 @@ public partial class ServiceViewModel : ObservableObject
             };
             return;
         }
-        if (s.Healthy) { StateKind = "healthy"; StateLabel = "healthy"; }
-        else if (s.Running) { StateKind = "degraded"; StateLabel = "running · health failing"; }
-        else { StateKind = "down"; StateLabel = "stopped"; }
+        // running-but-unhealthy is "warming up" (calm pulse) only for a grace window; past it the service
+        // is genuinely stuck -> escalate to "crashed" (the red alarm), which also stops the busy sigil
+        // spinning on it. Resets the moment it goes healthy or stops.
+        if (s.Healthy) { StateKind = "healthy"; StateLabel = "healthy"; _unhealthySince = null; }
+        else if (s.Running)
+        {
+            _unhealthySince ??= DateTime.UtcNow;
+            if (DateTime.UtcNow - _unhealthySince > TimeSpan.FromSeconds(90))
+                { StateKind = "crashed"; StateLabel = "running · not responding"; }
+            else
+                { StateKind = "degraded"; StateLabel = "running · health failing"; }
+        }
+        else { StateKind = "down"; StateLabel = "stopped"; _unhealthySince = null; }
 
         var bits = new List<string>();
         if (!string.IsNullOrEmpty(s.Model)) bits.Add(s.Model!);

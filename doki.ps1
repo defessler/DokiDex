@@ -226,6 +226,13 @@ function Doctor {
         $cmd = Get-Command $t.n -ErrorAction SilentlyContinue
         if ($cmd) { DL $t.n "ok" $t.d } else { DL $t.n $(if ($t.opt) { "warn" } else { "miss" }) $(if ($t.opt) { "optional — $($t.d)" } else { "REQUIRED — $($t.d)" }) }
     }
+    # `dotnet` present != the right SDK: the panel targets net9.0-windows, so assert the .NET 9 SDK
+    # specifically (the existence row above can pass with only .NET 8, and the panel build then fails).
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+        $sdks = @(dotnet --list-sdks 2>$null | ForEach-Object { ($_ -split '\s+')[0] })
+        if ($sdks -match '^9\.0\.') { DL "dotnet 9 SDK" "ok" "net9.0-windows control panel" }
+        else { DL "dotnet 9 SDK" "miss" "REQUIRED — panel needs .NET 9 (have: $($sdks -join ', ')); run setup.ps1" }
+    }
 
     Write-Host "`nModels (models\)"
     foreach ($m in @(
@@ -294,13 +301,20 @@ function TailLogs($name) {
 function LaunchPanel {
     $exe = Join-Path $root "control\bin\Release\net9.0-windows\DokiDex.Control.exe"
     $proj = Join-Path $root "control\DokiDex.Control.csproj"
+    # Build the exe on first run rather than `dotnet run` — the latter keeps a visible console window
+    # open for the app's whole life, the exact console-flash the boot sequence + .lnk exist to kill.
+    if (-not (Test-Path $exe) -and (Test-Path $proj)) {
+        if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+            Write-Host "building control panel (first run) ..."
+            & dotnet build $proj -c Release
+            if ($LASTEXITCODE -ne 0) { Write-Host "panel build failed — run .\control.bat to see the errors"; return }
+        } else { Write-Host "dotnet not found — run setup.ps1 (installs the .NET 9 SDK) or .\control.bat"; return }
+    }
     if (Test-Path $exe) {
         # ensure the premium console-free launcher exists (DokiDex.lnk -> exe, arc-reactor icon)
         if (-not (Test-Path (Join-Path $root "DokiDex.lnk"))) { try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {} }
         Start-Process $exe
-    }
-    elseif (Test-Path $proj) { Write-Host "launching control panel (dev) ..."; Start-Process "dotnet" -ArgumentList @("run", "--project", "`"$proj`"", "-c", "Release") }
-    else { Write-Host "control panel not built. Build it with:  dotnet build control\DokiDex.Control.csproj -c Release" }
+    } else { Write-Host "control panel project not found at $proj" }
 }
 
 switch ($Command) {

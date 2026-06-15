@@ -105,7 +105,10 @@ public static class Updater
         if (!Directory.Exists(UpdateDir)) return null;
         var running = RunningVersion();
         (string path, string tag)? best = null;
-        foreach (var f in Directory.GetFiles(UpdateDir, $"{AssetPrefix}v*{AssetSuffix}"))
+        string[] files;
+        try { files = Directory.GetFiles(UpdateDir, $"{AssetPrefix}v*{AssetSuffix}"); }
+        catch { return null; }   // locked/redirected LocalAppData, PathTooLong, IO — never strand the launch
+        foreach (var f in files)
         {
             var tag = TagFromAssetFile(f);
             if (tag == null || !IsNewer(tag, running)) continue;

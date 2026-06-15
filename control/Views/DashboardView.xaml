@@ -165,20 +165,37 @@
     </StackPanel>
   </ScrollViewer>
 
-  <!-- empty / loading state — echoes the boot's "doki status json" pre-flight; collapses once cards arrive -->
-  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
-              Visibility="{Binding TotalServiceCount, Converter={StaticResource ZeroToVis}}">
-    <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="40" Height="40"
-          Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.4" HorizontalAlignment="Center"/>
-    <TextBlock Text="reading  doki status …" Style="{StaticResource Mono}" FontSize="12"
-               Foreground="{StaticResource DimBrush}" Margin="0,16,0,0" HorizontalAlignment="Center"/>
-    <Ellipse Width="5" Height="5" Margin="0,12,0,0" HorizontalAlignment="Center" Fill="{StaticResource TealBrush}">
-      <Ellipse.Triggers>
-        <EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard>
-          <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.25" To="1" Duration="0:0:0.6" AutoReverse="True" RepeatBehavior="Forever"/>
-        </Storyboard></BeginStoryboard></EventTrigger>
-      </Ellipse.Triggers>
-    </Ellipse>
-  </StackPanel>
+  <!-- empty state — echoes the boot's "doki status json" pre-flight; collapses once cards arrive.
+       Two variants so a HARD failure (poll returned null) isn't masked as a perpetual "loading". -->
+  <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
+        Visibility="{Binding TotalServiceCount, Converter={StaticResource ZeroToVis}}">
+
+    <!-- loading: first poll pending / in flight (StatusUnavailable == false) -->
+    <StackPanel IsHitTestVisible="False" Visibility="{Binding StatusUnavailable, Converter={StaticResource InvBoolVis}}">
+      <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="40" Height="40"
+            Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.4" HorizontalAlignment="Center"/>
+      <TextBlock Text="reading  doki status …" Style="{StaticResource Mono}" FontSize="12"
+                 Foreground="{StaticResource DimBrush}" Margin="0,16,0,0" HorizontalAlignment="Center"/>
+      <Ellipse Width="5" Height="5" Margin="0,12,0,0" HorizontalAlignment="Center" Fill="{StaticResource TealBrush}">
+        <Ellipse.Triggers>
+          <EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard>
+            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.25" To="1" Duration="0:0:0.6" AutoReverse="True" RepeatBehavior="Forever"/>
+          </Storyboard></BeginStoryboard></EventTrigger>
+        </Ellipse.Triggers>
+      </Ellipse>
+    </StackPanel>
+
+    <!-- error: a poll returned nothing (stack down / pwsh not on PATH / wrong root). No pulse; offer Retry. -->
+    <StackPanel Visibility="{Binding StatusUnavailable, Converter={StaticResource BoolVis}}">
+      <Path Data="{StaticResource SigilGeo}" Stretch="Uniform" Width="40" Height="40"
+            Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.22" HorizontalAlignment="Center"/>
+      <TextBlock Text="doki status unavailable" Style="{StaticResource Mono}" FontSize="12.5"
+                 Foreground="{StaticResource AmberBrush}" Margin="0,16,0,0" HorizontalAlignment="Center"/>
+      <TextBlock Text="is the stack running?   (needs PowerShell 7 — pwsh — on PATH)" Style="{StaticResource Mono}"
+                 FontSize="11" Foreground="{StaticResource DimBrush}" Margin="0,6,0,0" HorizontalAlignment="Center"/>
+      <Button Content="↻  Retry" Style="{StaticResource IconBtn}" Margin="0,14,0,0" HorizontalAlignment="Center"
+              Command="{Binding RetryCommand}"/>
+    </StackPanel>
+  </Grid>
   </Grid>
 </UserControl>

@@ -31,6 +31,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _activeGroup = "none";
     [ObservableProperty][NotifyPropertyChangedFor(nameof(SwitchExplain))] private string _hoverMode = "";
     [ObservableProperty] private string _statusText = "ready";
+    [ObservableProperty] private bool _statusUnavailable;   // a poll returned null -> show the error overlay, not the loading spinner
     [ObservableProperty] private string _lastUpdated = "—";
     [ObservableProperty] private bool _llmActive = true;
     [ObservableProperty] private bool _mediaActive;
@@ -94,7 +95,7 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var doc = await _doki.GetStatusAsync(ct).ConfigureAwait(false);
-            if (doc == null) { _ui.Invoke(() => StatusText = "doki status unavailable"); return; }
+            if (doc == null) { _ui.Invoke(() => { StatusUnavailable = true; StatusText = "doki status unavailable"; }); return; }
             _ui.Invoke(() => Apply(doc));
         }
         finally { _polling = false; }
@@ -102,6 +103,7 @@ public partial class MainViewModel : ObservableObject
 
     private void Apply(StatusDoc doc)
     {
+        StatusUnavailable = false;   // a poll succeeded
         _profiles = doc.Profiles ?? new();
         foreach (var s in doc.Services)
         {
@@ -196,6 +198,9 @@ public partial class MainViewModel : ObservableObject
         _doki.RunVerifyConsole();
         StatusText = "running full-stack verify (console window)…";
     }
+
+    [RelayCommand]
+    private async Task Retry() => await PollOnce(CancellationToken.None);   // re-probe `doki status` from the error overlay
 
     [RelayCommand]
     private async Task CheckUpdates()

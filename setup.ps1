@@ -33,9 +33,22 @@ function Sync-Path {
 }
 function Ensure-WinGet($id, $cmd) {
     if ($cmd -and (Get-Command $cmd -ErrorAction SilentlyContinue)) { Ok "$cmd present"; return }
+    # winget itself is the one prerequisite we can't install — fail loud with guidance (a fresh/LTSC
+    # Windows without App Installer otherwise throws a cryptic CommandNotFoundException here).
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        throw "winget (App Installer) is required — install 'App Installer' from the Microsoft Store (https://aka.ms/getwinget), then re-run setup.ps1"
+    }
     Info "installing $id ..."
     winget install $id --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+    $code = $LASTEXITCODE
     Sync-Path   # so a freshly-installed command resolves later in this same session
+    if ($cmd) {
+        # the real verification: did the command land on PATH? (catches a silently-failed install)
+        if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { throw "winget install $id failed (exit $code): '$cmd' still not on PATH" }
+        Ok "$cmd installed"
+    } elseif ($code -ne 0 -and $code -ne -1978335189) {   # -1978335189 = 0x8A15002B (no applicable update / already current) is benign
+        Warn "winget install $id returned exit $code (continuing; verify the app installed)"
+    }
 }
 function Pip($py) {
     # Run pip in the given venv and FAIL LOUD: line 20 disables native-command error
@@ -142,17 +155,32 @@ if ($Stt) {
     Ok "STT ready -> :8005 (OpenAI /v1/audio/transcriptions). First '.\doki.ps1 up' downloads the Parakeet model (~2GB)."
 }
 
-if (-not $Media) { Info "core setup done.  -Media adds image/video,  -Tts speech,  -Stt transcription."; return }
+# ---- 4b. Control panel: .NET 9 SDK + build the app + create the launcher ---------------------------
+# The panel (control/, net9.0-windows WPF) is the PRIMARY UI and doctor lists dotnet as REQUIRED, so
+# core setup must provision it — otherwise a fresh box runs control.bat / `doki panel` and hits a hard
+# build failure (no SDK, or only .NET 8). The .NET 9 SDK bundles the WindowsDesktop runtime AND builds
+# SwarmUI (net8.0) too, so it is the single SDK for the whole stack. Probe via Get-Command (a bare
+# `dotnet` throws CommandNotFoundException that 2>$null can't suppress when dotnet is absent).
+$hasNet9 = $false
+if (Get-Command dotnet -ErrorAction SilentlyContinue) { $hasNet9 = [bool]((dotnet --list-sdks 2>$null) -match '9\.0\.') }
+if (-not $hasNet9) { Ensure-WinGet "Microsoft.DotNet.SDK.9" $null } else { Ok ".NET 9 SDK present" }
+$panelProj = Join-Path $root "control\DokiDex.Control.csproj"
+if ((Get-Command dotnet -ErrorAction SilentlyContinue) -and (Test-Path $panelProj)) {
+    Info "building control panel ..."
+    $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+    dotnet build $panelProj -c Release | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {}
+        Ok "control panel built — double-click DokiDex.lnk (or run: .\doki.ps1 panel)"
+    } else { Warn "panel build failed — run .\control.bat to see the build errors" }
+} else { Warn "dotnet not found — run .\control.bat to build + launch the panel" }
+
+if (-not $Media) { Info "core setup done — launch via DokiDex.lnk (or '.\doki.ps1 panel').  -Media adds image/video,  -Tts speech,  -Stt transcription."; return }
 
 # ---- 5. Media stack: SwarmUI + ComfyUI + uncensored models ----------------
 Info "media stack (SwarmUI + ComfyUI + uncensored image/video models)"
 
-# 5a. prereqs: .NET 8 SDK + git
-# Guard the probe: a bare `dotnet` call throws CommandNotFoundException when dotnet is
-# absent (the very case this handles), and `2>$null` can't suppress it — only Get-Command can.
-$hasNet8 = $false
-if (Get-Command dotnet -ErrorAction SilentlyContinue) { $hasNet8 = [bool]((dotnet --list-sdks 2>$null) -match '8\.0\.') }
-if (-not $hasNet8) { Ensure-WinGet "Microsoft.DotNet.SDK.8" $null } else { Ok ".NET 8 SDK present" }
+# 5a. prereqs: git (the .NET 9 SDK was ensured in core setup above — it builds SwarmUI's net8.0 too)
 Ensure-WinGet "Git.Git" "git"
 
 # 5b. clone SwarmUI

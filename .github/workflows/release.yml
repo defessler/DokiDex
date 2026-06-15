@@ -59,3 +59,6 @@ jobs:
             DokiDex-*-win-x64.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # a hyphenated tag (v1.0.0-rc1) is a pre-release, so GitHub's /releases/latest (what the
+          # in-app Updater queries) skips it — avoids offering an rc whose embedded version reads X.Y.Z.
+          prerelease: ${{ contains(github.ref_name, '-') }}
