@@ -56,6 +56,7 @@ foreach ($p in $pages) {
 5. [Why It's Built This Way](5-why-its-built-this-way)
 6. [Glossary](6-glossary)
 7. [Quick Start](7-quick-start)
+8. [Image & Video Generation](8-image-and-video)
 
 [🏠 Home](Home)
 '@ | Set-Content (Join-Path $build "_Sidebar.md")

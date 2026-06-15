@@ -7,7 +7,7 @@
 # Usage:
 #   .\setup.ps1                       core: prereqs + config deploy (LLM/chat/code)
 #   .\setup.ps1 -Media                + SwarmUI/ComfyUI + the verified uncensored models
-#   .\setup.ps1 -Media -Models full   + extras (Chroma image, LTX-Video)
+#   .\setup.ps1 -Media -Models full   + ~90-100GB quality kit (Wan 2.2 14B/5B, Qwen-Image-Edit, ACE-Step music, LTXV, Foley, 4x upscale, Z-Image Base, Chroma, :8013 rewriter)
 #
 # Then:  .\doki.ps1 up        (chat + code)        .\doki.ps1 up media   (image + video)
 param(

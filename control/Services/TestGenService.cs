@@ -25,6 +25,7 @@ public sealed class TestGenService
                 "llama-swap"      => await Chat(sw),
                 "fim"             => await Fim(sw),
                 "tts"             => await Tts(sw),
+                "stt"             => await Stt(sw),
                 "prompt-rewriter" => await Rewrite(sw),
                 "media"           => await Image(sw),
                 _                 => new TestResult(false, $"no test for {service}", sw.ElapsedMilliseconds),
@@ -52,6 +53,30 @@ public sealed class TestGenService
         var j = await r.Content.ReadFromJsonAsync<JsonElement>();
         var txt = j.GetProperty("content").GetString()?.Trim();
         return new TestResult(!string.IsNullOrEmpty(txt), $"infill: \"{txt}\"", sw.ElapsedMilliseconds);
+    }
+
+    // STT needs audio in: synthesize a short clip via TTS (:8004, same llm group), then transcribe it
+    // (:8005) — the same round-trip verify.ps1 runs. Informative if TTS isn't up (both are -Tts/-Stt opt-in).
+    private static async Task<TestResult> Stt(Stopwatch sw)
+    {
+        var ttsBody = new { model = "chatterbox", input = "DokiDex transcription test.", voice = "Emily.wav", response_format = "wav" };
+        byte[] wav;
+        try
+        {
+            using var tr = await Http.PostAsJsonAsync("http://127.0.0.1:8004/v1/audio/speech", ttsBody);
+            wav = await tr.Content.ReadAsByteArrayAsync();
+        }
+        catch { return new TestResult(false, "needs TTS (:8004) running to make a test clip", sw.ElapsedMilliseconds); }
+        if (wav.Length < 2000) return new TestResult(false, "needs TTS (:8004) running to make a test clip", sw.ElapsedMilliseconds);
+
+        using var form = new MultipartFormDataContent { { new StringContent("parakeet"), "model" } };
+        var audio = new ByteArrayContent(wav);
+        audio.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+        form.Add(audio, "file", "clip.wav");
+        using var r = await Http.PostAsync("http://127.0.0.1:8005/v1/audio/transcriptions", form);
+        var j = await r.Content.ReadFromJsonAsync<JsonElement>();
+        var txt = j.TryGetProperty("text", out var t) ? t.GetString()?.Trim() : "";
+        return new TestResult(!string.IsNullOrEmpty(txt), $"transcript: \"{txt}\"", sw.ElapsedMilliseconds);
     }
 
     private static async Task<TestResult> Rewrite(Stopwatch sw)

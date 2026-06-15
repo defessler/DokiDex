@@ -19,14 +19,27 @@ try {
     $results["chat/code (:8080)"] = if ($r.choices[0].message.content) { "PASS  '$($r.choices[0].message.content.Trim())'" } else { "FAIL  empty response" }
 } catch { $results["chat/code (:8080)"] = "FAIL  $($_.Exception.Message)" }
 
+# 1a2. coder-big (gpt-oss-120b) — the heavy reasoning model. SKIP unless installed (a ~60GB on-demand load).
+Write-Host "[verify] coder-big (heavy reasoning) ..."
+if (-not (Test-Path (Join-Path $root "models\gpt-oss-120b-mxfp4-00001-of-00003.gguf"))) {
+    $results["coder-big (:8080)"] = "SKIP  (not installed; the full ~120B coder)"
+} else {
+    try {
+        $body = @{ model = "coder-big"; messages = @(@{ role = "user"; content = "Reply with exactly: OK" }); max_tokens = 10; temperature = 0 } | ConvertTo-Json -Depth 5
+        $r = Invoke-RestMethod "http://127.0.0.1:8080/v1/chat/completions" -Method Post -ContentType "application/json" -TimeoutSec 300 -Body $body
+        $results["coder-big (:8080)"] = if ($r.choices[0].message.content) { "PASS  '$($r.choices[0].message.content.Trim())'" } else { "FAIL  empty response" }
+    } catch { $results["coder-big (:8080)"] = "FAIL  $($_.Exception.Message)" }
+}
+
 # 1b. speech/TTS (:8004) — uncensored speech, coexists with the coder in agent mode (started by 'up agent')
 Write-Host "[verify] speech/TTS ..."
+$ttmp = Join-Path $env:TEMP "doki_tts_verify.wav"
+Remove-Item $ttmp -ErrorAction SilentlyContinue   # clear any stale clip so the STT smoke keys on THIS run's artifact, not a prior run's
 if (-not (Test-Path (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\python.exe"))) {
     $results["speech/TTS (:8004)"] = "SKIP  (not installed; -Tts)"
 } else {
     try {
         $tb = @{ model = "chatterbox"; input = "DokiDex speech test, fully local and unfiltered."; voice = "Emily.wav"; response_format = "wav" } | ConvertTo-Json
-        $ttmp = Join-Path $env:TEMP "doki_tts_verify.wav"
         Invoke-WebRequest "http://127.0.0.1:8004/v1/audio/speech" -Method Post -ContentType "application/json" -Body $tb -OutFile $ttmp -TimeoutSec 180
         $tsz = (Get-Item $ttmp).Length
         $results["speech/TTS (:8004)"] = if ($tsz -gt 20000) { "PASS  $([math]::Round($tsz/1KB))KB wav" } else { "FAIL  tiny output ($tsz bytes)" }
@@ -200,7 +213,8 @@ if (-not (Test-Path (Join-Path $swModels "upscale_models\4x-UltraSharp.pth"))) {
 }
 
 # 6f. Fast video — LTXV-2b-0.9.8-distilled (SwarmUI-native, near-real-time, long clips).
-#     Live-verified: 97 frames 768x512 in ~36s incl. the T5 auto-download. A speed option below Wan.
+#     Live-verified capability; this smoke runs a fast 49-frame 768x512 clip (T5 auto-downloads first run).
+#     The documented recipe is 97 frames 768x512 — see docs/media-recipes.md / docs/FEATURES.md.
 Write-Host "[verify] fast video (LTXV) ..."
 if (-not (Test-Path (Join-Path $swModels "diffusion_models\ltxv-2b-0.9.8-distilled.safetensors"))) {
     $results["fast video (LTXV)"] = "SKIP  (not installed; -Models full)"

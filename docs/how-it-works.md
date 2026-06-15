@@ -141,6 +141,9 @@ and a template (`harness/AGENTS.md`).
 rule), so SwarmUI **swaps** models per request — which is why switching *capabilities* costs a load
 (see [benchmarks](benchmarks.md)). Everything is driven by `POST :7801/API/GenerateText2Image` with
 a session from `GetNewSession`; the exact body for each is in [media-recipes.md](media-recipes.md).
+SwarmUI also wears the on-brand **DokiGen Void** theme (`media-assets/SwarmUI-DokiGenTheme/`,
+compiled in and set as the default by `setup.ps1 -Media`; per-browser overridable in
+User Settings -> Theme).
 
 | Capability | Model | How it's invoked (the non-obvious bits) |
 |---|---|---|

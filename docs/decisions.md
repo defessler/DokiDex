@@ -287,7 +287,7 @@ Blackwell, small enough to coexist with the coder.
 ## 2026-06-14 — Control panel + frontier-gap media kit (I2V, music, image-edit, upscale, STT)
 
 Two design workflows (control-panel stack judge; frontier-gap roadmap) → a unified plan, then
-built + **live-verified end-to-end (`doki verify` 13/13)**. Specs: `docs/control-panel-design.md`,
+built + **live-verified end-to-end (`doki verify` 16/16)**. Specs: `docs/control-panel-design.md`,
 `docs/frontier-roadmap.md`.
 
 - **Control panel = C# WPF (.NET 9) + CommunityToolkit.Mvvm**, a thin reactive face over
@@ -400,4 +400,4 @@ its **unhappy paths unsafe**; the 17 findings were fixed before any release tag.
   success/reject/sweep + `IsNewer`/`TagFromAssetFile` (41 panel tests total, was 24).
 - **Repo-coupling, stated honestly:** the released exe is the auto-update payload and must live inside
   a cloned repo (the panel shells `doki.ps1`); standalone use elsewhere is unsupported — noted in the
-  release workflow. Cut a release with `git tag v0.2.0 && git push origin v0.2.0`.
+  release workflow. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`.

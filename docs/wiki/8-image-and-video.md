@@ -32,7 +32,7 @@ on. Wrap your idea in an `<mpprompt:...>` tag and it rewrites at generate time �
 becomes *"A sleek black cat, eyes gleaming, perched on a gnarled skateboard, wheels barely
 touching the cobblestone street as the sun casts long shadows…"* — every generation, zero effort.
 (Powered by the **MagicPrompt** SwarmUI extension, wired to the local rewriter **automatically** by
-`setup.ps1`. It's uncensored — the rewriter never refuses or swaps your subject.) The rewriter is
+`setup.ps1 -Media -Models full`. It's uncensored — the rewriter never refuses or swaps your subject.) The rewriter is
 small enough to run **alongside** the image/video model, so switching to media mode starts it too.
 
 ## What's under the hood
@@ -47,9 +47,10 @@ small enough to run **alongside** the image/video model, so switching to media m
   everything else. Inpaint is free too.
 - **Upscale:** **4×-UltraSharp** sharpens/enlarges a result (512→1024 in ~2 s) via SwarmUI's
   Refiner-Upscale step.
-- **Video:** **Wan 2.2 TI2V-5B** is the quality default — an 832×480 clip in **~55 s**, and it does
+- **Video:** **Wan 2.2 TI2V-5B** is the quality default — an 832×480 clip in **~26 s**, and it does
   both **text→video** *and* **image→video** (drop in a still and it animates it). **LTXV-2b** is the
-  **fast** option — near-real-time, longer clips (97 frames in ~36 s) at a small quality trade. **Wan
+  **fast** option — near-real-time, longer clips (97 frames in ~10.6 s warm; first run ~36 s incl. the
+  one-time T5 auto-download) at a small quality trade. **Wan
   2.1 1.3B** stays as the always-reliable fast floor. *(The Wan 2.2 A14B is downloaded but overflows
   32 GB; the 5B is the sweet spot.)*
 - **Sound:** **HunyuanVideo-Foley** adds **synced sound effects** to a clip (one MP4, 48 kHz, matched

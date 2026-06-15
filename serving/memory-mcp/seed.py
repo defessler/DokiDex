@@ -21,7 +21,7 @@ FACTS = [
     ("TTS (Chatterbox): pin protobuf 4.25.5 (onnx needs >=3.20; the cu128 reqs pin 3.19.6). The Perth watermark is stripped at install.", "tts,gotcha"),
     ("Coder: Crush + Qwen3-Coder-30B (coder-fast) = 91% on the golden suite (the daily driver). coder-big = gpt-oss-120b (CPU-offload, quality).", "code,models"),
     ("doki.ps1 is the control plane (no Docker): up/down/status json/restart/start/stop/panel. The GPU runs one group (llm vs media). Scripts are PowerShell.", "infra"),
-    ("doki verify runs 14 live capability smokes + a memory smoke; expects all-green. Add a guarded smoke for any new service.", "infra,verify"),
+    ("doki verify runs 15 live capability smokes + a memory smoke (16 rows); expects all-green. Add a guarded smoke for any new service.", "infra,verify"),
 ]
 
 
