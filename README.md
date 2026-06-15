@@ -25,7 +25,7 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 .\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
 .\doki.ps1 doctor      # environment + install diagnostics (GPU, disk, toolchain, models, services)
 .\doki.ps1 test        # unit tests — installer helpers + control panel + updater (fast, no GPU)
-.\doki.ps1 panel       # high-quality control panel (WPF): cinematic boot, live status, GPU meter, logs, ⚡test
+.\doki.ps1 panel       # high-quality control panel (WPF): boot, live status, GPU meter, logs, ⚡test, DokiGen Studio
 .\control.bat          #   ...first run: builds + creates a console-free DokiDex.lnk launcher (arc-reactor icon)
 ```
 
@@ -59,7 +59,7 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Image + video + audio:** SwarmUI (ComfyUI) — Z-Image Turbo/Base + Wan 2.2 (5B) text-to-video **and image-to-video** with synced Foley audio; **music** (ACE-Step 1.5), **instruction image-editing** (Qwen-Image-Edit), **4×-UltraSharp upscaling** — all unfiltered, headless. SwarmUI wears the matching on-brand **DokiGen Void** theme (default, set at install). A 3B prompt-rewriter auto-expands lazy prompts (`<mpprompt:…>`)
 - **Speech (TTS):** Chatterbox on `:8004` — uncensored (watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning; coexists with the coder LLM
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, coexists with the coder
-- **Control panel:** a native WPF cockpit (`doki panel`) over `doki status json` — grouped live service cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test
+- **Control panel:** a native WPF cockpit (`doki panel`) over `doki status json` — grouped live service cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, and a **DokiGen Studio** page (describe → pick a kind → **Generate** → inline preview → remix) — a no-CLI surface over `doki gen`
 
 ## Status
 
