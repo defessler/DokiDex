@@ -165,6 +165,18 @@ $mpExt = Join-Path $swarm "src\Extensions\SwarmUI-MagicPromptExtension"
 $extAdded = $false
 if (-not (Test-Path $mpExt)) { Info "installing MagicPrompt extension ..."; Git-Clone https://github.com/HartsyAI/SwarmUI-MagicPromptExtension $mpExt; $extAdded = $true } else { Ok "MagicPrompt extension present" }
 
+# 5b3. install the DokiGen Void theme — the on-brand void/cyan/gold SwarmUI skin (matches the control
+#      panel) — from the committed asset, BEFORE the build so it compiles in. Copy (not clone) so repo
+#      updates propagate; force a rebuild on first install so an already-built SwarmUI picks it up.
+$dgExt = Join-Path $swarm "src\Extensions\SwarmUI-DokiGenTheme"
+$dgSrc = Join-Path $root "media-assets\SwarmUI-DokiGenTheme"
+if (Test-Path $dgSrc) {
+    $dgNew = -not (Test-Path $dgExt)
+    if (Test-Path $dgExt) { Remove-Item $dgExt -Recurse -Force }
+    Copy-Item $dgSrc $dgExt -Recurse -Force
+    if ($dgNew) { Info "installing DokiGen Void theme ..."; $extAdded = $true } else { Ok "DokiGen Void theme present (refreshed)" }
+} else { Warn "media-assets\SwarmUI-DokiGenTheme not present; skipping DokiGen theme" }
+
 # 5c. build SwarmUI (rebuild when missing, a new extension was added, OR the checkout advanced past
 #     the last build — the last_build sentinel was written but never read, so a `git pull` of SwarmUI
 #     previously kept running a stale binary).
@@ -187,6 +199,18 @@ if (-not (Swarm-Up)) {
     for ($i = 0; $i -lt 60 -and -not (Swarm-Up); $i++) { Start-Sleep 1 }
 }
 if (Swarm-Up) { Ok "SwarmUI serving :7801" } else { throw "SwarmUI failed to start" }
+
+# 5d2. make DokiGen Void the default theme. Only EDIT an existing Settings.fds (never create a partial
+#      one — that could break SwarmUI startup); takes effect on the next SwarmUI start. The per-browser
+#      sui_theme_id cookie still wins once a user picks a theme in the UI.
+$fds = Join-Path $swarm "Data\Settings.fds"
+if (Test-Path $fds) {
+    $s = [System.IO.File]::ReadAllText($fds)
+    if ($s -match '(?m)^Theme:\s*\S+') {
+        $s2 = [regex]::Replace($s, '(?m)^Theme:\s*\S+', 'Theme: dokigen')
+        if ($s2 -ne $s) { [System.IO.File]::WriteAllText($fds, $s2); Ok "DokiGen Void set as default SwarmUI theme (applies next start)" } else { Ok "DokiGen Void already the default theme" }
+    } else { Ok "DokiGen Void installed — select it in User Settings -> Theme" }
+} else { Ok "DokiGen Void installed — select it in User Settings -> Theme" }
 
 # 5e. headless ComfyUI backend install (the verified InstallConfirmWS flow)
 if (-not (Test-Path (Join-Path $swarm "dlbackend\comfy"))) {

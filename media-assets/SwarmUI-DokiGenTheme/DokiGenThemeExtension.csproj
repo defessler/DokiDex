@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <AssemblyName>DokiGenThemeExtension</AssemblyName>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+    <!-- Pulls TargetFramework (net8.0), the SwarmUI.dll reference, GlobalUsings,
+         and the asset include/exclude rules from SwarmUI core. The build copies
+         this folder into src/Extensions/ where ../../SwarmUI.extension.props resolves. -->
+    <Import Project="../../SwarmUI.extension.props" />
+</Project>

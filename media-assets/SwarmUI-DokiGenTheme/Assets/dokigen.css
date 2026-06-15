@@ -1,0 +1,211 @@
+/* ============================================================================
+   DokiGen Void — SwarmUI theme
+   Layered ON TOP of css/themes/modern.css (which supplies fonts, layout,
+   selectors, and the color-mix() derivations that read --emphasis).
+   This file ONLY overrides :root custom properties + a few selectors so the
+   media UI wears the same void / cyan / gold language as the control panel.
+
+   THE SYSTEM (non-negotiable):
+     - LOTS OF VOID: ~70% deep near-black field. Flat solid fills stepped by
+       lightness (void -> surface -> card -> input), depth via ~1-shade lifts.
+     - ONE EMITTING ACCENT = reactor cyan #35E0F0. Cyan == LIVE / ACTIVE / focus
+       ONLY (mapped to --emphasis so modern.css auto-derives selection/qbutton).
+     - GOLD #E8C77A = etched structure that NEVER glows: hairline/hover borders,
+       section labels, dividers. Never a fill, never the emphasis.
+     - AMBER/RED only for trouble (danger buttons, errors, the one alarm red).
+     - 1px cool-grey hairlines (#243140). No thick/bright borders, no gradients.
+   Tokens are 1:1 with control\Themes\Palette.xaml.
+   ============================================================================ */
+
+:root {
+    /* ---- Surface ladder (lightness steps; higher = more elevated) ---------- */
+    --background:               #0A0E14; /* BgBrush — the app "void" field (page bg) */
+    --background-soft:          #0D121B; /* SurfaceBrush — rails / strips / chrome   */
+    --background-gray:          #121826; /* Surface2 — neutral panel fill            */
+    --background-panel:         #121826; /* Surface2 — cards / sidebars / panels     */
+    --background-panel-subtle:  rgba(53, 224, 240, 0.045); /* faint cyan wash on open groups */
+
+    /* ---- Text hierarchy ---------------------------------------------------- */
+    --text:        #E6EEF6; /* TextBrush — primary cool-white body/heading */
+    --text-strong: #FFFFFF; /* pure white for the strongest emphasis        */
+    --text-soft:   #7E8C99; /* DimBrush — secondary / inactive / labels     */
+    --popup-front: #E6EEF6;
+    --popup-back:  var(--background);
+
+    /* ---- THE single emitting accent: reactor cyan -------------------------- */
+    /* modern.css derives hovers, selection boxes, qbutton, and splitter-hover  */
+    /* from --emphasis via color-mix(). Cyan is the only color that "emits".    */
+    --emphasis:      #35E0F0; /* TealBrush / ReactorBrush — LIVE / ACTIVE / focus */
+    --emphasis-soft: #6FE9F5; /* lighter reactor tint (alt-generate, hovers)      */
+    --emphasis-text: #04141A; /* near-black text ON a cyan fill (cyan is bright)  */
+
+    /* ---- Etched gold structure (borders + non-glowing line-work) ----------- */
+    /* Gold is NEVER --emphasis, so modern.css never makes it glow/select.      */
+    --border-color: #243140;             /* BorderBrush2 — the 1px cool hairline default */
+    --light-border: #243140;             /* keep secondary borders cool too              */
+    --button-border: rgba(232, 199, 122, 0.5); /* gold #80E8C77A — "structure" edge on buttons */
+    --shadow: #243140;                   /* modern.css uses --shadow as a border-ish color; keep cool, flat */
+
+    /* ---- Buttons (flat void fills; gold hover edge; cyan reserved for active) */
+    /* modern.css computes --button-background-hover = color-mix(--button-background 70%, white),
+       so a near-black --button-background yields a faint neutral lift, NOT cyan. */
+    --button-text:                 #E6EEF6;
+    --button-background:           #1B2433; /* Surface3 — default/ghost button fill    */
+    --button-background-hover:     #243140; /* explicit cool lift (overrides modern's white-mix) */
+    --button-foreground-hover:     #FFFFFF;
+    --button-background-disabled:  #121826;
+    --button-foreground-disabled:  #5A6470;
+    --qbutton:                     var(--emphasis); /* quick/auto buttons read cyan as the active accent */
+
+    /* ---- Danger / trouble (amber-red, kept OFF the void per discipline) ----- */
+    --danger-button-background:        #7A2230; /* DangerBrush — "down" deep red          */
+    --danger-button-background-hover:  #8E2A3A;
+    --danger-button-foreground:        #FFFFFF;
+    --danger-button-foreground-hover:  #FFFFFF;
+    --danger-button-border:            rgba(255, 107, 107, 0.45); /* DangerBright edge      */
+    --background-danger:               #200B0B;
+    --background-gray-danger:          #2A1416;
+    --red:   #FF6B6B; /* DangerBrightBrush — the one alarm signal */
+    --green: #35E0F0; /* success/live reads as the reactor (no separate green in the system) */
+
+    /* ---- Inputs / range sliders ------------------------------------------- */
+    --range-track-color: #1B2433; /* Surface3 track */
+    --range-thumb-color: #35E0F0; /* cyan thumb = the active control handle */
+
+    /* ---- Selection boxes (model/image grid) — derive from cyan ------------- */
+    /* (modern.css already sets these from --emphasis; restated for clarity)    */
+    --box-selected-background:          color-mix(in srgb, var(--emphasis) 18%, transparent);
+    --box-selected-background-stronger: color-mix(in srgb, var(--emphasis) 28%, transparent);
+    --box-selected-border:              color-mix(in srgb, var(--emphasis) 70%, transparent);
+    --box-selected-border-stronger:     var(--emphasis);
+
+    /* ---- Batch tints (neutral; cyan is reserved for the active item only) -- */
+    --batch-0: rgba(126, 140, 153, 0.22);
+    --batch-1: rgba(126, 140, 153, 0.12);
+
+    /* ---- Texture / chrome -------------------------------------------------- */
+    --noise-image: none;                  /* flat surfaces — kill modern.css noise.png */
+    --scrollbar:   rgba(36, 49, 64, 0.85); /* BorderBrush2-toned scrollbar (cool, quiet) */
+    --panel-gap:   7px;                    /* keep modern.css gutter */
+
+    /* ---- Font stacks (mirror the WPF app) ---------------------------------- */
+    --dokigen-ui:   "Segoe UI Variable Display", "Segoe UI Light", "Segoe UI", sans-serif;
+    --dokigen-mono: "Cascadia Mono", "Consolas", monospace;
+}
+
+/* ===========================================================================
+   Selector-level touches — keep MINIMAL (breakage from extension CSS is on us).
+   These reproduce the four signature moves of the control panel.
+   =========================================================================== */
+
+/* App-wide UI font: Segoe UI Variable Display stack (modern.css base uses Inter). */
+body,
+.nav-tabs,
+.basic-button:not(.image_editor_newlayer_button),
+.input-group-header,
+.auto-input-name,
+button, input, select, textarea {
+    font-family: var(--dokigen-ui);
+}
+
+/* Code / seed / parameter / log readouts -> Cascadia Mono telemetry stack. */
+.current-image-data, .current-image-data .param_view_block,
+.param_view_block, code, pre, kbd, samp,
+#text2image_logview, .log-area, textarea.auto-text {
+    font-family: var(--dokigen-mono);
+}
+
+/* Flatten the page + panels onto the void: solid fills, no noise, hairlines. */
+body { background: var(--background); }
+
+.nav-tabs, #currentimagecontent, #inputsidebartab_content, #rightsidebarcontent,
+#t2i_bottom_bar, .browser-folder-tree-container, .browser-fullcontent-container {
+    background-color: var(--background-panel);
+    background-image: none; /* belt-and-suspenders over --noise-image: none */
+}
+
+/* ACTIVE TAB = 2px reactor-cyan bottom edge + lift + white text (web analogue
+   of the control panel's 2px cyan left-edge). Inactive tabs stay dim. */
+.nav-tabs .nav-link {
+    color: var(--text-soft);
+    border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+}
+.nav-tabs .nav-link.active {
+    color: var(--text);
+    border-bottom: 2px solid var(--emphasis);
+    background-color: var(--background-gray); /* Surface2 lift */
+}
+.nav-tabs .nav-link:hover:not(.active) {
+    color: var(--text);
+    border-bottom-color: rgba(232, 199, 122, 0.5); /* gold structure hint on hover, not cyan */
+}
+
+/* Inputs: Surface3 fill, cool hairline; FOCUS = cyan edge (focus == "active"). */
+input:not([type=range]):not([type=checkbox]):not([type=radio]),
+select, textarea, .auto-text {
+    background-color: var(--background-gray);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+input:not([type=range]):focus, select:focus, textarea:focus, .auto-text:focus {
+    border-color: var(--emphasis);
+    outline: none;
+    box-shadow: none; /* no glow halo — flat */
+}
+
+/* Section / group labels: small, dim, etched (the quiet 11px SemiBold labels). */
+.input-group-header, .header-label {
+    color: var(--text-soft);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* Buttons: flat Surface3, transparent->gold hover edge; cyan NOT used on hover. */
+.basic-button:not(.image_editor_newlayer_button) {
+    background-color: var(--button-background);
+    color: var(--button-text);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    box-shadow: none;
+    transition: background-color .15s, border-color .15s;
+}
+.basic-button:not(.image_editor_newlayer_button):hover {
+    background-color: var(--button-background-hover);
+    border-color: rgba(232, 199, 122, 0.5); /* gold = structure hover */
+    color: var(--button-foreground-hover);
+}
+
+/* The primary Generate button = the rare emphatic cyan-fill action. */
+#alt_generate_button, #generate_button, #image_generate_button {
+    background-color: var(--emphasis) !important;
+    color: var(--emphasis-text) !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+}
+#alt_generate_button:hover, #generate_button:hover, #image_generate_button:hover {
+    background-color: var(--emphasis-soft) !important;
+    color: var(--emphasis-text) !important;
+}
+
+/* Cards / model & image blocks: hairline border, small radius, flat. */
+.image-block, .model-block {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: none;
+}
+/* Selected/hovered grid item = cyan edge + Surface2 lift (the "active" move). */
+.image-block:hover, .model-selected {
+    border-color: var(--emphasis);
+    background: var(--background-gray) !important;
+}
+
+/* Splitters live ON the void; cyan only when grabbed (modern.css does the hover). */
+.splitter-bar { background-color: var(--background) !important; }
+
+/* Scrollbars: thin, cool, quiet. */
+* { scrollbar-color: var(--scrollbar) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; }
