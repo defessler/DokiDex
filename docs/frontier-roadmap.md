@@ -70,6 +70,14 @@ uncertain lip-sync value.
   loadable checkpoint). Nascent support — revisit after a SwarmUI/ComfyUI update. (The 20 GB test
   download was reclaimed.) So the audio-video frontier (S2V, SUPIR, LTX-2) is **fully mapped: all three
   blocked** — by custom-workflow injection (S2V/SUPIR) or nascent loader support (LTX-2), not VRAM.
+- **Update (2026-06-15, web recon):** the anticipated upstream update has landed. **LTX-2.3** (22B,
+  Mar 2026) shipped full open weights, and **community GGUF quants now exist** (`unsloth/LTX-2.3-GGUF`,
+  `unsloth/LTX-2-GGUF`) with ready ComfyUI audio+video workflows (`awesome-ltx2`). Official min is
+  **32 GB+ VRAM — i.e. exactly the RTX 5090** (~25 s for a 720p/24fps/4 s clip; 8 s spills past 32 GB
+  into weight streaming). It's the first **open-source one-pass audio+video** model and adds spatial
+  upscalers. LTX-2's old blocker (no loadable checkpoint) is plausibly resolved via the GGUF release —
+  **re-recon SwarmUI's LTX2 path against an `unsloth/LTX-2.3-GGUF` checkpoint** before writing it off;
+  if it loads, this becomes DokiGen's Tier-2 keystone (native synced A/V, no S2V injection blocker).
 - **Photoreal restoration upscale:** SUPIR — diffusion upscaler beyond 4x-UltraSharp.
 
 ## Tier 3 — cloud-only (state plainly; do not pretend to match locally)
