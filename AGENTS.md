@@ -46,4 +46,4 @@ A persistent `memory` MCP is available and survives across sessions — use it:
   comma-separated `tags`). Don't save what's already obvious from the code or git history.
 - **Finding where something lives:** `code_search` does semantic RAG over this repo's source — reach for
   it when a literal grep would miss the right file (different wording, related concept). Needs the embed
-  server up (`doki up`) + a built index (`python serving/memory-mcp/code_index.py`).
+  server up (`doki up`) + a built index (`doki index`).

@@ -58,9 +58,9 @@ def code_search(query: str, limit: int = 5) -> str:
         rows = code_index.search(query, limit)
     except Exception as e:  # embed server down / index missing / bad query — never crash the MCP session
         return (f"code_search unavailable ({type(e).__name__}: {e}). Is the embed server up and the repo "
-                "indexed?  Build the index with:  python serving/memory-mcp/code_index.py")
+                "indexed?  Build the index with:  doki index")
     if not rows:
-        return "no matching code chunks — is the index built?  (python serving/memory-mcp/code_index.py)"
+        return "no matching code chunks — is the index built?  (run:  doki index)"
     return "\n\n".join(
         f"{r['path']}:{r['start_line']}-{r['end_line']}  (score {r['score']})\n{r['content'][:500]}"
         for r in rows)

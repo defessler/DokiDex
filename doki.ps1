@@ -6,11 +6,12 @@
 #   .\doki.ps1 restart [profile]           down, then up
 #   .\doki.ps1 logs <llama-swap|fim|media> tail a service log
 #   .\doki.ps1 gen "<idea>" [-Video|-Music|-Edit]  text->image/video/music (SwarmUI; needs `up media`)
+#   .\doki.ps1 index                       (re)build the codebase RAG index for the code_search MCP tool
 #
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen")][string]$Command = "status",
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen", "index")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg,
     [switch]$Clear,  # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
     # `doki gen "<idea>" ...` — text->media via SwarmUI (needs `doki up media`). Kind: -Video | -Music | -Edit
@@ -363,6 +364,15 @@ switch ($Command) {
         else { TailLogs $Arg }
     }
     "verify" { & (Join-Path $root "verify.ps1") }
+    "index" {
+        # (re)build the codebase RAG index (serving/memory-mcp/code_index.py) that backs the code_search MCP
+        # tool. CPU-only via the :8090 embed server — never touches the GPU.
+        $embedModel = Join-Path $root "models\nomic-embed-text-v1.5.f16.gguf"
+        if (-not (Test-Path $embedModel)) { throw "embed model not installed — run .\setup.ps1 (fetches nomic-embed-text-v1.5)" }
+        if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "python not found (needed for the indexer)" }
+        if (-not (Probe "http://127.0.0.1:8090/health")) { throw "embed server not up on :8090 — start the stack first:  .\doki.ps1 up agent" }
+        & python (Join-Path $serving "memory-mcp\code_index.py") $root
+    }
     "gen" {
         if (-not $Arg) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit] [-Fast] [-Upscale] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
