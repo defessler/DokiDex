@@ -121,6 +121,12 @@
       const prompt = document.getElementById('prompt').value.trim();
       const hint = document.getElementById('genHint');
       if(!prompt){ hint.textContent='enter a prompt first'; return; }
+      if(!state.mediaActive){
+        if(!confirm("The GPU isn't in MEDIA mode. Switch now (this stops the running LLM) and generate?")) return;
+        hint.textContent='switching to MEDIA…';
+        try{ await fetch('/api/mode/media',{method:'POST'}); }catch{}
+        if(!await waitForMedia(90)){ hint.textContent='still switching to MEDIA — click Generate again in a moment'; return; }
+      }
       hint.textContent='submitting…';
       try {
         const seedVal = document.getElementById('seed').value.trim();
@@ -137,6 +143,7 @@
       if(VIDEO.has(j.kind)) return `<video controls src="${j.mediaUrl}"></video>`;
       return `<img src="${j.mediaUrl}" alt=""/>`;
     }
+    function waitForMedia(maxSec){ return new Promise(res=>{ let n=0; const t=setInterval(()=>{ if(state.mediaActive){clearInterval(t);res(true);} else if(++n>=maxSec){clearInterval(t);res(false);} },1000); }); }
     async function cancelJob(id){ try{ await fetch('/api/jobs/'+id+'/cancel',{method:'POST'}); }catch{} pollJobs(); }
     async function rerunJob(p,kind){ try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:decodeURIComponent(p),kind})}); }catch{} pollJobs(); }
     function jobCard(j){

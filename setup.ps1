@@ -220,6 +220,18 @@ Ensure-DotNet9
 $swarm = Join-Path $root "media\SwarmUI"
 if (-not (Test-Path (Join-Path $swarm ".git"))) { Info "cloning SwarmUI ..."; Git-Clone https://github.com/mcmonkeyprojects/SwarmUI $swarm } else { Ok "SwarmUI cloned" }
 
+# 5b1. Optionally PIN SwarmUI to a known-good commit. Its HTTP/WS API is untyped + unversioned, so a bare
+# `git pull` can change the gen/model contract the panel + web studio drive (GenerateText2ImageWS frame
+# keys, DoModelDownloadWS, GenerateText2Image body). Set $env:DOKI_SWARM_COMMIT to your verified commit to
+# freeze it (recommended once you've confirmed a working build); empty = track upstream main (default).
+$swarmPin = $env:DOKI_SWARM_COMMIT
+if ($swarmPin) {
+    Info "pinning SwarmUI to $swarmPin ..."
+    git -C $swarm fetch --quiet origin 2>$null
+    git -C $swarm checkout --quiet $swarmPin
+    if ($LASTEXITCODE -ne 0) { Warn "could not checkout SwarmUI $swarmPin (staying on current HEAD)" } else { Ok "SwarmUI pinned to $swarmPin" }
+}
+
 # 5b2. install the MagicPrompt extension (local-LLM prompt enhancement) BEFORE the build so it
 #      compiles in. Adding it forces a rebuild even if SwarmUI was already built.
 $mpExt = Join-Path $swarm "src\Extensions\SwarmUI-MagicPromptExtension"
