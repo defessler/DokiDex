@@ -34,7 +34,9 @@ public sealed record GenRequest(
     string? ControlPreprocessor = null,// ControlNet preprocessor (canny/depth/openpose/…)
     string? EndImage = null,           // FLF2V end keyframe (video/i2v); needs an end-frame-capable model
     bool Reference = false,            // use the init image as an IP-Adapter style/subject reference (image/edit)
-    double RefWeight = 0.6)            // IP-Adapter reference weight
+    double RefWeight = 0.6,            // IP-Adapter reference weight
+    string? Interpolate = null,        // video frame interpolation method (RIFE/FILM/GIMM); video/i2v only
+    int InterpolateMult = 2)           // interpolation multiplier
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -107,6 +109,11 @@ public static class GenCli
         {
             a.Add("-Reference");
             a.Add("-RefWeight"); a.Add(r.RefWeight.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        if (!string.IsNullOrWhiteSpace(r.Interpolate) && r.Kind is "video" or "i2v")
+        {
+            a.Add("-Interpolate"); a.Add(r.Interpolate!);
+            a.Add("-InterpolateMult"); a.Add(r.InterpolateMult.ToString());
         }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }

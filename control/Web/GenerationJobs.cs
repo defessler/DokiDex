@@ -16,7 +16,8 @@ public sealed record GenSubmit(
     string? Lyrics = null, int Duration = 0, int Bpm = 0, string? Lora = null, string? Negative = null,
     string? Upscaler = null, string? Segment = null,
     string? ControlImage = null, string? ControlModel = null, double ControlStrength = 1, string? ControlPreprocessor = null,
-    string? EndImage = null, bool Reference = false, double RefWeight = 0.6);
+    string? EndImage = null, bool Reference = false, double RefWeight = 0.6,
+    string? Interpolate = null, int InterpolateMult = 2);
 
 // One generation job, tracked in memory for the session.
 public sealed class GenJob

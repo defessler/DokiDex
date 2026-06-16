@@ -27,6 +27,7 @@ param(
     [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Upscaler, [string]$Segment,
     [string]$ControlImage, [string]$ControlModel, [double]$ControlStrength = 1, [string]$ControlPreprocessor,
     [string]$EndImage, [switch]$Reference, [double]$RefWeight = 0.6,
+    [string]$Interpolate, [int]$InterpolateMult = 2,
     [string]$InitImage, [string]$MaskImage, [string]$Out
 )
 $ErrorActionPreference = "Stop"
@@ -384,7 +385,7 @@ switch ($Command) {
         if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
         $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley
-        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlImage $ControlImage -ControlModel $ControlModel -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -InitImage $InitImage -MaskImage $MaskImage -Out $Out -BodyOnly:$BodyOnly
+        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlImage $ControlImage -ControlModel $ControlModel -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -InitImage $InitImage -MaskImage $MaskImage -Out $Out -BodyOnly:$BodyOnly
         if ($BodyOnly) { $genResult } else { $null = $genResult }   # -BodyOnly prints the GenerateText2Image body JSON for the web host (live-progress WS path)
     }
     "test" {

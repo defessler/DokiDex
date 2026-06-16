@@ -96,6 +96,15 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Frame_interpolation_is_emitted_only_for_video_kinds()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "video", Interpolate: "RIFE", InterpolateMult: 4, OutPath: "o"));
+        var i = a.IndexOf("-Interpolate"); Assert.True(i >= 0); Assert.Equal("RIFE", a[i + 1]);
+        Assert.Contains("-InterpolateMult", a);
+        Assert.DoesNotContain("-Interpolate", GenCli.BuildArgs(new GenRequest("x", "image", Interpolate: "RIFE", OutPath: "o")));
+    }
+
+    [Fact]
     public void End_image_is_emitted_only_for_video_kinds()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "video", EndImage: "e.png", OutPath: "o"));

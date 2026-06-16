@@ -117,6 +117,8 @@
         <label>Roll <input id="camRoll" type="range" min="-10" max="10" value="0" style="width:72px"></label>
         <label class="xbtn" style="cursor:pointer">+ end frame (FLF2V)<input id="endFile" type="file" accept="image/*" style="display:none"></label>
         <span id="endName" class="hint"></span>
+        <label>Interpolate <select id="interp" class="kin" style="width:auto"><option value="">off</option><option>RIFE</option><option>FILM</option><option>GIMM</option></select></label>
+        <label>×<select id="interpMult" class="kin" style="width:auto"><option>2</option><option>4</option></select></label>
       </div>
       <details id="controlbox" style="display:none;margin:4px 0">
         <summary class="hint" style="cursor:pointer">ControlNet (guide structure from an image)</summary>
@@ -340,6 +342,7 @@
             try { const cr=await (await fetch('/api/compose/camera',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cam)})).json(); if(cr.phrase) body.prompt = body.prompt + ', ' + cr.phrase; } catch {}
           }
           if (_endImage) body.endImage = _endImage;
+          const ip=document.getElementById('interp').value; if(ip){ body.interpolate=ip; body.interpolateMult=+document.getElementById('interpMult').value; }
         }
         if (state.initImage) body.initImage = state.initImage;
         if (state.initImage && (state.kind==='image'||state.kind==='edit') && document.getElementById('refMode').checked) body.reference = true;

@@ -135,6 +135,12 @@ Assert ($bRef.useipadapterforrevision -eq $true -and $bRef.ipadapterweight -eq 0
 $bRefNoInit = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Reference $true
 Assert (-not $bRefNoInit.ContainsKey('useipadapterforrevision'))    "-Reference without an init image -> no-op (needs the reference image)"
 
+# --- frame interpolation: "Video Frame Interpolation Method/Multiplier" -> videoframeinterpolation* (source) ---
+$bIp = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's' -Interpolate 'RIFE' -InterpolateMult 4
+Assert ($bIp.videoframeinterpolationmethod -eq 'RIFE' -and $bIp.videoframeinterpolationmultiplier -eq 4) "-Interpolate -> videoframeinterpolationmethod + multiplier"
+$bNoIp = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's'
+Assert (-not $bNoIp.ContainsKey('videoframeinterpolationmethod'))    "no -Interpolate -> no interpolation params (opt-in)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"
