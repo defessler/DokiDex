@@ -25,7 +25,8 @@ public sealed record GenRequest(
     int Duration = 0,         // music: track length in seconds (0 = recipe default 10)
     int Bpm = 0,              // music: tempo override (0 = recipe default 128)
     string? Lora = null,      // LoRA mixer: "name:0.8,other" -> <lora:..> tags; image-family only
-    string? Negative = null)  // user negative prompt: appended to (image) or set as the recipe negativeprompt
+    string? Negative = null,  // user negative prompt: appended to (image) or set as the recipe negativeprompt
+    string? Upscaler = null)  // upscale engine (balanced/photo/anime) or a raw model file; needs -Upscale/-Refine
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -70,6 +71,8 @@ public static class GenCli
         if (r.Fast) a.Add("-Fast");
         if (r.Upscale && GenRequest.UpscaleApplies(r.Kind)) a.Add("-Upscale");
         if (r.Refine && GenRequest.UpscaleApplies(r.Kind)) a.Add("-Refine");
+        // engine selector only matters when a post-pass runs (image/edit + -Upscale/-Refine); else it's dropped
+        if (!string.IsNullOrWhiteSpace(r.Upscaler) && (r.Upscale || r.Refine) && GenRequest.UpscaleApplies(r.Kind)) { a.Add("-Upscaler"); a.Add(r.Upscaler!); }
         if (r.Face) a.Add("-Face");
         if (r.Realism) a.Add("-Realism");
         if (r.Raw) a.Add("-Raw");

@@ -64,6 +64,12 @@ Assert ($up.refinercontrolpercentage -eq 0)                        "image -Upsca
 $rf = Get-GenRecipe -Kind image -Refine
 Assert ($rf.refinercontrolpercentage -eq 0.35 -and $rf.refinerdotiling -eq $true) "image -Refine -> control% 0.35 + tiling (hi-res-fix)"
 
+# --- upscale engine selector: -Upscaler picks the refiner upscale model (default unchanged; raw name verbatim) ---
+Assert ((Get-GenRecipe -Kind image -Upscale).refinerupscalemethod -eq 'model-4x-UltraSharp.pth') "-Upscale (no engine) -> 4x-UltraSharp (unchanged default)"
+Assert ((Get-GenRecipe -Kind image -Upscale -Upscaler anime).refinerupscalemethod -eq '4x-AnimeSharp.pth') "-Upscaler anime -> AnimeSharp upscaler"
+Assert ((Get-GenRecipe -Kind image -Refine -Upscaler 'my-custom.pth').refinerupscalemethod -eq 'my-custom.pth') "-Upscaler <file> -> used verbatim (any installed upscaler)"
+Assert (-not (Get-GenRecipe -Kind image -Upscaler anime).ContainsKey('refinerupscalemethod')) "-Upscaler without -Upscale/-Refine -> no refiner (gated)"
+
 # --- Get-GenPromptFields: idea placement per kind ---
 $pf = Get-GenPromptFields -Kind image -Idea 'a cat on a skateboard'
 Assert ($pf.prompt -eq '<mpprompt:a cat on a skateboard>')         "image idea -> <mpprompt:..> (rewriter expand)"

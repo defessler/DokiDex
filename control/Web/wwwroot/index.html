@@ -85,6 +85,7 @@
         <label>Seed <input id="seed" type="number" placeholder="random" class="kin"></label>
         <label>Count <input id="count" type="number" value="1" min="1" max="9" class="kin" style="width:54px"></label>
         <label>Aspect <select id="aspect" class="kin" style="width:auto"><option value="">1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
+        <label>Upscaler <select id="upscaler" class="kin" style="width:auto"><option value="">balanced</option><option value="photo">photo</option><option value="anime">anime</option></select></label>
         <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
         <span id="initname" class="hint" style="cursor:pointer"></span>
       </div>
@@ -282,6 +283,7 @@
         if (seedVal!=='') body.seed = parseInt(seedVal);
         const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
         const neg = document.getElementById('negPrompt').value.trim(); if (neg) body.negative = neg;
+        if (state.mods.upscale || state.mods.refine) { const up=document.getElementById('upscaler').value; if(up) body.upscaler=up; }
         if (_styleSel.size) {
           try { const sc = await (await fetch('/api/compose/style',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:body.prompt, negative:body.negative||'', chips:[..._styleSel]})})).json(); if(sc.prompt) body.prompt=sc.prompt; if(sc.negative) body.negative=sc.negative; } catch {}
         }

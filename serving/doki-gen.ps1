@@ -52,7 +52,7 @@ function Expand-Wildcards {
 function Get-GenRecipe {
     param(
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
-        [switch]$Fast, [switch]$Upscale, [switch]$Refine
+        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [string]$Upscaler
     )
     $r = switch ($Kind) {
         # DEFAULT image = Z-Image BASE (non-distilled) — the quality ceiling: a real CFG + working negative
@@ -83,7 +83,11 @@ function Get-GenRecipe {
     if (($Upscale -or $Refine) -and $Kind -in @('image', 'edit')) {
         $r.refinermethod = 'PostApply'
         $r.refinercontrolpercentage = $(if ($Refine) { 0.35 } else { 0 })
-        $r.refinerupscale = 2; $r.refinerupscalemethod = 'model-4x-UltraSharp.pth'
+        $r.refinerupscale = 2
+        # content-class engine selector: a named engine -> its upscaler model, OR a raw model filename verbatim
+        # (lets any installed upscaler be picked). Default/balanced = the shipped 4x-UltraSharp (unchanged).
+        $engines = @{ balanced = 'model-4x-UltraSharp.pth'; photo = 'model-4x-UltraSharp.pth'; anime = '4x-AnimeSharp.pth'; illustration = '4x-AnimeSharp.pth' }
+        $r.refinerupscalemethod = $(if (-not $Upscaler) { 'model-4x-UltraSharp.pth' } elseif ($engines.ContainsKey($Upscaler.ToLower())) { $engines[$Upscaler.ToLower()] } else { $Upscaler })
         if ($Refine) { $r.refinerdotiling = $true }
     }
     return $r
@@ -174,7 +178,7 @@ function Invoke-Gen {
         [Parameter(Mandatory)][string]$Prompt,
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
-        [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
+        [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative,
         [string]$InitImage, [string]$MaskImage, [string]$Out,
@@ -207,7 +211,7 @@ function Invoke-Gen {
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
     # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.
     if ($BodyOnly) {
-        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
+        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg
         $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession

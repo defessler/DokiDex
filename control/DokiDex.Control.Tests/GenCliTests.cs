@@ -73,6 +73,16 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Upscaler_engine_is_emitted_only_with_a_post_pass_on_image_edit()
+    {
+        // needs -Upscale or -Refine (and image/edit) to matter; dropped otherwise
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Upscale: true, Upscaler: "anime", OutPath: "o"));
+        var i = a.IndexOf("-Upscaler"); Assert.True(i >= 0); Assert.Equal("anime", a[i + 1]);
+        Assert.DoesNotContain("-Upscaler", GenCli.BuildArgs(new GenRequest("x", "image", Upscaler: "anime", OutPath: "o")));       // no post-pass
+        Assert.DoesNotContain("-Upscaler", GenCli.BuildArgs(new GenRequest("x", "video", Upscale: true, Upscaler: "anime", OutPath: "o"))); // wrong kind
+    }
+
+    [Fact]
     public void Init_image_is_passed_as_a_separate_value_arg()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "edit", InitImage: @"C:\pics\in.png", OutPath: "o"));
