@@ -2,12 +2,17 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using DokiDex.Control.Services;
 
 namespace DokiDex.Web;
 
+// One pronunciation-dictionary rule: speak `From` as `To` (fix mispronounced names / invented fantasy words).
+public sealed record LexRule(string? From, string? To);
+
 // A browser request to synthesize speech.
-public sealed record SpeakRequest(string? Text, string? Voice, double Exaggeration = 0.5, double CfgWeight = 0.5);
+public sealed record SpeakRequest(string? Text, string? Voice, double Exaggeration = 0.5, double CfgWeight = 0.5,
+    List<LexRule>? Lexicon = null);
 
 // Local text-to-speech over the shipped Chatterbox server (OpenAI-compatible /v1/audio/speech on :8004 — llm
 // group, coexists with the coder LLM). Two pieces:
@@ -28,6 +33,22 @@ public static class Tts
     private static string TtsRoot => Path.Combine(RepoPaths.Root, "tts", "Chatterbox-TTS-Server");
 
     public sealed record SpeakResult(bool Ok, string? ArtifactPath, string? Message);
+
+    // Pronunciation dictionary: whole-word, case-insensitive alias substitution applied BEFORE synthesis — a
+    // pure, model-agnostic, deterministic fix for the #1 TTS failure (mispronounced names/jargon/invented
+    // anime-fantasy words). Pure + total -> unit-tested. (IPA/phoneme rules are gated on the tokenizer; this
+    // alias slice ships now.)
+    public static string ApplyLexicon(string text, IEnumerable<LexRule>? rules)
+    {
+        if (rules is null || string.IsNullOrEmpty(text)) return text;
+        foreach (var r in rules)
+        {
+            var from = r.From?.Trim();
+            if (string.IsNullOrEmpty(from)) continue;
+            text = Regex.Replace(text, $@"\b{Regex.Escape(from)}\b", (r.To ?? "").Trim(), RegexOptions.IgnoreCase);
+        }
+        return text;
+    }
 
     // The voice registry: distinct voice NAMES (filename without extension) found across the candidate folders.
     public static IEnumerable<string> Voices() => Voices(TtsRoot);
@@ -50,6 +71,7 @@ public static class Tts
     {
         var text = (req.Text ?? "").Trim();
         if (text.Length == 0) return new SpeakResult(false, null, "empty text");
+        text = ApplyLexicon(text, req.Lexicon);   // pronunciation dictionary (deterministic pre-synthesis fix)
 
         // OpenAI-compatible speech body (+ Chatterbox's exaggeration / cfg_weight expressivity dials).
         var body = new

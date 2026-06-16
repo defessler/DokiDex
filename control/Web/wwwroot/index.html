@@ -166,6 +166,9 @@
         <button class="primary" onclick="speak()">Speak</button>
         <span class="hint" id="ttsHint"></span>
       </div>
+      <details style="margin:4px 0"><summary class="hint" style="cursor:pointer">Pronunciation dictionary</summary>
+        <textarea id="ttsLex" placeholder="one per line:  Caelum=KYE-lum&#10;Ymir=EE-meer" style="margin-top:6px;min-height:60px;font-family:monospace;font-size:12px"></textarea>
+      </details>
       <div id="ttsOut" style="margin-top:10px"></div>
     </section>
     <section id="view-status" style="display:none">
@@ -435,7 +438,8 @@
       const hint=document.getElementById('ttsHint'), out=document.getElementById('ttsOut');
       if(!text){ hint.textContent='enter some text'; return; }
       hint.textContent='synthesizing…';
-      const body={ text, voice:document.getElementById('ttsVoice').value, exaggeration:+document.getElementById('ttsExag').value, cfgWeight:+document.getElementById('ttsCfg').value };
+      const lexicon=document.getElementById('ttsLex').value.split('\n').map(l=>{const i=l.indexOf('=');return i>0?{from:l.slice(0,i).trim(),to:l.slice(i+1).trim()}:null;}).filter(Boolean);
+      const body={ text, voice:document.getElementById('ttsVoice').value, exaggeration:+document.getElementById('ttsExag').value, cfgWeight:+document.getElementById('ttsCfg').value, lexicon };
       try{
         const r=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const j=await r.json();

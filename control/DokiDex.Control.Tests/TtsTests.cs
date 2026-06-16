@@ -51,4 +51,30 @@ public class TtsTests : IDisposable
     [Fact]
     public void Missing_tts_install_yields_no_voices()
         => Assert.Empty(Tts.Voices(Path.Combine(_root, "does-not-exist")));
+
+    // --- pronunciation dictionary (ApplyLexicon) ---
+    [Fact]
+    public void Lexicon_replaces_whole_words_case_insensitively()
+    {
+        var rules = new[] { new LexRule("Caelum", "KYE-lum") };
+        Assert.Equal("hail KYE-lum and KYE-lum", Tts.ApplyLexicon("hail Caelum and caelum", rules));
+    }
+
+    [Fact]
+    public void Lexicon_does_not_replace_inside_a_larger_word()
+        => Assert.Equal("decode", Tts.ApplyLexicon("decode", new[] { new LexRule("code", "kohd") }));   // \b guards
+
+    [Fact]
+    public void Lexicon_handles_multi_word_aliases_and_multiple_rules()
+    {
+        var rules = new[] { new LexRule("Ymir", "EE-meer"), new LexRule("dark lord", "overlord") };
+        Assert.Equal("EE-meer the overlord", Tts.ApplyLexicon("Ymir the dark lord", rules));
+    }
+
+    [Fact]
+    public void Lexicon_null_or_blank_rules_are_a_no_op()
+    {
+        Assert.Equal("unchanged", Tts.ApplyLexicon("unchanged", null));
+        Assert.Equal("unchanged", Tts.ApplyLexicon("unchanged", new[] { new LexRule("  ", "x") }));
+    }
 }
