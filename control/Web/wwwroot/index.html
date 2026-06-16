@@ -99,6 +99,11 @@
         </div>
         <div style="margin-top:4px"><button class="xbtn" onclick="clearMask()">clear mask</button></div>
       </div>
+      <div class="mods">
+        <input id="rwInstr" class="kin" style="flex:1;min-width:200px" placeholder="steer-rewrite (e.g. make it night, darker tone, add a red scarf)">
+        <button class="ghost" onclick="rewritePrompt()">Rewrite</button>
+        <span class="hint" id="rwHint"></span>
+      </div>
       <div class="row">
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
         <span class="hint" id="genHint"></span>
@@ -209,6 +214,20 @@
         if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
         hint.textContent=''; pollJobs();
       } catch(e){ hint.textContent='request failed'; }
+    }
+    async function rewritePrompt(){
+      const p=document.getElementById('prompt').value.trim();
+      const instr=document.getElementById('rwInstr').value.trim();
+      const hint=document.getElementById('rwHint');
+      if(!p){ hint.textContent='enter a prompt first'; return; }
+      if(!instr){ hint.textContent='enter an instruction'; return; }
+      hint.textContent='rewriting…';
+      try{
+        const r=await fetch('/api/rewrite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,instruction:instr})});
+        const j=await r.json();
+        if(!r.ok){ hint.textContent=j.error||('error '+r.status); return; }
+        document.getElementById('prompt').value=j.prompt; document.getElementById('rwInstr').value=''; hint.textContent='rewritten — iterate again or Generate';
+      }catch(e){ hint.textContent='rewrite failed'; }
     }
     function mediaEl(j){
       if(!j.mediaUrl) return '<div class="spinner"></div>';

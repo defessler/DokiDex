@@ -1,5 +1,3 @@
-using System.Net.Http;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -21,9 +19,6 @@ public sealed record DirectorRequest(string? Idea, int Shots = 6);
 // "not reachable" contract).
 public static class Director
 {
-    private const string ChatUrl = "http://127.0.0.1:8080/v1/chat/completions";
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(3) };
-
     public sealed record Result(bool Ok, IReadOnlyList<Shot> Shots, string? Message);
 
     public static async Task<Result> StoryboardAsync(string idea, int shots, CancellationToken ct)
@@ -36,30 +31,11 @@ public static class Director
                 + "distinct, vivid camera shots. Reply with ONLY a JSON array (no prose, no code fence) of "
                 + $"exactly {shots} objects, each {{\"title\": <a few words>, \"prompt\": <a detailed, standalone "
                 + "image-generation prompt describing the shot: subject, setting, framing, lighting, mood>}}.";
-        var body = new
-        {
-            messages = new[]
-            {
-                new { role = "system", content = sys },
-                new { role = "user", content = idea },
-            },
-            temperature = 0.7,
-            max_tokens = 2048,
-        };
 
-        string text;
-        try
-        {
-            using var resp = await Http.PostAsJsonAsync(ChatUrl, body, ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
-                return new Result(false, Array.Empty<Shot>(), $"LLM returned {(int)resp.StatusCode} — is a model loaded? (start agent mode)");
-            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
-            text = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
-        }
-        catch (OperationCanceledException) { return new Result(false, Array.Empty<Shot>(), "cancelled"); }
-        catch (Exception ex) { return new Result(false, Array.Empty<Shot>(), $"LLM not reachable at :8080 — start agent mode first ({ex.Message})"); }
+        var chat = await LocalLlm.ChatAsync(sys, idea, temperature: 0.7, maxTokens: 2048, ct).ConfigureAwait(false);
+        if (!chat.Ok) return new Result(false, Array.Empty<Shot>(), chat.Error);
 
-        var parsed = ParseShotlist(text);
+        var parsed = ParseShotlist(chat.Text);
         return parsed.Count == 0
             ? new Result(false, parsed, "the model did not return a usable shotlist — try again or rephrase")
             : new Result(true, parsed, null);

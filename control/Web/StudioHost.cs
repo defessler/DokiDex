@@ -180,6 +180,13 @@ public static class StudioHost
         // Pure compile (no GPU); the SPA generates the result via /api/generate with raw=true so the <object:..>
         // regional tags reach SwarmUI unrewritten.
         api.MapPost("/compose/multichar", (MultiCharSpec body) => Results.Json(new { prompt = MultiCharacter.Compile(body) }));
+
+        // ---- steerable rewriter (user-directed prompt rewrite via the local LLM; conversational iterate) ----
+        api.MapPost("/rewrite", async (RewriteRequest body, CancellationToken ct) =>
+        {
+            var r = await Rewriter.RewriteAsync(body.Prompt ?? "", body.Instruction ?? "", ct);
+            return r.Ok ? Results.Json(new { prompt = r.Prompt }) : Results.Json(new { error = r.Error }, statusCode: 503);
+        });
     }
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no
