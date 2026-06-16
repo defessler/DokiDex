@@ -127,6 +127,11 @@
           <label class="xbtn" style="cursor:pointer">+ control image<input id="cnFile" type="file" accept="image/*" style="display:none"></label>
           <span id="cnName" class="hint"></span>
         </div>
+        <div style="margin-top:6px">
+          <div class="hint" style="margin-bottom:4px">…or sketch one (draw a rough structure, then Generate with type=scribble):</div>
+          <canvas id="sketch" width="384" height="256" style="border:1px solid var(--border);border-radius:6px;background:#fff;cursor:crosshair;touch-action:none"></canvas>
+          <div style="margin-top:4px"><button class="xbtn" onclick="clearSketch()">clear sketch</button></div>
+        </div>
       </details>
       <div id="maskbox" style="display:none;margin:4px 0 12px">
         <div class="hint" style="margin-bottom:4px">Edit canvas — paint the area to change, then Generate:</div>
@@ -634,6 +639,18 @@
       if(!f){ _cnImage=null; nm.textContent=''; return; }
       const rd=new FileReader(); rd.onload=()=>{ _cnImage=rd.result; nm.textContent=f.name; }; rd.readAsDataURL(f);
     });
+    // sketch-to-image: draw a rough structure -> becomes the ControlNet control image (use type=scribble)
+    let _sketchDrawn=false;
+    function clearSketch(){ const cv=document.getElementById('sketch'); const x=cv.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,cv.width,cv.height); _sketchDrawn=false; }
+    (function(){
+      const cv=document.getElementById('sketch'); if(!cv) return; const x=cv.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,cv.width,cv.height);
+      let drawing=false; const at=e=>{const r=cv.getBoundingClientRect();return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height];};
+      const line=(x1,y1,x2,y2)=>{x.strokeStyle='#000';x.lineWidth=3;x.lineCap='round';x.beginPath();x.moveTo(x1,y1);x.lineTo(x2,y2);x.stroke();_sketchDrawn=true;};
+      let lx=0,ly=0;
+      cv.addEventListener('pointerdown',e=>{drawing=true;[lx,ly]=at(e);line(lx,ly,lx,ly);});
+      cv.addEventListener('pointermove',e=>{if(!drawing)return;const[nx,ny]=at(e);line(lx,ly,nx,ny);lx=nx;ly=ny;});
+      window.addEventListener('pointerup',()=>{ if(drawing){ drawing=false; _cnImage=cv.toDataURL('image/png'); document.getElementById('cnName').textContent='(sketch)'; } });
+    })();
     let _endImage=null;
     document.getElementById('endFile').addEventListener('change', e => {
       const f=e.target.files[0]; const nm=document.getElementById('endName');
