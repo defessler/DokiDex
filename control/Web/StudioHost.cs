@@ -137,7 +137,7 @@ public static class StudioHost
                 Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
                 Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative,
-                Upscaler: body.Upscaler);
+                Upscaler: body.Upscaler, Segment: body.Segment);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));

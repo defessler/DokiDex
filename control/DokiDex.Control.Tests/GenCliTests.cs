@@ -171,6 +171,15 @@ public class GenCliTests
         => Assert.DoesNotContain("-Negative", GenCli.BuildArgs(new GenRequest("x", "image", Negative: "  ", OutPath: "o")));
 
     [Fact]
+    public void Segment_passes_through_as_a_separate_value_arg_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Segment: "face, hands:0.6", OutPath: "o"));
+        var i = a.IndexOf("-Segment");
+        Assert.True(i >= 0);
+        Assert.Equal("face, hands:0.6", a[i + 1]);
+    }
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));

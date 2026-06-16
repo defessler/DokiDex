@@ -90,6 +90,12 @@ $pfBoth = Get-GenPromptFields -Kind edit -Idea 'fix it' -Face -Realism
 Assert ($pfBoth.prompt -match '<lora:' -and $pfBoth.prompt -match '<segment:face') "edit -Face -Realism -> both tags after the literal instruction"
 
 # --- LoRA mixer: -Lora "name:weight,name" -> <lora:name:weight> tags (image-family only; bare name -> 1) ---
+# --- promptable segmentation: -Segment "kw, kw:creativity" -> <segment:kw,creativity,0.5> (generalizes -Face) ---
+$pfSeg = Get-GenPromptFields -Kind image -Idea 'a knight' -Segment 'sword, hands:0.6'
+Assert ($pfSeg.prompt -match '<segment:sword,0\.4,0\.5>')         "-Segment keyword -> <segment:kw,0.4,0.5> (default creativity)"
+Assert ($pfSeg.prompt -match '<segment:hands,0\.6,0\.5>')         "-Segment kw:creativity -> overrides creativity"
+Assert (-not ((Get-GenPromptFields -Kind music -Idea 'x' -Segment 'a').prompt -match '<segment:')) "-Segment ignored on non-image-family (music)"
+
 $pfLora = Get-GenPromptFields -Kind image -Idea 'a cat' -Lora 'anime-style:0.8, detail-boost'
 Assert ($pfLora.prompt -match '<lora:anime-style:0\.8>')          "-Lora name:weight -> <lora:name:weight>"
 Assert ($pfLora.prompt -match '<lora:detail-boost:1>')            "-Lora bare name -> weight defaults to 1"

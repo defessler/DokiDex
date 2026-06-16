@@ -91,6 +91,7 @@
       </div>
       <div class="mods">
         <label style="flex:1;min-width:200px">Negative <input id="negPrompt" class="kin" style="width:100%" placeholder="things to avoid (appended to the recipe negative)"></label>
+        <label style="flex:1;min-width:160px">Segment-refine <input id="segPrompt" class="kin" style="width:100%" placeholder="regions to refine: e.g. face, hands:0.6"></label>
       </div>
       <div id="musicbox" class="mods" style="display:none">
         <label style="flex:1 1 100%">Lyrics <textarea id="lyrics" rows="2" placeholder="leave blank for an instrumental" class="kin" style="width:100%;resize:vertical"></textarea></label>
@@ -284,6 +285,7 @@
         if (seedVal!=='') body.seed = parseInt(seedVal);
         const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
         const neg = document.getElementById('negPrompt').value.trim(); if (neg) body.negative = neg;
+        const seg = document.getElementById('segPrompt').value.trim(); if (seg) body.segment = seg;
         if (state.mods.upscale || state.mods.refine) { const up=document.getElementById('upscaler').value; if(up) body.upscaler=up; }
         if (_styleSel.size) {
           try { const sc = await (await fetch('/api/compose/style',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:body.prompt, negative:body.negative||'', chips:[..._styleSel]})})).json(); if(sc.prompt) body.prompt=sc.prompt; if(sc.negative) body.negative=sc.negative; } catch {}

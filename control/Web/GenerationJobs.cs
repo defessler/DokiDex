@@ -14,7 +14,7 @@ public sealed record GenSubmit(
     bool Face = false, bool Realism = false, bool Raw = false, string? InitImage = null,
     int Seed = -1, int Count = 1, double Strength = -1, string? MaskImage = null, string? Aspect = null,
     string? Lyrics = null, int Duration = 0, int Bpm = 0, string? Lora = null, string? Negative = null,
-    string? Upscaler = null);
+    string? Upscaler = null, string? Segment = null);
 
 // One generation job, tracked in memory for the session.
 public sealed class GenJob
