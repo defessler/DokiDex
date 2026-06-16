@@ -189,6 +189,12 @@
     </section>
     <section id="view-library" style="display:none">
       <h2>Library</h2>
+      <div class="mods">
+        <input id="libQuery" class="kin" style="flex:1;min-width:200px" placeholder="search prompts…" oninput="loadLibrary()">
+        <select id="libKind" class="kin" style="width:auto" onchange="loadLibrary()">
+          <option value="">all kinds</option><option>image</option><option>video</option><option>music</option><option>edit</option><option>tts</option>
+        </select>
+      </div>
       <div class="grid" id="library"><p class="hint">Loading…</p></div>
     </section>
     <section id="view-models" style="display:none">
@@ -391,9 +397,11 @@
     }
     async function loadLibrary(){
       try {
-        const items = await (await fetch('/api/gallery')).json();
+        const q = encodeURIComponent(document.getElementById('libQuery')?.value||'');
+        const kind = encodeURIComponent(document.getElementById('libKind')?.value||'');
+        const items = await (await fetch(`/api/gallery?q=${q}&kind=${kind}`)).json();
         const g = document.getElementById('library');
-        g.innerHTML = items.length ? '' : '<p class="hint">No saved generations yet.</p>';
+        g.innerHTML = items.length ? '' : '<p class="hint">No matching generations.</p>';
         items.forEach(it => g.appendChild($(libCard(it))));
       } catch(e){ document.getElementById('library').innerHTML='<p class="err">could not load the library</p>'; }
     }

@@ -14,7 +14,7 @@ public sealed class GalleryService
 
     private static string Root => DokiService.GenDir;
 
-    public IEnumerable<object> List()
+    public IEnumerable<object> List(string? query = null, string? kindFilter = null)
     {
         var root = Root;
         if (!Directory.Exists(root)) return Array.Empty<object>();
@@ -25,17 +25,31 @@ public sealed class GalleryService
             if (Array.IndexOf(MediaExt, ext) < 0) continue;
             var name = Path.GetFileName(f);
             var meta = ReadSidecar(f);
+            var kind = meta?.Kind ?? KindFromExt(ext);
+            var prompt = meta?.Prompt ?? "";
+            if (!Match(prompt, kind, query, kindFilter)) continue;   // saved-search / typed filter
             var when = File.GetLastWriteTime(f);
             items.Add((when, new
             {
                 name,
-                kind = meta?.Kind ?? KindFromExt(ext),
-                prompt = meta?.Prompt ?? "",
+                kind,
+                prompt,
                 mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}",
                 date = when.ToString("o"),
             }));
         }
         return items.OrderByDescending(i => i.when).Select(i => i.dto);
+    }
+
+    // Pure library filter: a free-text query matches anywhere in the prompt (case-insensitive); a kind filter
+    // must equal the item's kind. Blank/null filters match everything. Total -> unit-tested.
+    public static bool Match(string prompt, string kind, string? query, string? kindFilter)
+    {
+        if (!string.IsNullOrWhiteSpace(kindFilter) && !string.Equals(kind, kindFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!string.IsNullOrWhiteSpace(query) && (prompt ?? "").IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) < 0)
+            return false;
+        return true;
     }
 
     // Resolve a gallery file name to a full path, ONLY if it sits directly in Root (no traversal, no subdirs).

@@ -160,7 +160,7 @@ public static class StudioHost
         });
 
         // ---- library / gallery (persistent over the app-owned output folder + JSON sidecars) ----
-        api.MapGet("/gallery", (GalleryService gal) => Results.Json(gal.List()));
+        api.MapGet("/gallery", (GalleryService gal, string? q, string? kind) => Results.Json(gal.List(q, kind)));
         api.MapGet("/gallery/media/{name}", (string name, GalleryService gal) =>
         {
             var full = gal.Resolve(name);
