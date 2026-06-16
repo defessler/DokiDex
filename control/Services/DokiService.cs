@@ -113,6 +113,19 @@ public sealed class DokiService
         return new GenResult(false, req.OutPath, msg);
     }
 
+    // Build the SwarmUI GenerateText2Image body for a request WITHOUT generating (`doki gen … -BodyOnly`), so
+    // the web host can drive GenerateText2ImageWS itself for live progress while the recipe stays single-sourced
+    // in doki-gen.ps1. Returns the compact body JSON, or null if the request is invalid. Does NOT need media mode.
+    public async Task<string?> GetGenBodyAsync(GenRequest req, CancellationToken ct = default)
+    {
+        var args = new List<string>(GenCli.BuildArgs(req)) { "-BodyOnly" };
+        var (ok, stdout, _) = await CaptureFullAsync(args, TimeSpan.FromSeconds(60), ct).ConfigureAwait(false);
+        if (!ok) return null;
+        foreach (var line in stdout.Split('\n').Reverse())
+        { var t = line.Trim(); if (t.StartsWith('{')) return t; }   // the body is the JSON line BodyOnly prints
+        return null;
+    }
+
     // Open a media artifact the panel itself generated. Scoped to the set of -Out paths THIS panel created
     // (+ an allowlisted media extension) so it can never be coerced into shell-opening an arbitrary path, and
     // it keeps working after the output folder is changed (cf. OpenArtifact's note).

@@ -78,6 +78,7 @@ api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
 api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
 api.MapGet("/jobs/{id}", (string id, GenerationJobs jobs) =>
     jobs.Get(id) is { } j ? Results.Json(j.ToDto()) : Results.NotFound());
+api.MapPost("/jobs/{id}/cancel", async (string id, GenerationJobs jobs) => { await jobs.Cancel(id); return Results.Accepted(); });
 api.MapGet("/media/{id}", (string id, GenerationJobs jobs) =>
 {
     var j = jobs.Get(id);

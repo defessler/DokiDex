@@ -33,7 +33,14 @@ public static class RepoPaths
         return string.IsNullOrEmpty(dir) ? AppContext.BaseDirectory : dir;
     }
 
-    private static string FindRoot() => ResolveRoot(AppSettings.Load().InstallRoot, ExeDir, AppContext.BaseDirectory);
+    private static string FindRoot()
+    {
+        // An explicit DOKIDEX_HOME wins (dev override / power-user pointing at an alternate home), but only
+        // when it actually contains doki.ps1 — otherwise fall through to the saved InstallRoot / walk-up.
+        var env = Environment.GetEnvironmentVariable("DOKIDEX_HOME");
+        if (!string.IsNullOrWhiteSpace(env) && File.Exists(Path.Combine(env, "doki.ps1"))) return env;
+        return ResolveRoot(AppSettings.Load().InstallRoot, ExeDir, AppContext.BaseDirectory);
+    }
 
     // Pure resolution (unit-tested): a valid configured install root wins; else walk UP from each start
     // looking for doki.ps1; else fall back to the first start (the launched-exe dir) — never a hardcoded path.

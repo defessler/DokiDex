@@ -19,7 +19,8 @@ public sealed class GenJob
     public required string Prompt { get; init; }
     public required string Kind { get; init; }
     public string Status { get; set; } = "queued";   // queued | running | done | failed
-    public double Progress { get; set; }              // 0..1 (indeterminate until the P1b WS bridge lands)
+    public double Progress { get; set; }              // 0..1, fed by the GenerateText2ImageWS bridge
+    public string? Preview { get; set; }              // in-flight preview (data: URL) while running
     public string? Message { get; set; }
     public string? ArtifactPath { get; set; }
     public bool HasArtifact => !string.IsNullOrEmpty(ArtifactPath) && File.Exists(ArtifactPath);
@@ -29,18 +30,21 @@ public sealed class GenJob
         id = Id, prompt = Prompt, kind = Kind, status = Status, progress = Progress, message = Message,
         // scoped media URL by job id only (never a client-supplied path) -> no traversal
         mediaUrl = Status == "done" && HasArtifact ? $"/api/media/{Id}" : null,
+        // only the running job carries a preview (keeps the /api/jobs payload small)
+        preview = Status == "running" ? Preview : null,
     };
 }
 
 // In-memory generation queue. Submissions are accepted immediately (queued) so the UI stays responsive; a
-// single-flight gate serializes GPU EXECUTION (the 32 GB media group runs one gen at a time). Today it drives
-// the tested CLI path (DokiService.RunGenAsync -> `doki gen`); P1b swaps in a GenerateText2ImageWS bridge for
-// live %/preview while keeping this queue + the recipe contract intact.
+// single-flight gate serializes GPU EXECUTION (the 32 GB media group runs one gen at a time). The recipe stays
+// single-sourced in doki-gen.ps1 (fetched via `doki gen -BodyOnly`); this host drives SwarmUI's
+// GenerateText2ImageWS for live %/preview and downloads the artifact. Cancel = InterruptAll + token cancel.
 public sealed class GenerationJobs
 {
     private readonly DokiService _doki;
     private readonly IHubContext<StudioHub> _hub;
     private readonly ConcurrentDictionary<string, GenJob> _jobs = new();
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _cts = new();
     private readonly SemaphoreSlim _gpu = new(1, 1);
     private int _seq;
 
@@ -50,27 +54,51 @@ public sealed class GenerationJobs
     {
         var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind };
         _jobs[job.Id] = job;
-        _ = Task.Run(() => RunAsync(job, req));
+        var cts = new CancellationTokenSource();
+        _cts[job.Id] = cts;
+        _ = Task.Run(() => RunAsync(job, req, cts.Token));
         return job;
     }
 
     public GenJob? Get(string id) => _jobs.TryGetValue(id, out var j) ? j : null;
     public IEnumerable<GenJob> Recent(int n = 60) => _jobs.Values.OrderByDescending(j => j.Id).Take(n);
 
-    private async Task RunAsync(GenJob job, GenRequest req)
+    // Cancel: interrupt SwarmUI's current gen AND cancel our token (stops the WS receive + the gate wait).
+    public async Task Cancel(string id)
     {
-        await _gpu.WaitAsync().ConfigureAwait(false);
+        if (_cts.TryGetValue(id, out var cts)) { try { cts.Cancel(); } catch { } }
+        await SwarmGen.InterruptAsync().ConfigureAwait(false);
+    }
+
+    private async Task RunAsync(GenJob job, GenRequest req, CancellationToken ct)
+    {
         try
         {
-            job.Status = "running";
-            await Push(job).ConfigureAwait(false);
-            var outPath = _doki.NewGenOutPath(req.Kind);
-            var res = await _doki.RunGenAsync(req with { OutPath = outPath }).ConfigureAwait(false);
-            if (res.Ok) { job.ArtifactPath = res.OutPath; job.Progress = 1; job.Status = "done"; job.Message = "done"; }
-            else { job.Status = "failed"; job.Message = StripAnsi(res.Message); }
+            await _gpu.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                job.Status = "running";
+                await Push(job).ConfigureAwait(false);
+
+                var body = await _doki.GetGenBodyAsync(req, ct).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(body)) { job.Status = "failed"; job.Message = "could not build the generation request"; return; }
+
+                var outPath = _doki.NewGenOutPath(req.Kind);
+                var outcome = await SwarmGen.RunAsync(body!, outPath, p =>
+                {
+                    job.Progress = p.Overall > 1.0 ? p.Overall / 100.0 : p.Overall;
+                    if (!string.IsNullOrEmpty(p.PreviewDataUrl)) job.Preview = p.PreviewDataUrl;
+                    _ = Push(job);
+                }, ct).ConfigureAwait(false);
+
+                if (outcome.Ok) { job.ArtifactPath = outcome.ArtifactPath; job.Progress = 1; job.Preview = null; job.Status = "done"; job.Message = "done"; }
+                else { job.Status = "failed"; job.Message = StripAnsi(outcome.Message); }
+            }
+            finally { _gpu.Release(); }
         }
+        catch (OperationCanceledException) { job.Status = "failed"; job.Message = "cancelled"; }
         catch (Exception ex) { job.Status = "failed"; job.Message = StripAnsi(ex.Message); }
-        finally { _gpu.Release(); await Push(job).ConfigureAwait(false); }
+        finally { _cts.TryRemove(job.Id, out _); await Push(job).ConfigureAwait(false); }
     }
 
     private Task Push(GenJob job)
