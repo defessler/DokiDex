@@ -18,6 +18,7 @@ builder.WebHost.ConfigureKestrel(k => k.ListenLocalhost(port));   // 127.0.0.1 +
 
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<DokiService>();
+builder.Services.AddSingleton<GenerationJobs>();
 
 var app = builder.Build();
 
@@ -61,6 +62,33 @@ api.MapPost("/services/{name}/{action}", (string name, string action, DokiServic
         default: return Results.BadRequest(new { error = "unknown action" });
     }
     return Results.Accepted();
+});
+
+// ---- generation (P1a: tested CLI recipe path + a single-flight job queue; P1b adds the live WS bridge) ----
+api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
+    var kind = (body.Kind ?? "image").Trim().ToLowerInvariant();
+    if (Array.IndexOf(GenRequest.Kinds, kind) < 0) return Results.BadRequest(new { error = "unknown kind" });
+    var req = new GenRequest(body.Prompt.Trim(), kind,
+        Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
+        Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: body.InitImage);
+    return Results.Json(jobs.Submit(req).ToDto());
+});
+api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
+api.MapGet("/jobs/{id}", (string id, GenerationJobs jobs) =>
+    jobs.Get(id) is { } j ? Results.Json(j.ToDto()) : Results.NotFound());
+api.MapGet("/media/{id}", (string id, GenerationJobs jobs) =>
+{
+    var j = jobs.Get(id);
+    if (j is null || !j.HasArtifact) return Results.NotFound();
+    var mime = Path.GetExtension(j.ArtifactPath!).ToLowerInvariant() switch
+    {
+        ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", ".gif" => "image/gif",
+        ".mp4" => "video/mp4", ".webm" => "video/webm", ".mp3" => "audio/mpeg", ".wav" => "audio/wav", ".flac" => "audio/flac",
+        _ => "application/octet-stream",
+    };
+    return Results.File(j.ArtifactPath!, mime);   // scoped: only files the app generated for a known job id
 });
 
 app.MapHub<StudioHub>("/hub");

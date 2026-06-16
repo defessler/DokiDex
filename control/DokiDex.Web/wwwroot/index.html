@@ -6,92 +6,176 @@
   <title>DokiDex Studio</title>
   <style>
     :root {
-      --bg:#0A0E14; --surface:#0D121B; --surface2:#121826; --border:#243140;
-      --text:#E6EEF6; --dim:#7E8C99; --cyan:#35E0F0; --gold:#E8C77A; --amber:#E8C77A;
-      --danger:#FF6B6B;
+      --bg:#0A0E14; --surface:#0D121B; --surface2:#121826; --surface3:#1B2433; --border:#243140;
+      --text:#E6EEF6; --dim:#7E8C99; --cyan:#35E0F0; --gold:#E8C77A; --danger:#FF6B6B;
     }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--text);
-      font-family:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif; }
-    header { display:flex; align-items:center; gap:12px; padding:18px 28px;
-      border-bottom:1px solid var(--border); background:var(--surface); }
-    .brand { font-weight:300; letter-spacing:3px; font-size:18px; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif; }
+    header { display:flex; align-items:center; gap:18px; padding:14px 28px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:5; }
+    .brand { font-weight:300; letter-spacing:3px; font-size:17px; }
     .brand b { color:var(--gold); font-weight:600; letter-spacing:1px; }
-    .tag { color:var(--dim); font-size:12px; font-family:"Cascadia Mono",Consolas,monospace; }
-    main { padding:24px 28px; max-width:1100px; margin:0 auto; }
-    .gpu { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin-bottom:20px; }
-    .gpu .head { display:flex; justify-content:space-between; font-family:"Cascadia Mono",Consolas,monospace; font-size:13px; }
-    .bar { height:6px; background:var(--bg); border-radius:3px; margin-top:8px; overflow:hidden; }
-    .bar > div { height:100%; background:var(--cyan); width:0; transition:width .4s; }
-    .modes { display:flex; gap:10px; margin-bottom:22px; flex-wrap:wrap; }
-    .mode { background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:var(--dim);
-      padding:10px 16px; cursor:pointer; font-size:13px; min-width:120px; text-align:left; }
-    .mode:hover { border-color:#80E8C77A; }
-    .mode.active { border-left:2px solid var(--cyan); color:var(--text); background:var(--surface); }
-    .mode small { display:block; color:var(--dim); font-size:10px; margin-top:2px; }
-    h2 { font-size:11px; letter-spacing:1px; color:var(--dim); font-weight:600; text-transform:uppercase; margin:18px 0 10px; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
-    .card { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
-    .card .row { display:flex; justify-content:space-between; align-items:center; }
-    .card .name { font-size:13px; }
-    .card .meta { color:var(--dim); font-size:11px; font-family:"Cascadia Mono",Consolas,monospace; margin-top:4px; }
+    nav { display:flex; gap:6px; margin-left:6px; }
+    nav button { background:none; border:0; color:var(--dim); font-size:13px; padding:6px 12px; cursor:pointer; border-radius:5px; }
+    nav button.on { color:var(--text); background:var(--surface2); }
+    .gpu-pill { margin-left:auto; font-family:"Cascadia Mono",Consolas,monospace; font-size:11px; color:var(--dim); }
+    .gpu-pill b { color:var(--cyan); }
+    main { padding:22px 28px; max-width:1080px; margin:0 auto; }
+    .banner { background:#1a1606; border:1px solid #5a4a16; color:var(--gold); border-radius:8px; padding:12px 14px; margin-bottom:18px; display:flex; align-items:center; gap:14px; font-size:13px; }
+    .banner button { margin-left:auto; }
+    textarea { width:100%; min-height:84px; resize:vertical; background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:12px 14px; font-size:15px; font-family:inherit; }
+    textarea:focus { outline:none; border-color:#80E8C77A; }
+    .pills { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+    .pill { background:var(--surface2); border:1px solid var(--border); color:var(--dim); border-radius:999px; padding:6px 14px; font-size:12px; cursor:pointer; }
+    .pill.on { color:#06121a; background:var(--cyan); border-color:var(--cyan); font-weight:600; }
+    .mods { display:flex; gap:14px; flex-wrap:wrap; margin:8px 0 14px; color:var(--dim); font-size:12px; }
+    .mods label { cursor:pointer; user-select:none; }
+    .row { display:flex; align-items:center; gap:12px; }
+    button.primary { background:#0E7490; color:var(--text); border:1px solid #0E7490; border-radius:6px; padding:10px 22px; font-size:14px; cursor:pointer; }
+    button.primary:hover { background:#1190b0; }
+    button.ghost { background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; }
+    .hint { color:var(--dim); font-size:12px; }
+    h2 { font-size:11px; letter-spacing:1px; color:var(--dim); font-weight:600; text-transform:uppercase; margin:24px 0 10px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
+    .card { background:var(--surface2); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .card .media { aspect-ratio:1; background:var(--bg); display:flex; align-items:center; justify-content:center; }
+    .card .media img, .card .media video { width:100%; height:100%; object-fit:contain; }
+    .card .body { padding:10px 12px; }
+    .card .p { font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+    .card .s { font-size:11px; font-family:"Cascadia Mono",Consolas,monospace; margin-top:6px; }
+    .s.running { color:var(--cyan); } .s.failed { color:var(--danger); } .s.queued { color:var(--dim); } .s.done { color:var(--gold); }
+    .spinner { width:22px; height:22px; border:2px solid var(--border); border-top-color:var(--cyan); border-radius:50%; animation:spin 0.9s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    /* status view */
+    .scards { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+    .scard { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
     .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; }
-    .ok { background:var(--cyan); } .warn { background:var(--amber); } .down { background:#3a4452; } .bad { background:var(--danger); }
-    .err { color:var(--amber); font-family:"Cascadia Mono",Consolas,monospace; font-size:13px; }
+    .ok{background:var(--cyan)} .warn{background:var(--gold)} .off{background:#3a4452} .bad{background:var(--danger)}
+    .modes{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+    .mode{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--dim);padding:10px 16px;cursor:pointer;min-width:120px;text-align:left}
+    .mode.active{border-left:2px solid var(--cyan);color:var(--text);background:var(--surface)}
+    .mode small{display:block;color:var(--dim);font-size:10px;margin-top:2px}
   </style>
 </head>
 <body>
   <header>
     <span class="brand">D O K I <b>DEX</b></span>
-    <span class="tag">// local studio</span>
+    <nav>
+      <button id="nav-create" class="on" onclick="setView('create')">Create</button>
+      <button id="nav-status" onclick="setView('status')">Status</button>
+    </nav>
+    <span id="gpuPill" class="gpu-pill"></span>
   </header>
   <main>
-    <div id="app"><p class="tag">connecting…</p></div>
+    <section id="view-create">
+      <div id="guard"></div>
+      <textarea id="prompt" placeholder="Describe what to generate…  (Ctrl+Enter to generate)"></textarea>
+      <div class="pills" id="kinds"></div>
+      <div class="mods" id="mods"></div>
+      <div class="row">
+        <button class="primary" id="genBtn" onclick="generate()">Generate</button>
+        <span class="hint" id="genHint"></span>
+      </div>
+      <h2>Results</h2>
+      <div class="grid" id="results"><p class="hint">Nothing generated yet.</p></div>
+    </section>
+    <section id="view-status" style="display:none">
+      <div class="modes" id="modes"></div>
+      <div id="statusBody"></div>
+    </section>
   </main>
   <script>
-    const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
-    const MODES = [
-      ['agent','chat + code'], ['coexist','+ autocomplete'], ['media','image + video']
-    ];
-    async function post(url) { try { await fetch(url, { method:'POST' }); } catch {} setTimeout(refresh, 400); }
-    function svcCard(s) {
-      const cls = !s.installed ? 'down' : (s.running && s.healthy ? 'ok' : (s.running ? 'warn' : 'down'));
-      const state = !s.installed ? 'not installed' : (s.running ? (s.healthy ? 'healthy' : 'starting…') : 'stopped');
-      const meta = [s.port ? ':'+s.port : null, s.vramGb ? s.vramGb+' GB' : null, s.model].filter(Boolean).join(' · ');
-      return `<div class="card"><div class="row"><span class="name"><span class="dot ${cls}"></span>${s.name}</span>
-        <span class="tag">${state}</span></div><div class="meta">${meta || s.desc || ''}</div></div>`;
+    const $ = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
+    const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const KINDS = ['image','video','music','edit','i2v','foley'];
+    const MODS = [['fast','Fast'],['refine','Refine'],['face','Face'],['realism','Realism'],['upscale','Upscale']];
+    const VIDEO = new Set(['video','i2v','foley']);
+    let state = { view:'create', kind:'image', mods:{}, mediaActive:false };
+
+    function setView(v){ state.view=v;
+      document.getElementById('view-create').style.display = v==='create'?'':'none';
+      document.getElementById('view-status').style.display = v==='status'?'':'none';
+      document.getElementById('nav-create').className = v==='create'?'on':'';
+      document.getElementById('nav-status').className = v==='status'?'on':'';
     }
-    function render(doc) {
-      const app = document.getElementById('app');
-      const gpu = doc.gpu || {};
-      const pct = gpu.totalMB ? Math.round(100 * gpu.usedMB / gpu.totalMB) : 0;
-      const active = gpu.activeGroup || 'none';
-      const llm = (doc.services||[]).filter(s => s.group !== 'media');
-      const media = (doc.services||[]).filter(s => s.group === 'media');
-      app.innerHTML = '';
-      app.appendChild($(`<div class="gpu"><div class="head"><span>GPU · ${active.toUpperCase()}</span>
-        <span>${Math.round((gpu.usedMB||0)/1024)} / ${Math.round((gpu.totalMB||0)/1024)} GB · ${gpu.util||0}%</span></div>
-        <div class="bar"><div style="width:${pct}%"></div></div></div>`));
-      const modes = $('<div class="modes"></div>');
-      for (const [m, sub] of MODES) {
-        const b = $(`<button class="mode ${active===m||(m==='agent'&&active==='llm')?'active':''}"><span>${m.toUpperCase()}</span><small>${sub}</small></button>`);
-        b.onclick = () => post('/api/mode/' + m);
-        modes.appendChild(b);
-      }
-      app.appendChild(modes);
-      if (llm.length) { app.appendChild($('<h2>LLM group</h2>')); const g=$('<div class="grid"></div>'); llm.forEach(s=>g.appendChild($(svcCard(s)))); app.appendChild(g); }
-      if (media.length) { app.appendChild($('<h2>Media group</h2>')); const g=$('<div class="grid"></div>'); media.forEach(s=>g.appendChild($(svcCard(s)))); app.appendChild(g); }
+    function renderControls(){
+      const k = document.getElementById('kinds'); k.innerHTML='';
+      KINDS.forEach(kind => { const b=$(`<button class="pill ${state.kind===kind?'on':''}">${kind}</button>`); b.onclick=()=>{state.kind=kind; renderControls();}; k.appendChild(b); });
+      const m = document.getElementById('mods'); m.innerHTML='';
+      MODS.forEach(([id,label]) => { const l=$(`<label><input type="checkbox" ${state.mods[id]?'checked':''}/> ${label}</label>`); l.querySelector('input').onchange=(e)=>state.mods[id]=e.target.checked; m.appendChild(l); });
     }
-    async function refresh() {
+    async function generate(){
+      const prompt = document.getElementById('prompt').value.trim();
+      const hint = document.getElementById('genHint');
+      if(!prompt){ hint.textContent='enter a prompt first'; return; }
+      hint.textContent='submitting…';
+      try {
+        const body = Object.assign({ prompt, kind:state.kind }, state.mods);
+        const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+        if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
+        hint.textContent=''; pollJobs();
+      } catch(e){ hint.textContent='request failed'; }
+    }
+    function mediaEl(j){
+      if(!j.mediaUrl) return '<div class="spinner"></div>';
+      if(j.kind==='music') return `<audio controls src="${j.mediaUrl}" style="width:90%"></audio>`;
+      if(VIDEO.has(j.kind)) return `<video controls src="${j.mediaUrl}"></video>`;
+      return `<img src="${j.mediaUrl}" alt=""/>`;
+    }
+    function jobCard(j){
+      const inner = j.status==='done' ? mediaEl(j)
+        : j.status==='failed' ? '<span style="color:var(--danger);font-size:24px">!</span>'
+        : '<div class="spinner"></div>';
+      const sub = j.status==='failed' ? esc(j.message||'failed') : j.status;
+      return `<div class="card"><div class="media">${inner}</div><div class="body">
+        <div class="p">${esc(j.prompt)}</div><div class="s ${j.status}">${j.kind} · ${esc(sub)}</div></div></div>`;
+    }
+    async function pollJobs(){
+      try {
+        const jobs = await (await fetch('/api/jobs')).json();
+        const g = document.getElementById('results');
+        if(!jobs.length){ g.innerHTML='<p class="hint">Nothing generated yet.</p>'; return; }
+        g.innerHTML=''; jobs.forEach(j => g.appendChild($(jobCard(j))));
+      } catch(e){}
+    }
+    function renderGuard(){
+      const el = document.getElementById('guard');
+      if(state.mediaActive){ el.innerHTML=''; return; }
+      el.innerHTML='';
+      const b = $(`<div class="banner"><span>The GPU isn't in MEDIA mode — generation needs it.</span><button class="ghost">Switch to MEDIA</button></div>`);
+      b.querySelector('button').onclick = async()=>{ await fetch('/api/mode/media',{method:'POST'}); };
+      el.appendChild(b);
+    }
+    function svcCard(s){
+      const cls = !s.installed?'off':(s.running&&s.healthy?'ok':(s.running?'warn':'off'));
+      const st = !s.installed?'not installed':(s.running?(s.healthy?'healthy':'starting…'):'stopped');
+      const meta=[s.port?':'+s.port:null, s.vramGb?s.vramGb+' GB':null, s.model].filter(Boolean).join(' · ');
+      return `<div class="scard"><div class="row" style="justify-content:space-between"><span><span class="dot ${cls}"></span>${esc(s.name)}</span><span class="hint">${st}</span></div><div class="hint" style="margin-top:5px;font-family:monospace">${esc(meta||s.desc||'')}</div></div>`;
+    }
+    async function pollStatus(){
       try {
         const r = await fetch('/api/status');
-        if (r.status === 503) { document.getElementById('app').innerHTML = '<p class="err">DokiDex home not found — is the stack installed?</p>'; return; }
-        render(await r.json());
-      } catch (e) {
-        document.getElementById('app').innerHTML = '<p class="err">web host unreachable</p>';
-      }
+        const pill = document.getElementById('gpuPill');
+        if(r.status===503){ state.mediaActive=false; renderGuard(); pill.textContent=''; document.getElementById('statusBody').innerHTML='<p class="hint">DokiDex home not found.</p>'; return; }
+        const doc = await r.json(); const gpu=doc.gpu||{}; const active=gpu.activeGroup||'none';
+        state.mediaActive = active==='media'; renderGuard();
+        pill.innerHTML = `GPU <b>${active.toUpperCase()}</b> · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
+        // status view
+        const modes=document.getElementById('modes'); modes.innerHTML='';
+        [['agent','chat + code'],['coexist','+ autocomplete'],['media','image + video']].forEach(([m,sub])=>{
+          const on = active===m || (m==='agent'&&active==='llm');
+          const b=$(`<button class="mode ${on?'active':''}"><span>${m.toUpperCase()}</span><small>${sub}</small></button>`);
+          b.onclick=()=>fetch('/api/mode/'+m,{method:'POST'}); modes.appendChild(b);
+        });
+        const body=document.getElementById('statusBody'); body.innerHTML='';
+        const llm=(doc.services||[]).filter(s=>s.group!=='media'), media=(doc.services||[]).filter(s=>s.group==='media');
+        if(llm.length){ body.appendChild($('<h2>LLM group</h2>')); const g=$('<div class="scards"></div>'); llm.forEach(s=>g.appendChild($(svcCard(s)))); body.appendChild(g); }
+        if(media.length){ body.appendChild($('<h2>Media group</h2>')); const g=$('<div class="scards"></div>'); media.forEach(s=>g.appendChild($(svcCard(s)))); body.appendChild(g); }
+      } catch(e){}
     }
-    refresh(); setInterval(refresh, 2000);
+    document.getElementById('prompt').addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); generate(); } });
+    renderControls(); document.getElementById('prompt').focus();
+    pollStatus(); setInterval(pollStatus, 2000);
+    pollJobs(); setInterval(pollJobs, 1500);
   </script>
 </body>
 </html>
