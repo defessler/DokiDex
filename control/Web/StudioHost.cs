@@ -132,8 +132,19 @@ public static class StudioHost
             if (body.InitImage is not null && initPath is null) return Results.BadRequest(new { error = "bad init image" });
             var maskPath = SaveDataUrl(body.MaskImage, "mask");
             if (body.MaskImage is not null && maskPath is null) return Results.BadRequest(new { error = "bad mask image" });
-            var controlPath = SaveDataUrl(body.ControlImage, "control");
-            if (body.ControlImage is not null && controlPath is null) return Results.BadRequest(new { error = "bad control image" });
+            // ControlNet units: decode each unit's data-URL control image to a temp file (the recipe wants paths).
+            List<ControlUnit>? controlUnits = null;
+            if (body.ControlNets is { Count: > 0 })
+            {
+                controlUnits = new();
+                foreach (var u in body.ControlNets)
+                {
+                    if (string.IsNullOrWhiteSpace(u.Model)) continue;
+                    var img = SaveDataUrl(u.Image, "control");
+                    if (u.Image is not null && img is null) return Results.BadRequest(new { error = "bad control image" });
+                    controlUnits.Add(u with { Image = img });
+                }
+            }
             var endPath = SaveDataUrl(body.EndImage, "end");
             if (body.EndImage is not null && endPath is null) return Results.BadRequest(new { error = "bad end image" });
             var req = new GenRequest(body.Prompt.Trim(), kind,
@@ -142,7 +153,7 @@ public static class StudioHost
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
                 Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative,
                 Upscaler: body.Upscaler, Segment: body.Segment,
-                ControlImage: controlPath, ControlModel: body.ControlModel, ControlStrength: body.ControlStrength, ControlPreprocessor: body.ControlPreprocessor,
+                ControlNets: controlUnits,
                 EndImage: endPath, Reference: body.Reference, RefWeight: body.RefWeight,
                 Interpolate: body.Interpolate, InterpolateMult: body.InterpolateMult);
             return Results.Json(jobs.Submit(req).ToDto());

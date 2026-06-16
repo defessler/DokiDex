@@ -122,15 +122,10 @@
       </div>
       <details id="controlbox" style="display:none;margin:4px 0">
         <summary class="hint" style="cursor:pointer">ControlNet (guide structure from an image)</summary>
-        <div class="mods" style="margin-top:6px">
-          <label>Model <select id="cnModel" class="kin" style="width:auto"><option value="">(none)</option></select></label>
-          <label>Type <select id="cnPre" class="kin" style="width:auto"><option value="">auto</option><option>canny</option><option>depth</option><option>openpose</option><option>scribble</option><option>none</option></select></label>
-          <label>Strength <input id="cnStrength" type="range" min="0" max="2" step="0.05" value="1" style="width:90px"></label>
-          <label class="xbtn" style="cursor:pointer">+ control image<input id="cnFile" type="file" accept="image/*" style="display:none"></label>
-          <span id="cnName" class="hint"></span>
-        </div>
-        <div style="margin-top:6px">
-          <div class="hint" style="margin-bottom:4px">…or sketch one (draw a rough structure, then Generate with type=scribble):</div>
+        <div id="cnList" style="margin-top:6px"></div>
+        <button class="xbtn" id="cnAdd" onclick="addCnUnit()">+ stack a ControlNet</button>
+        <div style="margin-top:8px">
+          <div class="hint" style="margin-bottom:4px">…or sketch unit 1's control image (draw a rough structure, set its type=scribble):</div>
           <canvas id="sketch" width="384" height="256" style="border:1px solid var(--border);border-radius:6px;background:#fff;cursor:crosshair;touch-action:none"></canvas>
           <div style="margin-top:4px"><button class="xbtn" onclick="clearSketch()">clear sketch</button></div>
         </div>
@@ -254,11 +249,41 @@
     function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; }
     function updateControlBox(){ document.getElementById('controlbox').style.display = (state.kind==='image'||state.kind==='edit') ? '' : 'none'; }
     function updateRefLabel(){ document.getElementById('refLabel').style.display = (state.initImage && (state.kind==='image'||state.kind==='edit')) ? '' : 'none'; }
-    let _cnImage=null, _cnLoaded=false;
+    // ControlNet stacking: 1-3 units, each {model, pre, strength, image}. unit 0's image is also fed by the sketch.
+    let _cnModels=[], _cnLoaded=false;
+    let cnUnits=[{model:'',pre:'',strength:1,image:null}];
     async function loadControlNets(){
       if(_cnLoaded) return; _cnLoaded=true;
-      try{ const cns = await (await fetch('/api/controlnet-models')).json(); const sel=document.getElementById('cnModel'); cns.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); }); }catch{}
+      try{ _cnModels = await (await fetch('/api/controlnet-models')).json(); }catch{ _cnModels=[]; }
+      renderCnUnits();
     }
+    function renderCnUnits(){
+      const wrap=document.getElementById('cnList'); if(!wrap) return; wrap.innerHTML='';
+      cnUnits.forEach((u,i)=>{
+        const row=$(`<div class="mods" style="align-items:center"></div>`);
+        const ml=document.createElement('label'); ml.textContent=`#${i+1} `;
+        const ms=document.createElement('select'); ms.className='kin'; ms.style.width='auto';
+        const none=document.createElement('option'); none.value=''; none.textContent='(none)'; ms.appendChild(none);
+        _cnModels.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;if(n===u.model)o.selected=true;ms.appendChild(o);});
+        ms.onchange=e=>u.model=e.target.value; ml.appendChild(ms); row.appendChild(ml);
+        const pl=document.createElement('label'); pl.textContent='type ';
+        const ps=document.createElement('select'); ps.className='kin'; ps.style.width='auto';
+        ['','canny','depth','openpose','scribble','none'].forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t||'auto';if(t===u.pre)o.selected=true;ps.appendChild(o);});
+        ps.onchange=e=>u.pre=e.target.value; pl.appendChild(ps); row.appendChild(pl);
+        const sl=document.createElement('label'); sl.textContent='str ';
+        const si=document.createElement('input'); si.type='range'; si.min='0'; si.max='2'; si.step='0.05'; si.value=u.strength; si.style.width='80px';
+        si.oninput=e=>u.strength=+e.target.value; sl.appendChild(si); row.appendChild(sl);
+        const il=document.createElement('label'); il.className='xbtn'; il.style.cursor='pointer'; il.textContent=u.image?'image ✓':'+ image';
+        const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.style.display='none';
+        inp.onchange=e=>{const f=e.target.files[0]; if(!f){u.image=null;il.textContent='+ image';return;} const rd=new FileReader(); rd.onload=()=>{u.image=rd.result;il.textContent='image ✓';}; rd.readAsDataURL(f);};
+        il.appendChild(inp); row.appendChild(il);
+        if(cnUnits.length>1){ const del=$(`<button class="xbtn">✕</button>`); del.onclick=()=>{cnUnits.splice(i,1);renderCnUnits();}; row.appendChild(del); }
+        wrap.appendChild(row);
+      });
+      document.getElementById('cnAdd').style.display = cnUnits.length<3 ? '' : 'none';
+    }
+    function addCnUnit(){ if(cnUnits.length<3){ cnUnits.push({model:'',pre:'',strength:1,image:null}); renderCnUnits(); } }
+    function collectControlNets(){ return cnUnits.filter(u=>u.model).map(u=>({model:u.model,image:u.image||null,strength:u.strength,preprocessor:u.pre||null})); }
     let _styleSel=new Set();
     async function loadStyleChips(){
       try{
@@ -333,8 +358,7 @@
           const bp = parseInt(document.getElementById('bpm').value); if (bp>0) body.bpm = bp;
         }
         if ((state.kind==='image'||state.kind==='edit')) {
-          const cm=document.getElementById('cnModel').value;
-          if(cm){ body.controlModel=cm; body.controlStrength=+document.getElementById('cnStrength').value; const pp=document.getElementById('cnPre').value; if(pp) body.controlPreprocessor=pp; if(_cnImage) body.controlImage=_cnImage; }
+          const cns=collectControlNets(); if(cns.length) body.controlNets=cns;
         }
         if (state.kind==='video' || state.kind==='i2v') {
           const cam={ preset:document.getElementById('camPreset').value, pan:+document.getElementById('camPan').value, tilt:+document.getElementById('camTilt').value, zoom:+document.getElementById('camZoom').value, roll:+document.getElementById('camRoll').value };
@@ -637,12 +661,7 @@
       const rd = new FileReader(); rd.onload = () => { state.initImage = rd.result; nm.textContent = f.name + '  ✕'; updateMaskBox(); updateRefLabel(); }; rd.readAsDataURL(f);
     });
     document.getElementById('initname').addEventListener('click', () => { state.initImage=null; document.getElementById('initfile').value=''; document.getElementById('initname').textContent=''; updateMaskBox(); updateRefLabel(); });
-    document.getElementById('cnFile').addEventListener('change', e => {
-      const f=e.target.files[0]; const nm=document.getElementById('cnName');
-      if(!f){ _cnImage=null; nm.textContent=''; return; }
-      const rd=new FileReader(); rd.onload=()=>{ _cnImage=rd.result; nm.textContent=f.name; }; rd.readAsDataURL(f);
-    });
-    // sketch-to-image: draw a rough structure -> becomes the ControlNet control image (use type=scribble)
+    // sketch-to-image: draw a rough structure -> becomes ControlNet unit 1's control image (use type=scribble)
     let _sketchDrawn=false;
     function clearSketch(){ const cv=document.getElementById('sketch'); const x=cv.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,cv.width,cv.height); _sketchDrawn=false; }
     (function(){
@@ -652,7 +671,7 @@
       let lx=0,ly=0;
       cv.addEventListener('pointerdown',e=>{drawing=true;[lx,ly]=at(e);line(lx,ly,lx,ly);});
       cv.addEventListener('pointermove',e=>{if(!drawing)return;const[nx,ny]=at(e);line(lx,ly,nx,ny);lx=nx;ly=ny;});
-      window.addEventListener('pointerup',()=>{ if(drawing){ drawing=false; _cnImage=cv.toDataURL('image/png'); document.getElementById('cnName').textContent='(sketch)'; } });
+      window.addEventListener('pointerup',()=>{ if(drawing){ drawing=false; if(cnUnits[0]){ cnUnits[0].image=cv.toDataURL('image/png'); renderCnUnits(); } } });
     })();
     let _endImage=null;
     document.getElementById('endFile').addEventListener('change', e => {

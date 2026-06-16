@@ -83,16 +83,26 @@ public class GenCliTests
     }
 
     [Fact]
-    public void ControlNet_is_emitted_only_with_a_model_on_image_edit()
+    public void ControlNet_units_serialize_to_one_json_arg_on_image_edit()
     {
-        var a = GenCli.BuildArgs(new GenRequest("x", "image", ControlModel: "canny.safetensors", ControlStrength: 0.8, ControlImage: "c.png", ControlPreprocessor: "canny", OutPath: "o"));
-        var mi = a.IndexOf("-ControlModel"); Assert.True(mi >= 0); Assert.Equal("canny.safetensors", a[mi + 1]);
-        Assert.Contains("-ControlStrength", a);
-        var ii = a.IndexOf("-ControlImage"); Assert.True(ii >= 0); Assert.Equal("c.png", a[ii + 1]);
-        Assert.Contains("-ControlPreprocessor", a);
-        // no model -> nothing; wrong kind -> nothing
-        Assert.DoesNotContain("-ControlModel", GenCli.BuildArgs(new GenRequest("x", "image", ControlImage: "c.png", OutPath: "o")));
-        Assert.DoesNotContain("-ControlModel", GenCli.BuildArgs(new GenRequest("x", "video", ControlModel: "canny.safetensors", OutPath: "o")));
+        var a = GenCli.BuildArgs(new GenRequest("x", "image",
+            ControlNets: new[] { new ControlUnit("canny.safetensors", "c.png", 0.8, "canny") }, OutPath: "o"));
+        var i = a.IndexOf("-ControlNets"); Assert.True(i >= 0);
+        var json = a[i + 1];
+        Assert.Contains("canny.safetensors", json); Assert.Contains("c.png", json); Assert.Contains("canny", json);
+        // a unit with no model is dropped -> no arg; wrong kind -> no arg
+        Assert.DoesNotContain("-ControlNets", GenCli.BuildArgs(new GenRequest("x", "image", ControlNets: new[] { new ControlUnit(null, "c.png") }, OutPath: "o")));
+        Assert.DoesNotContain("-ControlNets", GenCli.BuildArgs(new GenRequest("x", "video", ControlNets: new[] { new ControlUnit("canny.safetensors") }, OutPath: "o")));
+    }
+
+    [Fact]
+    public void ControlNet_stacks_up_to_three_units()
+    {
+        var four = new[] { new ControlUnit("a"), new ControlUnit("b"), new ControlUnit("c"), new ControlUnit("d") };
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", ControlNets: four, OutPath: "o"));
+        var json = a[a.IndexOf("-ControlNets") + 1];
+        Assert.Contains("\"a\"", json); Assert.Contains("\"c\"", json);
+        Assert.DoesNotContain("\"d\"", json);   // capped at 3
     }
 
     [Fact]

@@ -114,14 +114,14 @@ Assert (-not $body.ContainsKey('initimage'))                       "body has no 
 $bodyI = Build-GenBody -Recipe (Get-GenRecipe -Kind edit) -PromptFields (Get-GenPromptFields -Kind edit -Idea 'y') -SessionId 's' -InitImageB64 'BASE64DATA'
 Assert ($bodyI.initimage -eq 'BASE64DATA' -and $bodyI.initimagecreativity -eq 0) "init image -> initimage + creativity 0"
 
-# --- ControlNet body params (SwarmUI-source-confirmed keys via CleanTypeName): model activates it ---
-$bCN = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -ControlModel 'control_v11p_canny.safetensors' -ControlStrength 0.8 -ControlImageB64 'CTRLB64' -ControlPreprocessor 'canny'
-Assert ($bCN.controlnetmodel -eq 'control_v11p_canny.safetensors')   "ControlNet -> controlnetmodel set (activates)"
-Assert ($bCN.controlnetstrength -eq 0.8)                             "ControlNet -> controlnetstrength"
-Assert ($bCN.controlnetimageinput -eq 'CTRLB64')                     "ControlNet -> controlnetimageinput (the control image)"
-Assert ($bCN.controlnetpreprocessor -eq 'canny')                     "ControlNet -> controlnetpreprocessor"
+# --- ControlNet stacking (SwarmUI-source-confirmed keys via CleanTypeName): units -> controlnet/two/three ---
+$cnJson = '[{"Model":"canny.safetensors","Image":"CTRLB64","Strength":0.8,"Preprocessor":"canny"},{"Model":"depth.safetensors","Image":"D2","Strength":0.5,"Preprocessor":"depth"}]'
+$bCN = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -ControlNets $cnJson
+Assert ($bCN.controlnetmodel -eq 'canny.safetensors' -and $bCN.controlnetstrength -eq 0.8) "ControlNet unit 1 -> controlnetmodel + strength"
+Assert ($bCN.controlnetimageinput -eq 'CTRLB64' -and $bCN.controlnetpreprocessor -eq 'canny') "ControlNet unit 1 -> imageinput + preprocessor"
+Assert ($bCN.controlnettwomodel -eq 'depth.safetensors' -and $bCN.controlnettwopreprocessor -eq 'depth') "ControlNet unit 2 -> controlnettwo* (stacking)"
 $bNoCN = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
-Assert (-not $bNoCN.ContainsKey('controlnetmodel'))                  "no ControlNet model -> no controlnet* params (opt-in)"
+Assert (-not $bNoCN.ContainsKey('controlnetmodel'))                  "no ControlNets -> no controlnet* params (opt-in)"
 
 # --- FLF2V end keyframe: "Video End Image" -> videoendimage (SwarmUI source-confirmed key) ---
 $bEnd = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's' -EndImageB64 'ENDB64'

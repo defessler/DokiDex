@@ -1,4 +1,11 @@
+using System.Collections.Generic;
+using System.Linq;
+
 namespace DokiDex.Control.Services;
+
+// One ControlNet unit: a structure model + control image (path/data) + strength + preprocessor. Up to 3
+// stack (SwarmUI ControlNet / Two / Three); each is independent so no parallel-array alignment.
+public sealed record ControlUnit(string? Model, string? Image = null, double Strength = 1, string? Preprocessor = null);
 
 // A text->media request for `doki gen`, and the pure translation of it into doki.ps1's argv.
 //
@@ -28,10 +35,7 @@ public sealed record GenRequest(
     string? Negative = null,  // user negative prompt: appended to (image) or set as the recipe negativeprompt
     string? Upscaler = null,  // upscale engine (balanced/photo/anime) or a raw model file; needs -Upscale/-Refine
     string? Segment = null,   // promptable region refine: "hair,hands:0.6" -> <segment:..> tags; image-family
-    string? ControlImage = null,       // ControlNet control image (structure source); image/edit only
-    string? ControlModel = null,       // ControlNet model name (activates ControlNet); from /api/controlnet-models
-    double ControlStrength = 1,        // ControlNet strength (0..2)
-    string? ControlPreprocessor = null,// ControlNet preprocessor (canny/depth/openpose/…)
+    System.Collections.Generic.IReadOnlyList<ControlUnit>? ControlNets = null,  // 1-3 stacked ControlNet units; image/edit only
     string? EndImage = null,           // FLF2V end keyframe (video/i2v); needs an end-frame-capable model
     bool Reference = false,            // use the init image as an IP-Adapter style/subject reference (image/edit)
     double RefWeight = 0.6,            // IP-Adapter reference weight
@@ -95,13 +99,12 @@ public static class GenCli
         if (!string.IsNullOrWhiteSpace(r.Lora)) { a.Add("-Lora"); a.Add(r.Lora!); }
         if (!string.IsNullOrWhiteSpace(r.Negative)) { a.Add("-Negative"); a.Add(r.Negative!); }
         if (!string.IsNullOrWhiteSpace(r.Segment)) { a.Add("-Segment"); a.Add(r.Segment!); }
-        // ControlNet: a model activates it; image/preprocessor only matter then, gated to image/edit.
-        if (!string.IsNullOrWhiteSpace(r.ControlModel) && GenRequest.UpscaleApplies(r.Kind))
+        // ControlNet stacking (up to 3): a unit with a model activates it. Serialized as one -ControlNets JSON
+        // arg (image = path); image/edit only. doki-gen maps unit 0/1/2 -> controlnet / controlnettwo / controlnetthree.
+        if (r.ControlNets is { Count: > 0 } && GenRequest.UpscaleApplies(r.Kind))
         {
-            a.Add("-ControlModel"); a.Add(r.ControlModel!);
-            a.Add("-ControlStrength"); a.Add(r.ControlStrength.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            if (!string.IsNullOrWhiteSpace(r.ControlImage)) { a.Add("-ControlImage"); a.Add(r.ControlImage!); }
-            if (!string.IsNullOrWhiteSpace(r.ControlPreprocessor)) { a.Add("-ControlPreprocessor"); a.Add(r.ControlPreprocessor!); }
+            var units = r.ControlNets.Where(u => !string.IsNullOrWhiteSpace(u.Model)).Take(3).ToList();
+            if (units.Count > 0) { a.Add("-ControlNets"); a.Add(System.Text.Json.JsonSerializer.Serialize(units)); }
         }
         if (!string.IsNullOrWhiteSpace(r.EndImage) && r.Kind is "video" or "i2v") { a.Add("-EndImage"); a.Add(r.EndImage!); }
         // IP-Adapter image reference: only with an init image on image/edit (the init image is the reference)
