@@ -49,7 +49,7 @@ its own ComfyUI + Python backend. Served on `:7801`, installed under repo `media
 
 > **As-built note:** the lists below were the design intent; the shipped installer's actual
 > model set is **Z-Image Turbo + Wan 2.1 1.3B** (lean) with Z-Image Base / Chroma / Wan 2.2 /
-> LTXV-2b / Qwen-Image-Edit / ACE-Step added by `-Models full`. See `docs/media-recipes.md`.
+> LTXV-2b / Qwen-Image-Edit / ACE-Step added by `-Models full`. See `docs/wiki/11-media-recipes.md`.
 
 **Image models** (open-weight, unfiltered):
 - **Z-Image Turbo** (FP8) — the lean default: fast, fits with headroom
@@ -80,7 +80,7 @@ model bundles):
 5. Verify LLM assets present (llama.cpp/llama-swap binaries, GGUFs) — guided fetch if missing.
 6. Smoke checks (`test-toolcall.ps1`, media `/` probe).
 
-**Reproducibility:** components are pinned by the installer; the as-built model set is documented in `docs/media-recipes.md` and the README Status section.
+**Reproducibility:** components are pinned by the installer; the as-built model set is documented in `docs/wiki/11-media-recipes.md` and the README Status section.
 
 ## Out of scope (now)
 

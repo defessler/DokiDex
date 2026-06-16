@@ -248,7 +248,7 @@ if (-not (Test-Path (Join-Path $swModels "upscale_models\4x-UltraSharp.pth"))) {
 
 # 6f. Fast video — LTXV-2b-0.9.8-distilled (SwarmUI-native, near-real-time, long clips).
 #     Live-verified capability; this smoke runs a fast 49-frame 768x512 clip (T5 auto-downloads first run).
-#     The documented recipe is 97 frames 768x512 — see docs/media-recipes.md / docs/FEATURES.md.
+#     The documented recipe is 97 frames 768x512 — see docs/wiki/11-media-recipes.md / docs/wiki/9-features.md.
 Write-Host "[verify] fast video (LTXV) ..."
 if (-not (Test-Path (Join-Path $swModels "diffusion_models\ltxv-2b-0.9.8-distilled.safetensors"))) {
     $results["fast video (LTXV)"] = "SKIP  (not installed; -Models full)"

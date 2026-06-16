@@ -45,6 +45,17 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public void SwitchMode_is_disabled_for_the_already_active_mode()
+    {
+        var vm = Make();
+        vm.Apply(Doc(new[] { Svc("media", "media", true) }, activeGroup: "media"));
+        Assert.Equal("media", vm.ActiveMode);
+        Assert.False(vm.SwitchModeCommand.CanExecute("media"));   // already in MEDIA -> its button disables
+        Assert.True(vm.SwitchModeCommand.CanExecute("agent"));    // a different mode stays clickable
+        Assert.True(vm.SwitchModeCommand.CanExecute("coexist"));
+    }
+
+    [Fact]
     public void BuildExplain_reports_free_headroom_when_it_fits()
     {
         var vm = Make();

@@ -1,6 +1,6 @@
 # DokiDex — Feature Index
 
-**DokiDex is a fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows 11 **native** (no Docker, no WSL). It does agentic coding, chat, autocomplete, web search, persistent agent memory, speech in/out, and image/video/music/audio generation + editing — **all uncensored, with nothing leaving the box at runtime** (the only network egress is keyless web search). One PowerShell script (`doki.ps1`) runs the whole thing like docker-compose, without Docker. This is the scannable feature index; for the full architecture see [`how-it-works.md`](how-it-works.md), and for exact API calls see [`media-recipes.md`](media-recipes.md).
+**DokiDex is a fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows 11 **native** (no Docker, no WSL). It does agentic coding, chat, autocomplete, web search, persistent agent memory, speech in/out, and image/video/music/audio generation + editing — **all uncensored, with nothing leaving the box at runtime** (the only network egress is keyless web search). One PowerShell script (`doki.ps1`) runs the whole thing like docker-compose, without Docker. This is the scannable feature index; for the full architecture see [`how-it-works.md`](10-how-it-works.md), and for exact API calls see [`media-recipes.md`](11-media-recipes.md).
 
 > **The one rule that shapes everything:** 32 GB of VRAM can't hold the coding brain *and* the image/video models at once, so services split into two mutually-exclusive **GPU groups** — `llm` and `media` — and `doki` switches between them. The `llm` group has small always-on riders (TTS ~4 GB, STT on CPU) that fit alongside the coder. This single constraint is enforced on every start and is why most of the control plane exists.
 
@@ -266,4 +266,4 @@ Idempotent, 100% headless bootstrap. Core install is flagless; everything else i
 
 ## See also
 
-Full architecture → [`how-it-works.md`](how-it-works.md) · exact API call for every capability → [`media-recipes.md`](media-recipes.md) · every design call + eval gate → [`decisions.md`](decisions.md).
+Full architecture → [`how-it-works.md`](10-how-it-works.md) · exact API call for every capability → [`media-recipes.md`](11-media-recipes.md) · every design call + eval gate → [`decisions.md`](../decisions.md).
