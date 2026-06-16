@@ -92,9 +92,14 @@ public partial class App : Application
             catch { /* any updater failure must not block boot */ }
         }
 
-        // The app is independent of any cloned repo: if no DokiDex home resolves (no saved InstallRoot AND
-        // not launched from inside a repo), ask the user to locate/adopt one before booting. Cancel = exit.
-        if (!Services.RepoPaths.HasValidRoot && !Services.InstallLocator.PromptAndAdopt()) { Shutdown(); return; }
+        // The app is independent of any cloned repo: if no DokiDex home resolves (no saved InstallRoot AND not
+        // launched from inside a repo), open the Setup Wizard (fresh install OR adopt an existing folder) before
+        // booting. It persists InstallRoot + refreshes RepoPaths on success; cancel = exit.
+        if (!Services.RepoPaths.HasValidRoot)
+        {
+            var installer = new Views.InstallerWindow();
+            if (installer.ShowDialog() != true) { Shutdown(); return; }
+        }
 
         new BootWindow().Show();
     }

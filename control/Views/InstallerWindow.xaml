@@ -1,0 +1,115 @@
+<Window x:Class="DokiDex.Control.Views.InstallerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DokiDex — Setup" Width="720" Height="800"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize"
+        Background="{StaticResource BgBrush}">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <!-- header -->
+    <StackPanel Grid.Row="0" Margin="28,24,28,6">
+      <TextBlock Text="DokiDex" Style="{StaticResource H1}" Foreground="{StaticResource ReactorGoldBrush}"/>
+      <TextBlock Text="install + manage the fully-local AI stack" Style="{StaticResource Mono}"
+                 Foreground="{StaticResource DimBrush}" FontSize="12" Margin="0,2,0,0"/>
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="28,8,28,8">
+      <StackPanel>
+        <!-- ===== config (idle) ===== -->
+        <StackPanel Visibility="{Binding Idle, Converter={StaticResource BoolVis}}">
+          <TextBlock Text="MODE" Style="{StaticResource SectionHeader}"/>
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,16">
+            <RadioButton Content="Fresh install" GroupName="m" Foreground="{StaticResource TextBrush}" Margin="0,0,20,0"
+                         IsChecked="{Binding IsFresh, Mode=OneWay}" Command="{Binding ChooseFreshCommand}"/>
+            <RadioButton Content="Use an existing DokiDex folder" GroupName="m" Foreground="{StaticResource TextBrush}"
+                         IsChecked="{Binding IsAdopt, Mode=OneWay}" Command="{Binding ChooseAdoptCommand}"/>
+          </StackPanel>
+
+          <TextBlock Text="LOCATION" Style="{StaticResource SectionHeader}"/>
+          <DockPanel Margin="0,6,0,4">
+            <Button DockPanel.Dock="Right" Content="Choose…" Style="{StaticResource IconBtn}" Margin="8,0,0,0" Command="{Binding PickFolderCommand}"/>
+            <TextBox Text="{Binding Home, UpdateSourceTrigger=PropertyChanged}" Foreground="{StaticResource TextBrush}"
+                     Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource BorderBrush2}"
+                     BorderThickness="1" Padding="9,7" VerticalContentAlignment="Center"/>
+          </DockPanel>
+          <TextBlock Text="{Binding EstimateText}" Style="{StaticResource Mono}" Foreground="{StaticResource DimBrush}"
+                     FontSize="11" Margin="0,0,0,16"/>
+
+          <!-- components (fresh only) -->
+          <StackPanel Visibility="{Binding IsFresh, Converter={StaticResource BoolVis}}">
+            <TextBlock Text="COMPONENTS" Style="{StaticResource SectionHeader}"/>
+            <StackPanel Margin="0,6,0,16">
+              <CheckBox Content="Coder LLM models (~80 GB) — chat + code" Foreground="{StaticResource TextBrush}" IsChecked="{Binding CoderModels}" Margin="0,3"/>
+              <CheckBox Content="Media — image / video / audio (SwarmUI)" Foreground="{StaticResource TextBrush}" IsChecked="{Binding Media}" Margin="0,3"/>
+              <CheckBox Content="Full media quality kit (~100 GB; else a lean set)" Foreground="{StaticResource TextBrush}" IsChecked="{Binding ModelsFull}" IsEnabled="{Binding Media}" Margin="22,3,0,3"/>
+              <CheckBox Content="Speech — TTS (voice out)" Foreground="{StaticResource TextBrush}" IsChecked="{Binding Tts}" Margin="0,3"/>
+              <CheckBox Content="Speech — STT (voice in)" Foreground="{StaticResource TextBrush}" IsChecked="{Binding Stt}" Margin="0,3"/>
+            </StackPanel>
+          </StackPanel>
+
+          <DockPanel Margin="0,0,0,4">
+            <TextBlock Text="PREREQUISITES" Style="{StaticResource SectionHeader}" DockPanel.Dock="Left"/>
+            <Button Content="↻ re-check" Style="{StaticResource IconBtn}" HorizontalAlignment="Right" Command="{Binding RecheckPrereqsCommand}"/>
+          </DockPanel>
+          <ItemsControl ItemsSource="{Binding PrereqRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Background="{StaticResource Surface2Brush}" CornerRadius="6" Padding="10,7" Margin="0,3">
+                  <DockPanel>
+                    <Grid DockPanel.Dock="Left" Width="22" VerticalAlignment="Center">
+                      <TextBlock Text="✓" FontSize="13" Foreground="{StaticResource TealBrush}" Visibility="{Binding Present, Converter={StaticResource BoolVis}}"/>
+                      <TextBlock Text="●" FontSize="11" Foreground="{StaticResource AmberBrush}" Visibility="{Binding Present, Converter={StaticResource InvBoolVis}}"/>
+                    </Grid>
+                    <Button DockPanel.Dock="Right" Content="{Binding ActionLabel}" Style="{StaticResource IconBtn}" VerticalAlignment="Center"
+                            Visibility="{Binding Actionable, Converter={StaticResource BoolVis}}"
+                            Command="{Binding DataContext.InstallPrereqCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"/>
+                    <StackPanel>
+                      <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontSize="12.5"/>
+                      <TextBlock Text="{Binding Note}" Foreground="{StaticResource DimBrush}" Style="{StaticResource Mono}" FontSize="10.5"/>
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <!-- ===== progress (install running / done) ===== -->
+        <StackPanel Visibility="{Binding ShowProgress, Converter={StaticResource BoolVis}}">
+          <TextBlock Text="INSTALL LOG" Style="{StaticResource SectionHeader}"/>
+          <ProgressBar IsIndeterminate="True" Height="3" Margin="0,8" Background="Transparent" Foreground="{StaticResource TealBrush}"
+                       BorderThickness="0" Visibility="{Binding Installing, Converter={StaticResource BoolVis}}"/>
+          <TextBox x:Name="LogBox" Text="{Binding Log, Mode=OneWay}" IsReadOnly="True" Height="430"
+                   Background="#0A0E14" Foreground="{StaticResource DimBrush}" FontFamily="Consolas" FontSize="11"
+                   BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1"
+                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- footer -->
+    <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0" Padding="28,12">
+      <DockPanel>
+        <TextBlock Text="{Binding StatusLine}" Foreground="{StaticResource AmberBrush}" Style="{StaticResource Mono}"
+                   FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
+          <StackPanel Orientation="Horizontal" Visibility="{Binding Idle, Converter={StaticResource BoolVis}}">
+            <Button Content="Cancel" Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding CancelCommand}"/>
+            <Button Content="Use this folder" Style="{StaticResource BtnPrimary}" Command="{Binding AdoptCommand}"
+                    Visibility="{Binding IsAdopt, Converter={StaticResource BoolVis}}"/>
+            <Button Content="Install" Style="{StaticResource BtnPrimary}" Command="{Binding InstallCommand}"
+                    Visibility="{Binding IsFresh, Converter={StaticResource BoolVis}}"/>
+          </StackPanel>
+          <Button Content="🚀 Launch DokiDex" Style="{StaticResource BtnPrimary}" Command="{Binding LaunchCommand}"
+                  Visibility="{Binding Done, Converter={StaticResource BoolVis}}"/>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+  </Grid>
+</Window>
