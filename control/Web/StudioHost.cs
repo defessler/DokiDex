@@ -175,6 +175,11 @@ public static class StudioHost
                 ? Results.Json(new { shots = r.Shots })
                 : Results.Json(new { error = r.Message, shots = r.Shots }, statusCode: 503);
         });
+
+        // ---- multi-character composer (base scene + isolated per-character regions -> one raw SwarmUI prompt) ----
+        // Pure compile (no GPU); the SPA generates the result via /api/generate with raw=true so the <object:..>
+        // regional tags reach SwarmUI unrewritten.
+        api.MapPost("/compose/multichar", (MultiCharSpec body) => Results.Json(new { prompt = MultiCharacter.Compile(body) }));
     }
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no

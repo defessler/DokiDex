@@ -66,6 +66,7 @@
     <nav>
       <button id="nav-create" class="on" onclick="setView('create')">Create</button>
       <button id="nav-director" onclick="setView('director')">Director</button>
+      <button id="nav-cast" onclick="setView('cast')">Cast</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
@@ -116,6 +117,22 @@
       </div>
       <div class="grid" id="shots"></div>
     </section>
+    <section id="view-cast" style="display:none">
+      <h2>Cast — multi-character composer</h2>
+      <p class="hint">Base scene holds the count tags + style. Each character gets an isolated prompt + a coarse position, compiled to SwarmUI regions to stop attribute bleed.</p>
+      <textarea id="castBase" placeholder="2girls, a sunny park, anime style"></textarea>
+      <div id="castRows" style="margin:10px 0"></div>
+      <div class="mods">
+        <button class="ghost" onclick="addCastChar()">+ character</button>
+        <input id="castRel" class="kin" style="width:280px" placeholder="relationship (optional): A hugs B">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" onclick="composeCast()">Compose &amp; preview</button>
+        <button class="ghost" id="castGenBtn" onclick="genCast()" style="display:none">Generate</button>
+        <span class="hint" id="castHint"></span>
+      </div>
+      <textarea id="castOut" readonly placeholder="compiled prompt appears here" style="margin-top:10px;display:none;font-family:monospace;font-size:12px"></textarea>
+    </section>
     <section id="view-status" style="display:none">
       <div class="modes" id="modes"></div>
       <div id="statusBody"></div>
@@ -137,7 +154,7 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','director','status','library','models']) {
+      for (const x of ['create','director','cast','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
@@ -323,6 +340,42 @@
       for(const p of prompts){ try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,kind:'image'})}); }catch{} }
       setView('create'); pollJobs();
     }
+    // ---- cast (multi-character composer) ----
+    const CAST_POS = [['top-left',0],['top',2],['top-right',4],['left',10],['center',12],['right',14],['bottom-left',20],['bottom',22],['bottom-right',24]];
+    let castChars = [{prompt:'',cell:10},{prompt:'',cell:14}];
+    function renderCast(){
+      const wrap=document.getElementById('castRows'); if(!wrap) return; wrap.innerHTML='';
+      castChars.forEach((c,i)=>{
+        const row=$(`<div class="row" style="margin:6px 0"></div>`);
+        const inp=document.createElement('input'); inp.className='kin'; inp.style.flex='1'; inp.placeholder=`character ${i+1} (e.g. red dress, long hair)`; inp.value=c.prompt;
+        inp.oninput=e=>castChars[i].prompt=e.target.value;
+        const sel=document.createElement('select'); sel.className='kin'; sel.style.width='auto';
+        CAST_POS.forEach(([name,cell])=>{ const o=document.createElement('option'); o.value=cell; o.textContent=name; if(cell===c.cell)o.selected=true; sel.appendChild(o); });
+        sel.onchange=e=>castChars[i].cell=parseInt(e.target.value);
+        const del=$(`<button class="xbtn">✕</button>`); del.onclick=()=>{ castChars.splice(i,1); renderCast(); };
+        row.appendChild(inp); row.appendChild(sel); row.appendChild(del); wrap.appendChild(row);
+      });
+    }
+    function addCastChar(){ if(castChars.length>=6){ document.getElementById('castHint').textContent='max 6 characters'; return; } castChars.push({prompt:'',cell:12}); renderCast(); }
+    function castSpec(){ return { base:document.getElementById('castBase').value, characters:castChars.filter(c=>c.prompt.trim()).map(c=>({prompt:c.prompt,cell:c.cell})), relationship:document.getElementById('castRel').value }; }
+    async function composeCast(){
+      const hint=document.getElementById('castHint'), out=document.getElementById('castOut');
+      try{
+        const r=await fetch('/api/compose/multichar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(castSpec())});
+        const j=await r.json();
+        out.value=j.prompt||''; out.style.display=j.prompt?'':'none';
+        document.getElementById('castGenBtn').style.display=j.prompt?'':'none';
+        hint.textContent=j.prompt?'compiled — review, then Generate':'add a character first';
+      }catch(e){ hint.textContent='compose failed'; }
+    }
+    async function genCast(){
+      const out=document.getElementById('castOut');
+      if(!out.value.trim()) await composeCast();
+      const prompt=out.value.trim(); if(!prompt) return;
+      if(!await ensureMedia()) return;
+      try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,kind:'image',raw:true})}); }catch{}
+      setView('create'); pollJobs();
+    }
     function renderGuard(){
       const el = document.getElementById('guard');
       if(state.mediaActive){ el.innerHTML=''; return; }
@@ -373,7 +426,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>
