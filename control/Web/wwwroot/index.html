@@ -125,6 +125,11 @@
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
         <span class="hint" id="genHint"></span>
       </div>
+      <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Batch (CSV) — one generation per row</summary>
+        <p class="hint" style="margin:6px 0">Header row + one gen per row. Columns: <code>prompt</code> (required), kind, seed, count, aspect, lora, strength, fast, refine, face, realism, upscale, raw.</p>
+        <textarea id="csvText" placeholder="prompt,kind,seed&#10;a fox in the rain,image,7&#10;a neon city skyline,image,8" style="min-height:80px;font-family:monospace;font-size:12px"></textarea>
+        <div class="row" style="margin-top:6px"><button class="ghost" onclick="runBatch()">Queue batch</button><span class="hint" id="csvHint"></span></div>
+      </details>
       <h2>Results</h2>
       <div class="grid" id="results"><p class="hint">Nothing generated yet.</p></div>
     </section>
@@ -278,6 +283,15 @@
         if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
         hint.textContent=''; pollJobs();
       } catch(e){ hint.textContent='request failed'; }
+    }
+    async function runBatch(){
+      const csv=document.getElementById('csvText').value.trim();
+      const hint=document.getElementById('csvHint');
+      if(!csv){ hint.textContent='paste CSV first'; return; }
+      if(!await ensureMedia()) return;
+      hint.textContent='queuing…';
+      try{ const r=await fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv})}); const j=await r.json(); hint.textContent=`queued ${j.submitted} job(s)`; pollJobs(); }
+      catch(e){ hint.textContent='batch failed'; }
     }
     async function rewritePrompt(){
       const p=document.getElementById('prompt').value.trim();

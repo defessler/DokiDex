@@ -192,6 +192,26 @@ public static class StudioHost
             return r.Ok ? Results.Json(new { prompt = r.Prompt }) : Results.Json(new { error = r.Error }, statusCode: 503);
         });
 
+        // ---- CSV batch generation: header row -> per-row GenRequest -> queued jobs (respects the GPU gate) ----
+        api.MapPost("/batch", (BatchRequest body, GenerationJobs jobs) =>
+        {
+            var ids = new List<string>();
+            foreach (var row in Csv.ParseWithHeader(body.Csv))
+            {
+                row.TryGetValue("prompt", out var prompt);
+                if (string.IsNullOrWhiteSpace(prompt)) continue;
+                var kind = (Cell(row, "kind") ?? "image").Trim().ToLowerInvariant();
+                if (Array.IndexOf(GenRequest.Kinds, kind) < 0) kind = "image";
+                var req = new GenRequest(prompt.Trim(), kind,
+                    Fast: BoolCell(row, "fast"), Upscale: BoolCell(row, "upscale"), Refine: BoolCell(row, "refine"),
+                    Face: BoolCell(row, "face"), Realism: BoolCell(row, "realism"), Raw: BoolCell(row, "raw"),
+                    Seed: IntCell(row, "seed", -1), Count: Math.Clamp(IntCell(row, "count", 1), 1, 9),
+                    Strength: DblCell(row, "strength", -1), Aspect: Cell(row, "aspect"), Lora: Cell(row, "lora"));
+                ids.Add(jobs.Submit(req).Id);
+            }
+            return Results.Json(new { submitted = ids.Count, ids });
+        });
+
         // ---- text-to-speech (Chatterbox :8004); voices = file-based registry, output lands in the Library ----
         api.MapGet("/voices", () => Results.Json(Tts.Voices()));
         api.MapPost("/speak", async (SpeakRequest body, CancellationToken ct) =>
@@ -202,6 +222,19 @@ public static class StudioHost
             return Results.Json(new { mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
         });
     }
+
+    // CSV cell helpers for the batch endpoint (tolerant: missing/blank -> the default).
+    private static string? Cell(Dictionary<string, string> row, string key)
+        => row.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
+    private static bool BoolCell(Dictionary<string, string> row, string key)
+    {
+        var v = Cell(row, key)?.Trim().ToLowerInvariant();
+        return v is "1" or "true" or "yes" or "y" or "on";
+    }
+    private static int IntCell(Dictionary<string, string> row, string key, int dflt)
+        => int.TryParse(Cell(row, key), out var n) ? n : dflt;
+    private static double DblCell(Dictionary<string, string> row, string key, double dflt)
+        => double.TryParse(Cell(row, key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : dflt;
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no
     // wwwroot on disk. Loaded once, lazily, from THIS assembly (Control) — the same bytes whether hosted
