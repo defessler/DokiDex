@@ -191,6 +191,16 @@ public static class StudioHost
             var r = await Rewriter.RewriteAsync(body.Prompt ?? "", body.Instruction ?? "", ct);
             return r.Ok ? Results.Json(new { prompt = r.Prompt }) : Results.Json(new { error = r.Error }, statusCode: 503);
         });
+
+        // ---- text-to-speech (Chatterbox :8004); voices = file-based registry, output lands in the Library ----
+        api.MapGet("/voices", () => Results.Json(Tts.Voices()));
+        api.MapPost("/speak", async (SpeakRequest body, CancellationToken ct) =>
+        {
+            var r = await Tts.SpeakAsync(body, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            var name = Path.GetFileName(r.ArtifactPath!);
+            return Results.Json(new { mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
+        });
     }
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no

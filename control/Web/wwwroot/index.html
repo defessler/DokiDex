@@ -67,6 +67,7 @@
       <button id="nav-create" class="on" onclick="setView('create')">Create</button>
       <button id="nav-director" onclick="setView('director')">Director</button>
       <button id="nav-cast" onclick="setView('cast')">Cast</button>
+      <button id="nav-voice" onclick="setView('voice')">Voice</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
@@ -154,6 +155,19 @@
       </div>
       <textarea id="castOut" readonly placeholder="compiled prompt appears here" style="margin-top:10px;display:none;font-family:monospace;font-size:12px"></textarea>
     </section>
+    <section id="view-voice" style="display:none">
+      <h2>Voice — local text-to-speech</h2>
+      <p class="hint">Uncensored local TTS with voice cloning (Chatterbox :8004, agent mode). Output lands in the Library.</p>
+      <textarea id="ttsText" placeholder="Type what should be spoken…"></textarea>
+      <div class="mods">
+        <label>Voice <select id="ttsVoice" class="kin" style="width:auto"><option value="">default</option></select></label>
+        <label>Expressiveness <input id="ttsExag" type="range" min="0" max="1" step="0.05" value="0.5" style="width:90px"></label>
+        <label>Guidance <input id="ttsCfg" type="range" min="0" max="1" step="0.05" value="0.5" style="width:90px"></label>
+        <button class="primary" onclick="speak()">Speak</button>
+        <span class="hint" id="ttsHint"></span>
+      </div>
+      <div id="ttsOut" style="margin-top:10px"></div>
+    </section>
     <section id="view-status" style="display:none">
       <div class="modes" id="modes"></div>
       <div id="statusBody"></div>
@@ -175,12 +189,13 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','director','cast','status','library','models']) {
+      for (const x of ['create','director','cast','voice','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
       if (v==='library') loadLibrary();
       if (v==='models') loadModels();
+      if (v==='voice') loadVoices();
     }
     function renderControls(){
       const k = document.getElementById('kinds'); k.innerHTML='';
@@ -404,6 +419,30 @@
       if(!await ensureMedia()) return;
       for(const p of prompts){ try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,kind:'image'})}); }catch{} }
       setView('create'); pollJobs();
+    }
+    // ---- voice (local TTS) ----
+    let _voicesLoaded=false;
+    async function loadVoices(){
+      if(_voicesLoaded) return; _voicesLoaded=true;
+      try{
+        const vs = await (await fetch('/api/voices')).json();
+        const sel=document.getElementById('ttsVoice');
+        vs.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+      }catch{}
+    }
+    async function speak(){
+      const text=document.getElementById('ttsText').value.trim();
+      const hint=document.getElementById('ttsHint'), out=document.getElementById('ttsOut');
+      if(!text){ hint.textContent='enter some text'; return; }
+      hint.textContent='synthesizing…';
+      const body={ text, voice:document.getElementById('ttsVoice').value, exaggeration:+document.getElementById('ttsExag').value, cfgWeight:+document.getElementById('ttsCfg').value };
+      try{
+        const r=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const j=await r.json();
+        if(!r.ok){ hint.textContent=j.error||('error '+r.status); return; }
+        hint.textContent='done — also saved to Library';
+        out.innerHTML=`<audio controls autoplay src="${j.mediaUrl}" style="width:100%"></audio>`;
+      }catch(e){ hint.textContent='request failed'; }
     }
     // ---- cast (multi-character composer) ----
     const CAST_POS = [['top-left',0],['top',2],['top-right',4],['left',10],['center',12],['right',14],['bottom-left',20],['bottom',22],['bottom-right',24]];
