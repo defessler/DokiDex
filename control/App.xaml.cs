@@ -115,7 +115,16 @@ public partial class App : Application
         }
         catch { }
 
-        new BootWindow().Show();
+        // --studio: launch the web studio (start the DokiDex.Web host + open the browser) instead of the WPF
+        // cockpit. Additive for now (the cockpit stays the default); the web app is the intended primary surface.
+        if (e.Args.Any(a => a.Equals("--studio", StringComparison.OrdinalIgnoreCase)))
+        {
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            var w = new Views.StudioLauncherWindow();
+            Current.MainWindow = w;
+            w.Show();
+        }
+        else new BootWindow().Show();
     }
 
     // value following `name` in argv (so `--render out.png` -> "out.png"), or null.
