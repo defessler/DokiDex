@@ -96,6 +96,15 @@ public class GenCliTests
     }
 
     [Fact]
+    public void End_image_is_emitted_only_for_video_kinds()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "video", EndImage: "e.png", OutPath: "o"));
+        var i = a.IndexOf("-EndImage"); Assert.True(i >= 0); Assert.Equal("e.png", a[i + 1]);
+        Assert.Contains("-EndImage", GenCli.BuildArgs(new GenRequest("x", "i2v", EndImage: "e.png", OutPath: "o")));
+        Assert.DoesNotContain("-EndImage", GenCli.BuildArgs(new GenRequest("x", "image", EndImage: "e.png", OutPath: "o")));   // not a video kind
+    }
+
+    [Fact]
     public void Init_image_is_passed_as_a_separate_value_arg()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "edit", InitImage: @"C:\pics\in.png", OutPath: "o"));

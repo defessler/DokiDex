@@ -123,6 +123,12 @@ Assert ($bCN.controlnetpreprocessor -eq 'canny')                     "ControlNet
 $bNoCN = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
 Assert (-not $bNoCN.ContainsKey('controlnetmodel'))                  "no ControlNet model -> no controlnet* params (opt-in)"
 
+# --- FLF2V end keyframe: "Video End Image" -> videoendimage (SwarmUI source-confirmed key) ---
+$bEnd = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's' -EndImageB64 'ENDB64'
+Assert ($bEnd.videoendimage -eq 'ENDB64')                           "end image -> videoendimage"
+$bNoEnd = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's'
+Assert (-not $bNoEnd.ContainsKey('videoendimage'))                  "no end image -> no videoendimage (opt-in)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"

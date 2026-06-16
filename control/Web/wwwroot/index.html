@@ -113,6 +113,8 @@
         <label>Tilt <input id="camTilt" type="range" min="-10" max="10" value="0" style="width:72px"></label>
         <label>Zoom <input id="camZoom" type="range" min="-10" max="10" value="0" style="width:72px"></label>
         <label>Roll <input id="camRoll" type="range" min="-10" max="10" value="0" style="width:72px"></label>
+        <label class="xbtn" style="cursor:pointer">+ end frame (FLF2V)<input id="endFile" type="file" accept="image/*" style="display:none"></label>
+        <span id="endName" class="hint"></span>
       </div>
       <details id="controlbox" style="display:none;margin:4px 0">
         <summary class="hint" style="cursor:pointer">ControlNet (guide structure from an image)</summary>
@@ -328,6 +330,7 @@
           if (cam.preset || cam.pan || cam.tilt || cam.zoom || cam.roll) {
             try { const cr=await (await fetch('/api/compose/camera',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cam)})).json(); if(cr.phrase) body.prompt = body.prompt + ', ' + cr.phrase; } catch {}
           }
+          if (_endImage) body.endImage = _endImage;
         }
         if (state.initImage) body.initImage = state.initImage;
         if (state.kind==='edit' && state.initImage && _maskDrawn) body.maskImage = document.getElementById('maskcanvas').toDataURL('image/png');
@@ -613,6 +616,12 @@
       const f=e.target.files[0]; const nm=document.getElementById('cnName');
       if(!f){ _cnImage=null; nm.textContent=''; return; }
       const rd=new FileReader(); rd.onload=()=>{ _cnImage=rd.result; nm.textContent=f.name; }; rd.readAsDataURL(f);
+    });
+    let _endImage=null;
+    document.getElementById('endFile').addEventListener('change', e => {
+      const f=e.target.files[0]; const nm=document.getElementById('endName');
+      if(!f){ _endImage=null; nm.textContent=''; return; }
+      const rd=new FileReader(); rd.onload=()=>{ _endImage=rd.result; nm.textContent=f.name; }; rd.readAsDataURL(f);
     });
     (function(){
       const cv = document.getElementById('maskcanvas');

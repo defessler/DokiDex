@@ -157,7 +157,8 @@ function Build-GenBody {
         [string]$InitImageB64, [string]$MaskImageB64,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [int]$Duration = 0, [int]$Bpm = 0, [string]$Negative,
-        [string]$ControlImageB64, [string]$ControlModel, [double]$ControlStrength = 1, [string]$ControlPreprocessor
+        [string]$ControlImageB64, [string]$ControlModel, [double]$ControlStrength = 1, [string]$ControlPreprocessor,
+        [string]$EndImageB64
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -190,6 +191,9 @@ function Build-GenBody {
         if ($ControlImageB64) { $body.controlnetimageinput = $ControlImageB64 }
         if ($ControlPreprocessor) { $body.controlnetpreprocessor = $ControlPreprocessor }
     }
+    # FLF2V end keyframe (video/i2v). Key "Video End Image" -> videoendimage (SwarmUI CleanTypeName); the model
+    # must support end frames (Wan FLF2V / LTX-V) — ignored by models that don't. Init image = the start frame.
+    if ($EndImageB64) { $body.videoendimage = $EndImageB64 }
     return $body
 }
 
@@ -206,6 +210,7 @@ function Invoke-Gen {
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Segment,
         [string]$ControlImage, [string]$ControlModel, [double]$ControlStrength = 1, [string]$ControlPreprocessor,
+        [string]$EndImage,
         [string]$InitImage, [string]$MaskImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -233,6 +238,11 @@ function Invoke-Gen {
     $Prompt = Expand-Wildcards -Text $Prompt -Seed $Seed   # __name__ -> a media-assets/wildcards line; resolved prompt is what generates + records
     $aspectArg = $(if ($Kind -in @('image', 'edit')) { $Aspect } else { '' })   # aspect reshapes image/edit only; video dims are model-fixed
     $controlModelArg = $(if ($Kind -in @('image', 'edit')) { $ControlModel } else { '' })   # ControlNet: image/edit only
+    $endB64 = $null
+    if ($EndImage -and $Kind -in @('video', 'i2v')) {   # FLF2V end keyframe: video/i2v only
+        if (-not (Test-Path -LiteralPath $EndImage)) { throw "end image not found: $EndImage" }
+        $endB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $EndImage).Path))
+    }
     # music-only knobs (ACE-Step): lyrics replace [instrumental]; duration/bpm reshape the track. Ignored elsewhere.
     $lyricsArg   = $(if ($Kind -eq 'music') { $Lyrics } else { '' })
     $durationArg = $(if ($Kind -eq 'music') { $Duration } else { 0 })
@@ -245,7 +255,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlImageB64 $controlB64 -ControlModel $controlModelArg -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlImageB64 $controlB64 -ControlModel $controlModelArg -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor -EndImageB64 $endB64
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -260,7 +270,7 @@ function Invoke-Gen {
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlImageB64 $controlB64 -ControlModel $controlModelArg -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlImageB64 $controlB64 -ControlModel $controlModelArg -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor -EndImageB64 $endB64) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }

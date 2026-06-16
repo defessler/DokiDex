@@ -134,13 +134,16 @@ public static class StudioHost
             if (body.MaskImage is not null && maskPath is null) return Results.BadRequest(new { error = "bad mask image" });
             var controlPath = SaveDataUrl(body.ControlImage, "control");
             if (body.ControlImage is not null && controlPath is null) return Results.BadRequest(new { error = "bad control image" });
+            var endPath = SaveDataUrl(body.EndImage, "end");
+            if (body.EndImage is not null && endPath is null) return Results.BadRequest(new { error = "bad end image" });
             var req = new GenRequest(body.Prompt.Trim(), kind,
                 Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
                 Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
                 Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative,
                 Upscaler: body.Upscaler, Segment: body.Segment,
-                ControlImage: controlPath, ControlModel: body.ControlModel, ControlStrength: body.ControlStrength, ControlPreprocessor: body.ControlPreprocessor);
+                ControlImage: controlPath, ControlModel: body.ControlModel, ControlStrength: body.ControlStrength, ControlPreprocessor: body.ControlPreprocessor,
+                EndImage: endPath);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
