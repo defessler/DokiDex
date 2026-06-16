@@ -128,6 +128,7 @@
       </div>
       <div class="row">
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
+        <button class="ghost" id="exploreBtn" onclick="explore()" title="fan this prompt into 8 fast variations">Explore ×8</button>
         <span class="hint" id="genHint"></span>
       </div>
       <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Batch (CSV) — one generation per row</summary>
@@ -305,6 +306,19 @@
         if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
         hint.textContent=''; pollJobs();
       } catch(e){ hint.textContent='request failed'; }
+    }
+    async function explore(){
+      const prompt=document.getElementById('prompt').value.trim();
+      const hint=document.getElementById('genHint');
+      if(!prompt){ hint.textContent='enter a prompt first'; return; }
+      if(!await ensureMedia()) return;
+      hint.textContent='exploring 8 directions…';
+      const body={ prompt, kind:state.kind, count:8, fast:true };
+      const asp=document.getElementById('aspect').value; if(asp) body.aspect=asp;
+      const neg=document.getElementById('negPrompt').value.trim(); if(neg) body.negative=neg;
+      const loras=collectLoras(); if(loras) body.lora=loras;
+      try{ const r=await fetch('/api/explore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json(); hint.textContent=`exploring ${j.submitted||0} variations`; pollJobs(); }
+      catch(e){ hint.textContent='explore failed'; }
     }
     async function runBatch(){
       const csv=document.getElementById('csvText').value.trim();

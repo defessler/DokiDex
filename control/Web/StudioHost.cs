@@ -186,6 +186,22 @@ public static class StudioHost
         // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
         api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));
 
+        // ---- exploration mode: diverge one prompt into N seed-varied gens (reuses the gen queue) ----
+        api.MapPost("/explore", (ExploreRequest body, GenerationJobs jobs) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
+            var kind = (body.Kind ?? "image").Trim().ToLowerInvariant();
+            if (Array.IndexOf(GenRequest.Kinds, kind) < 0) kind = "image";
+            var ids = new List<string>();
+            foreach (var seed in Explore.Seeds(body.Seed, body.Count))
+            {
+                var req = new GenRequest(body.Prompt.Trim(), kind, Fast: body.Fast, Seed: seed,
+                    Aspect: body.Aspect, Lora: body.Lora, Negative: body.Negative);
+                ids.Add(jobs.Submit(req).Id);
+            }
+            return Results.Json(new { submitted = ids.Count, ids });
+        });
+
         // ---- style chips (stackable aesthetic bundles -> appended +/- prompt fragments; pure, no GPU) ----
         api.MapGet("/style-chips", () => Results.Json(StyleChips.All()));
         api.MapPost("/compose/style", (StyleRequest body) =>
