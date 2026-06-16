@@ -220,6 +220,19 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task Retry() => await PollOnce(CancellationToken.None);   // re-probe `doki status` from the error overlay
 
+    // Recovery from the "status unavailable" overlay when the cause is a missing/wrong home (the app run
+    // outside a repo): let the user point at their DokiDex folder (persisted), then immediately re-probe.
+    [RelayCommand]
+    private async Task LocateInstall()
+    {
+        if (InstallLocator.PromptAndAdopt())
+        {
+            StatusUnavailable = false;
+            StatusText = "DokiDex folder set — retrying…";
+            await PollOnce(CancellationToken.None);
+        }
+    }
+
     [RelayCommand]
     private async Task CheckUpdates()
     {

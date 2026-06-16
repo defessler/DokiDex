@@ -205,10 +205,14 @@
             Stroke="{StaticResource ReactorGoldBrush}" StrokeThickness="1" Opacity="0.22" HorizontalAlignment="Center"/>
       <TextBlock Text="doki status unavailable" Style="{StaticResource Mono}" FontSize="12.5"
                  Foreground="{StaticResource AmberBrush}" Margin="0,16,0,0" HorizontalAlignment="Center"/>
-      <TextBlock Text="is the stack running?   (needs PowerShell 7 — pwsh — on PATH)" Style="{StaticResource Mono}"
-                 FontSize="11" Foreground="{StaticResource DimBrush}" Margin="0,6,0,0" HorizontalAlignment="Center"/>
-      <Button Content="↻  Retry" Style="{StaticResource IconBtn}" Margin="0,14,0,0" HorizontalAlignment="Center"
-              Command="{Binding RetryCommand}"/>
+      <TextBlock Text="is the stack running, or is the DokiDex folder set?   (needs PowerShell 7 — pwsh — on PATH)"
+                 Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource DimBrush}" Margin="0,6,0,0"
+                 HorizontalAlignment="Center" TextAlignment="Center"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
+        <Button Content="↻  Retry" Style="{StaticResource IconBtn}" Command="{Binding RetryCommand}"/>
+        <Button Content="📁  Locate DokiDex folder…" Style="{StaticResource IconBtn}" Margin="8,0,0,0"
+                Command="{Binding LocateInstallCommand}"/>
+      </StackPanel>
     </StackPanel>
   </Grid>
   </Grid>

@@ -9,6 +9,8 @@ namespace DokiDex.Control.Services;
 public sealed class AppSettings
 {
     public string? GenOutputDir { get; set; }
+    public string? InstallRoot { get; set; }   // the DokiDex home the app installs to / adopts (repo-independent)
+    public bool InstallManaged { get; set; }    // true = app extracted scripts here (refresh on update); false = adopted repo (never overwrite)
 
     private static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dokidex");

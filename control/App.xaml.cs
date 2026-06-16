@@ -92,6 +92,10 @@ public partial class App : Application
             catch { /* any updater failure must not block boot */ }
         }
 
+        // The app is independent of any cloned repo: if no DokiDex home resolves (no saved InstallRoot AND
+        // not launched from inside a repo), ask the user to locate/adopt one before booting. Cancel = exit.
+        if (!Services.RepoPaths.HasValidRoot && !Services.InstallLocator.PromptAndAdopt()) { Shutdown(); return; }
+
         new BootWindow().Show();
     }
 
