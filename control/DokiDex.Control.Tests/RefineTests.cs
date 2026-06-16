@@ -40,6 +40,15 @@ public class RefineTests
         Assert.Equal("art.png", r.InitImage);
     }
 
+    [Fact]
+    public void Vary_action_is_a_prompt_free_nearby_reroll_at_mid_strength()
+    {
+        var r = Refine.Build("a knight", "x.png", "vary")!;
+        Assert.Equal("x.png", r.InitImage);
+        Assert.False(r.Face); Assert.False(r.Refine); Assert.False(r.Upscale);   // no special flag
+        Assert.Equal(0.55, r.Strength, 3);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("teleport")]

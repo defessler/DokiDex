@@ -18,8 +18,9 @@ public static class Refine
         "face"    => new GenRequest(prompt, "image", InitImage: initImagePath, Face: true,    Strength: 0.35),
         "hires"   => new GenRequest(prompt, "image", InitImage: initImagePath, Refine: true,  Strength: 0.40),
         "upscale" => new GenRequest(prompt, "image", InitImage: initImagePath, Upscale: true, Strength: 0.0),
+        "vary"    => new GenRequest(prompt, "image", InitImage: initImagePath, Strength: 0.55),   // nearby re-roll
         _         => null,
     };
 
-    public static readonly string[] Actions = { "face", "hires", "upscale" };
+    public static readonly string[] Actions = { "face", "hires", "upscale", "vary" };
 }

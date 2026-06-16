@@ -371,7 +371,7 @@
       const bar = j.status==='running' ? `<div class="pbar"><div style="width:${pct}%"></div></div>` : '';
       const cancel = (j.status==='running'||j.status==='queued') ? `<button class="xbtn" onclick="cancelJob('${j.id}')">cancel</button>` : '';
       const rerun = j.status==='done' ? `<button class="xbtn" onclick="rerunJob('${encodeURIComponent(j.prompt)}','${j.kind}')">↻ rerun</button>` : '';
-      const refine = (j.status==='done' && (j.kind==='image'||j.kind==='edit')) ? `<button class="xbtn" onclick="refineJob('${j.id}','face')">face</button><button class="xbtn" onclick="refineJob('${j.id}','hires')">hi-res</button><button class="xbtn" onclick="refineJob('${j.id}','upscale')">upscale</button>` : '';
+      const refine = (j.status==='done' && (j.kind==='image'||j.kind==='edit')) ? `<button class="xbtn" onclick="refineJob('${j.id}','vary')">vary</button><button class="xbtn" onclick="refineJob('${j.id}','face')">face</button><button class="xbtn" onclick="refineJob('${j.id}','hires')">hi-res</button><button class="xbtn" onclick="refineJob('${j.id}','upscale')">upscale</button>` : '';
       const sub = j.status==='failed' ? esc(j.message||'failed') : (j.status==='running' ? pct+'%' : j.status);
       return `<div class="card"><div class="media">${inner}</div>${bar}<div class="body">
         <div class="p">${esc(j.prompt)}</div>
