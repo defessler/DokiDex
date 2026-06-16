@@ -186,16 +186,15 @@ Relevant files (absolute): `D:\Projects\DokiDex\control\DokiDex.Control.csproj`,
 
 ## 8. Platform-research feature backlog (folded in)
 
-Two double-validated research rounds across **13 platforms** (Sora 2, Grok Imagine, Midjourney, Leonardo, Krea, Ideogram, Runway, Pika, Kling, Recraft, Playground, Civitai, Tensor/SeaArt) produced a deduped, locally-feasible backlog — the full list with priorities + per-item SwarmUI implementation notes is in **`2026-06-16-platform-backlog.md`**. Research has converged (round-3 mostly strengthened/deduped existing rows rather than adding new feasible ones). P1 additions to fold into the sections above:
+Five double-validated research rounds across **~27 AI generation platforms** (Sora 2, Grok Imagine, Midjourney, Leonardo, Krea, Ideogram, Runway, Pika, Kling, Recraft, Playground, Civitai, Tensor/SeaArt, Luma, Hailuo/MiniMax, Veo/Flow, Firefly, NovelAI, Freepik, Higgsfield, Suno, Udio, ElevenLabs, Dreamina/CapCut, PixVerse, Vidu, LTX Studio) produced a deduped, locally-feasible feature backlog. The **authoritative, prioritized list with per-item SwarmUI implementation notes is in [`2026-06-16-platform-backlog.md`](2026-06-16-platform-backlog.md)**. Research has **converged**: the final round was mostly confirmation on video/image platforms; further platform mining would add fewer than ~2 new feasible features. The one remaining upside is **engine-gated, not research-gated** — a native SwarmUI ACE-Step audio-init path would unlock ~5 already-specified audio-editing features (repaint / extend / lyric-edit / audio2audio) currently parked in the backlog's DROPPED list.
 
-**Top 5 highest-leverage:** Draft<->Final + Enhance-from-card · layout-first bounding-box composer · Smart-Layers auto-decompose edit · Exploration Mode (prompt-free remix) · start/end keyframe + per-axis camera sliders.
+**TOP 5 highest-leverage additions** (drive the §5 build priorities):
+1. **Draft<->Final + Enhance-from-card** — cheap iterate-then-commit loop (turbo draft -> full render).
+2. **Local audio subsystem** — stem/voice separation (Demucs sidecar) + a structured, section-aware music composer + a voice/persona registry over the shipped Chatterbox clone.
+3. **Script-to-Shotlist director agent** — screenplay/prompt -> multi-shot list -> storyboard strip (the multi-shot authoring front door).
+4. **Layout-first composition** — bounding-box composer + 3D-primitive blockout -> depth-ControlNet (deterministic composition, not a dice-roll).
+5. **Smart-Layers auto-decompose edit** + the **multi-character directorial composer** (per-character token isolation + relationship binding).
 
-- **Composer:** `@`-references (character/style/ingredient tokens w/ per-ref weight) · steerable rewriter + Magic-Prompt tri-state (store original + expanded) · wildcards/dynamic-prompt · conversational iterate-by-instruction · aesthetic dials (stylize/weird/variety) · Draft<->Final turbo toggle.
-- **Generation card:** per-reference ControlNet/IP-Adapter stacking · LoRA blend mixer · training-free character reference · per-card downstream actions (face-fix / hi-res / tiered upscale) · Image-Set series w/ per-cell reroll · CSV batch · model A/B compare.
-- **Edit canvas:** multi-region annotation edit (one batched pass) · Smart-Layers auto-decompose · mixed inpaint+outpaint+sketch · retexture/restyle (structure-locked) · drag-the-border outpaint · rich mask toolkit (invert / load-previous) · replace/remove background · dual-axis creative upscale (resemblance/detail) + split-view compare.
-- **Live surface:** realtime "scratchpad" (turbo, as-you-type over SignalR) · sketch-to-image canvas.
-- **Video controls:** keyframe storyboard strip · start/end keyframes + signed per-axis camera sliders + loop · reusable Ingredients library · unified extend · motion brush (+ anchor / auto-segment).
-- **Model + Workflow manager:** custom-style creation + test-preview · moodboard->train + switchable style profiles · random-style shuffle + lock.
-- **Library:** saved searches/filters + timeline + bulk ops + generate-into-folder · keyboard image-ranking triage.
+**New capability areas this research surfaced** (now in the backlog): a full **Audio/Music/Voice** section · **multi-character** token isolation · **3D-blockout** composition · **novel-view re-angle** · **annotate-start-frame -> compiled video directives**.
 
-Dropped as not locally feasible (no cataloged model / cloud / social): video region-edit (no native VACE), lip-sync/talking-head (no native S2V), virtual relight/lens rigs, Act-Two performance, shareable style codes — see the backlog's DROPPED section.
+Full prioritized detail (Composer / Generation card / Edit canvas / Live surface / Video controls / Audio / Model+Workflow manager / Library / cross-cutting / DROPPED) lives in the backlog file.
