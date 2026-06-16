@@ -114,7 +114,7 @@ function Invoke-Gen {
         [Parameter(Mandatory)][string]$Prompt,
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
-        [switch]$Face, [switch]$Realism,
+        [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
         [string]$InitImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -128,6 +128,17 @@ function Invoke-Gen {
         if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }
         $initB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $InitImage).Path))
     }
+    # -BodyOnly: print the exact GenerateText2Image body (recipe + prompt fields + optional init image) and
+    # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
+    # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.
+    if ($BodyOnly) {
+        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
+        $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64
+        $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
+        return ($b | ConvertTo-Json -Depth 6 -Compress)
+    }
+
     # SwarmUI must already be in media mode — don't contend for the GPU / evict the LLM behind the user's back.
     try { Invoke-WebRequest "$Base/" -TimeoutSec 4 -UseBasicParsing | Out-Null }
     catch { throw "SwarmUI not reachable at $Base — start media mode first:  .\doki.ps1 up media" }
