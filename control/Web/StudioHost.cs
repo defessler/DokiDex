@@ -164,6 +164,17 @@ public static class StudioHost
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));
         api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));
         api.MapDelete("/models/{id}", (string id, ModelManager mm) => mm.Delete(id) ? Results.Ok() : Results.NotFound());
+
+        // ---- script-to-shotlist director (local instruct model on :8080 -> ordered shot prompts) ----
+        // Storyboarding is text-only and runs in agent/coexist mode; the user then generates the shots as images
+        // in media mode (the shotlist survives the GPU switch). Returns a clean message when the LLM is down.
+        api.MapPost("/director/shotlist", async (DirectorRequest body, CancellationToken ct) =>
+        {
+            var r = await Director.StoryboardAsync(body.Idea ?? "", body.Shots, ct);
+            return r.Ok
+                ? Results.Json(new { shots = r.Shots })
+                : Results.Json(new { error = r.Message, shots = r.Shots }, statusCode: 503);
+        });
     }
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no

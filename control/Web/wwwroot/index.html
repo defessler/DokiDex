@@ -65,6 +65,7 @@
     <span class="brand">D O K I <b>DEX</b></span>
     <nav>
       <button id="nav-create" class="on" onclick="setView('create')">Create</button>
+      <button id="nav-director" onclick="setView('director')">Director</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
@@ -104,6 +105,17 @@
       <h2>Results</h2>
       <div class="grid" id="results"><p class="hint">Nothing generated yet.</p></div>
     </section>
+    <section id="view-director" style="display:none">
+      <h2>Director — script to shotlist</h2>
+      <p class="hint">Turn an idea or script into an ordered list of shots (local LLM, agent mode). Then generate each shot as an image.</p>
+      <textarea id="dirIdea" placeholder="A lone astronaut explores a derelict space station and discovers it isn't empty…"></textarea>
+      <div class="mods">
+        <label>Shots <input id="dirShots" type="number" value="6" min="1" max="20" class="kin" style="width:54px"></label>
+        <button class="primary" id="dirBtn" onclick="storyboard()">Storyboard</button>
+        <span class="hint" id="dirHint"></span>
+      </div>
+      <div class="grid" id="shots"></div>
+    </section>
     <section id="view-status" style="display:none">
       <div class="modes" id="modes"></div>
       <div id="statusBody"></div>
@@ -125,7 +137,7 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','status','library','models']) {
+      for (const x of ['create','director','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
@@ -260,6 +272,57 @@
     }
     async function installModel(id){ try{ await fetch('/api/models/'+id+'/install',{method:'POST'}); }catch{} loadModels(); }
     async function delModel(id){ if(!confirm('Remove this model file?')) return; try{ await fetch('/api/models/'+id,{method:'DELETE'}); }catch{} loadModels(); }
+    // ---- director (script -> shotlist -> generate each shot) ----
+    async function ensureMedia(){
+      if(state.mediaActive) return true;
+      if(!confirm("The GPU isn't in MEDIA mode. Switch now (this stops the running LLM) and generate?")) return false;
+      try{ await fetch('/api/mode/media',{method:'POST'}); }catch{}
+      return await waitForMedia(90);
+    }
+    async function storyboard(){
+      const idea=document.getElementById('dirIdea').value.trim();
+      const hint=document.getElementById('dirHint'), out=document.getElementById('shots');
+      if(!idea){ hint.textContent='enter an idea first'; return; }
+      hint.textContent='storyboarding…'; out.innerHTML='';
+      try{
+        const shots=parseInt(document.getElementById('dirShots').value)||6;
+        const r=await fetch('/api/director/shotlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea,shots})});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ hint.textContent=j.error||('error '+r.status); return; }
+        const list=j.shots||[];
+        hint.textContent=`${list.length} shots — edit any prompt, then generate`;
+        renderShots(list);
+      }catch(e){ hint.textContent='request failed'; }
+    }
+    function renderShots(shots){
+      const out=document.getElementById('shots'); out.innerHTML='';
+      if(!shots.length){ out.innerHTML='<p class="hint">No shots returned.</p>'; return; }
+      shots.forEach(s=>{
+        const card=$(`<div class="scard"></div>`);
+        card.appendChild($(`<div class="row"><b>${s.index}. ${esc(s.title||('Shot '+s.index))}</b></div>`));
+        const ta=document.createElement('textarea'); ta.value=s.prompt; ta.rows=3; ta.style.width='100%'; ta.style.marginTop='6px';
+        card.appendChild(ta);
+        const btn=$(`<button class="xbtn" style="margin-top:6px">→ generate</button>`);
+        btn.onclick=()=>genShot(ta.value);
+        card.appendChild(btn);
+        out.appendChild(card);
+      });
+      const all=$(`<button class="primary" style="margin-top:12px">Generate all shots</button>`);
+      all.onclick=genAllShots; out.appendChild(all);
+    }
+    async function genShot(prompt){
+      prompt=(prompt||'').trim(); if(!prompt) return;
+      if(!await ensureMedia()) return;
+      try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,kind:'image'})}); }catch{}
+      setView('create'); pollJobs();
+    }
+    async function genAllShots(){
+      const prompts=[...document.querySelectorAll('#shots textarea')].map(t=>t.value.trim()).filter(Boolean);
+      if(!prompts.length) return;
+      if(!await ensureMedia()) return;
+      for(const p of prompts){ try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,kind:'image'})}); }catch{} }
+      setView('create'); pollJobs();
+    }
     function renderGuard(){
       const el = document.getElementById('guard');
       if(state.mediaActive){ el.innerHTML=''; return; }
