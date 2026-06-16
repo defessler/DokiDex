@@ -3,9 +3,9 @@
 > **Method:** multi-agent workflow (`dokidex-completion-audit`) — 6 read-only verifiers (one per phase) run in parallel against the live repo + running services, every fail/uncertain finding adversarially re-checked by an independent agent, then synthesized. 12 agents, ~350k tokens, ~3.5 min.
 
 > **Resolution (2026-06-12):** the audit found the plan **functionally complete** with 5 doc/git-hygiene gaps. All 5 were closed in the same commit that adds this file:
-> 1. Phase-0 disk measurement → recorded in `benchmarks.md` ✅
+> 1. Phase-0 disk measurement → recorded in `wiki/12-benchmarks.md` ✅
 > 2. Phase-4 live-search proof → re-run (Node.js LTS query) + recorded, MCP wiring committed ✅
-> 3. Phase-5 coexistence VRAM (27.6GB) → recorded in `benchmarks.md` ✅
+> 3. Phase-5 coexistence VRAM (27.6GB) → recorded in `wiki/12-benchmarks.md` ✅
 > 4. README status text → updated to Phases 0–5 ✅
 > 5. Working tree / uncommitted Phase 4–5 work → committed ✅
 

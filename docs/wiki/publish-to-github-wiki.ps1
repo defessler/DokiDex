@@ -58,6 +58,13 @@ foreach ($p in $pages) {
 7. [Quick Start](7-quick-start)
 8. [Image & Video Generation](8-image-and-video)
 
+**Reference**
+
+9. [Feature Index](9-features)
+10. [How It Works](10-how-it-works)
+11. [Media & Speech Recipes](11-media-recipes)
+12. [Benchmarks](12-benchmarks)
+
 [🏠 Home](Home)
 '@ | Set-Content (Join-Path $build "_Sidebar.md")
 

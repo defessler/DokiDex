@@ -7,7 +7,7 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
   <br><sub>The DokiDex control panel — one GPU group at a time, live RTX 5090 meter, per-service health (healthy / warming / stopped / crashed / not-installed), and one-click coder-model hot-swap.</sub>
 </p>
 
-**▶ Features (full index):** [docs/FEATURES.md](docs/FEATURES.md) · **How it all works (architecture):** [docs/how-it-works.md](docs/how-it-works.md) · **Design doc:** [docs/TDD.md](docs/TDD.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/media-recipes.md](docs/media-recipes.md)
+**▶ Features (full index):** [docs/wiki/9-features.md](docs/wiki/9-features.md) · **How it all works (architecture):** [docs/wiki/10-how-it-works.md](docs/wiki/10-how-it-works.md) · **Design doc:** [docs/TDD.md](docs/TDD.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/wiki/11-media-recipes.md](docs/wiki/11-media-recipes.md)
 
 ## Run it
 
@@ -44,7 +44,7 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 |---|---|
 | `doki.ps1` | Native control plane — start/stop/status the stack (no Docker) |
 | `setup.ps1` | One-command bootstrap (prereqs, config deploy, `-Media` = SwarmUI + models) |
-| `docs/` | Design doc, decision log, benchmarks, ELI5 wiki |
+| `docs/` | Design doc, decision log, roadmap, specs + the `wiki/` (ELI5 guide + reference: features, how-it-works, recipes, benchmarks) |
 | `serving/` | llama.cpp / llama-swap configs and launch scripts |
 | `harness/` | Crush / OpenCode / llama.vscode configs, AGENTS.md template |
 | `evals/` | Golden-task eval suite, runner, scorecards |
@@ -79,4 +79,4 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Control plane:** `doki up/down/status/restart/logs/panel` + per-service `start/stop/restart` and `status json`; agent / coexist / media profiles; one-command `setup.ps1`. The installer is audit-hardened on the fresh-install / failure paths — atomic resumable model downloads, fail-loud dependency steps, in-session PATH refresh after winget. A fast no-GPU test layer (`doki test`, **160 assertions** — installer helpers 16, `status json` panel contract 47, sqlite/FTS5 memory store 20, `doki gen` recipes 44, codebase-RAG core 33) runs alongside the panel's **124 xUnit** (≈284 total).
 - **Model refresh (eval-gated):** Nemotron-Cascade-2 (45%) and Qwen3-Coder-Next-REAP (broken tool-calls) both lost — Qwen3-Coder-30B confirmed the best 32GB fit by measurement.
 
-See `docs/media-recipes.md` (exact API call for every capability), `docs/benchmarks.md` (measurements), `docs/decisions.md` (every call + the eval gates), `docs/streamlined-setup-design.md` (control plane + media), and TDD §7 (roadmap).
+See `docs/wiki/11-media-recipes.md` (exact API call for every capability), `docs/wiki/12-benchmarks.md` (measurements), `docs/decisions.md` (every call + the eval gates), `docs/streamlined-setup-design.md` (control plane + media), and TDD §7 (roadmap).

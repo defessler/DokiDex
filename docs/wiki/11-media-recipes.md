@@ -54,6 +54,6 @@ Seed/refresh the store with this project's facts: `python serving\memory-mcp\see
 
 ## See also
 
-`docs/benchmarks.md` (how fast each of these is) · `verify.ps1` (the live smoke for every call) ·
+`docs/wiki/12-benchmarks.md` (how fast each of these is) · `verify.ps1` (the live smoke for every call) ·
 `docs/wiki/8-image-and-video.md` (the friendly walkthrough) · `docs/frontier-roadmap.md` (what's
 blocked and why).

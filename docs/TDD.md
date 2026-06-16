@@ -11,7 +11,7 @@
 > **Note:** this is the original *design* doc (foundation: inference + harness + search). The
 > system has since grown image/video/music/edit generation, speech (TTS/STT), a persistent-memory
 > MCP, and a WPF control panel. For how the **complete as-built system** works, see
-> **[how-it-works.md](how-it-works.md)**.
+> **[how-it-works.md](wiki/10-how-it-works.md)**.
 
 ---
 

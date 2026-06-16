@@ -1,5 +1,5 @@
 # tests/doki-gen.test.ps1 — unit tests for the GPU-free core of `doki gen` (serving/doki-gen.ps1):
-# switches -> kind, the docs/media-recipes.md recipe table, prompt placement, and final-body assembly.
+# switches -> kind, the docs/wiki/11-media-recipes.md recipe table, prompt placement, and final-body assembly.
 # No SwarmUI, no GPU, no network (Invoke-Gen's live POST is exercised by `doki verify`, not here).
 # Framework-free: exit 0 = pass, 1 = fail.
 
@@ -25,7 +25,7 @@ $ambiguous = $false
 try { Resolve-GenKind -Video -Music | Out-Null } catch { $ambiguous = $true }
 Assert $ambiguous                             "-Video -Music -> throws (ambiguous)"
 
-# --- Get-GenRecipe: the media-recipes.md table, 1:1 ---
+# --- Get-GenRecipe: the docs/wiki/11-media-recipes.md table, 1:1 ---
 $img = Get-GenRecipe -Kind image
 Assert ($img.model -eq 'z_image_bf16.safetensors')                 "image -> Z-Image Base model (quality default)"
 Assert ($img.steps -eq 35 -and $img.width -eq 1024)                "image -> 35 steps @ 1024"

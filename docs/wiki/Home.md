@@ -31,6 +31,19 @@ These pages are meant to be read in order, like chapters. Each one is short.
 
 ---
 
+## Deeper reference 📚
+
+Once the chapters make sense, these go into the precise detail:
+
+| Page | What it covers |
+|------|----------------|
+| [Feature Index](9-features.md) | Every capability in one scannable table. |
+| [How It Works](10-how-it-works.md) | The as-built architecture, end to end. |
+| [Media & Speech Recipes](11-media-recipes.md) | The exact local API call for every image / video / audio capability. |
+| [Benchmarks](12-benchmarks.md) | Measured speeds and VRAM across the stack. |
+
+---
+
 ## The 30‑second version
 
 Imagine hiring a junior programmer who:
@@ -55,4 +68,4 @@ One person, on one gaming PC:
 
 Everything below is the story of how those parts add up to a working coding robot.
 
-> 📎 This wiki is the *friendly* version. The precise engineering details live in [`docs/TDD.md`](../TDD.md) (the design doc), [`docs/benchmarks.md`](../benchmarks.md) (the measurements), and [`docs/decisions.md`](../decisions.md) (the "why we picked X" log).
+> 📎 This wiki is the *friendly* version, but it now also holds the precise reference pages above. The remaining engineering docs live in [`docs/TDD.md`](../TDD.md) (the design doc) and [`docs/decisions.md`](../decisions.md) (the "why we picked X" log).

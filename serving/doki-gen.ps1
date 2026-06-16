@@ -1,7 +1,7 @@
 # serving/doki-gen.ps1 — `doki gen "<idea>"` text->media.
 #
 # Split into PURE helpers (Resolve-GenKind / Get-GenRecipe / Get-GenPromptFields / Build-GenBody) that carry
-# the docs/media-recipes.md table 1:1 and are exercised with NO GPU by tests/doki-gen.test.ps1, plus the
+# the docs/wiki/11-media-recipes.md table 1:1 and are exercised with NO GPU by tests/doki-gen.test.ps1, plus the
 # live Invoke-Gen that POSTs to SwarmUI :7801 (needs `doki up media`). Dot-sourced by doki.ps1's `gen` verb.
 #
 # No top-level statements / Set-StrictMode here on purpose: dot-sourcing runs in the caller's scope, so this
@@ -22,7 +22,7 @@ function Resolve-GenKind {
 }
 
 # kind (+ -Fast / -Upscale modifiers) -> the SwarmUI body fields for that recipe (model + sampler knobs),
-# verbatim from docs/media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
+# verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
@@ -46,7 +46,7 @@ function Get-GenRecipe {
         'edit'  { @{ model = 'qwen_image_edit_2511_fp8mixed.safetensors'; steps = 20; cfgscale = 2.5 } }
         # image->video: generate a frame (Z-Image Turbo, fast seed) then animate it via the native videomodel
         # pipeline. The videosteps/videocfg/videoresolution trio is what makes the I2V step fire (per
-        # media-recipes.md); add -InitImage to animate an EXISTING still instead of a fresh frame.
+        # docs/wiki/11-media-recipes.md); add -InitImage to animate an EXISTING still instead of a fresh frame.
         'i2v'   { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = 'wan2.2_ti2v_5B_fp16.safetensors'; videoframes = 49; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = 'Image'; videoformat = 'h264-mp4' } }
         # video + synced SFX via the WanFoley custom ComfyUI workflow -> one muxed mp4 with 48 kHz audio.
         'foley' { @{ comfyuicustomworkflow = 'WanFoley'; seed = -1 } }

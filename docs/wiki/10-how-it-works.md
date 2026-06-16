@@ -2,8 +2,8 @@
 
 The authoritative, as-built walkthrough of the entire stack: what each piece is, how they fit,
 how a request flows, and why it's built this way. (For the original design rationale see
-[`TDD.md`](TDD.md); for the friendly ELI5 version see [`wiki/Home.md`](wiki/Home.md); for the exact
-API call of every capability see [`media-recipes.md`](media-recipes.md).)
+[`TDD.md`](../TDD.md); for the friendly ELI5 version see [`Home`](Home.md); for the exact
+API call of every capability see [`media-recipes.md`](11-media-recipes.md).)
 
 DokiDex is a **fully-local AI stack on one machine** — RTX 5090 (32 GB VRAM), 64 GB DDR5, Windows
 11 **native** (no Docker, no WSL). It does agentic coding, chat, autocomplete, web search, speech
@@ -138,8 +138,8 @@ and a template (`harness/AGENTS.md`).
 **SwarmUI** (on the **ComfyUI** engine, `:7801`) is installed and wired up 100% headlessly by
 `setup.ps1 -Media`. It runs the `media` GPU group. One model is resident at a time (the 32 GB
 rule), so SwarmUI **swaps** models per request — which is why switching *capabilities* costs a load
-(see [benchmarks](benchmarks.md)). Everything is driven by `POST :7801/API/GenerateText2Image` with
-a session from `GetNewSession`; the exact body for each is in [media-recipes.md](media-recipes.md).
+(see [benchmarks](12-benchmarks.md)). Everything is driven by `POST :7801/API/GenerateText2Image` with
+a session from `GetNewSession`; the exact body for each is in [media-recipes.md](11-media-recipes.md).
 SwarmUI also wears the on-brand **DokiGen Void** theme (`media-assets/SwarmUI-DokiGenTheme/`,
 compiled in and set as the default by `setup.ps1 -Media`; per-browser overridable in
 User Settings -> Theme).
@@ -164,7 +164,7 @@ models were trained on — every generation, uncensored, zero effort.
 SwarmUI's `CustomWorkflows/`, invoked via `comfyuicustomworkflow=Name` with `${prompt}`/`${seed}`
 placeholders. (Hand-authoring these has a limit — SwarmUI can't inject a ref-image/audio into a
 raw custom workflow without editor-generated metadata, which is why lip-sync (Wan-S2V) and LTX-2
-audio are blocked; see [frontier-roadmap.md](frontier-roadmap.md).)
+audio are blocked; see [frontier-roadmap.md](../frontier-roadmap.md).)
 
 ---
 
@@ -194,7 +194,7 @@ switcher with 32 GB-headroom math + an eviction-confirm sheet, live file-tailed 
 per-modality ⚡test, a coder model-swap, and update badges. It opens with a cinematic boot sequence,
 wears a premium void/cyan/gold theme, and **self-updates** from its own GitHub releases (`Services/Updater.cs`,
 applied in place on launch — distinct from the upstream SwarmUI/llama-swap badges). It has **124 unit
-tests** (`doki test`) on its parsing + state + auto-updater logic. (Design: [control-panel-design.md](control-panel-design.md).)
+tests** (`doki test`) on its parsing + state + auto-updater logic. (Design: [control-panel-design.md](../control-panel-design.md).)
 
 ---
 
@@ -222,7 +222,7 @@ tests** (`doki test`) on its parsing + state + auto-updater logic. (Design: [con
 - **GPU group-exclusion over a smaller model.** Rather than shrink the coder to coexist with media,
   the stack keeps both at full quality and *switches* — a one-command, well-signposted operation.
 - **Eval-gated.** Every model choice went through a measured bake-off (see
-  [decisions.md](decisions.md) / [benchmarks.md](benchmarks.md)); nothing is adopted on vibes.
+  [decisions.md](../decisions.md) / [benchmarks.md](12-benchmarks.md)); nothing is adopted on vibes.
 - **Data-driven control plane.** New services are one `$Services` entry — the panel, `status json`,
   and `doctor` all pick them up with no extra code.
 
@@ -254,10 +254,11 @@ These cost real debugging and are seeded into the memory store:
 | `harness/` | `crush.json`, `AGENTS.md` template, editor/chat configs |
 | `media-assets/` | the committed ComfyUI custom workflows (e.g. `WanFoley.json`) |
 | `control/` | the WPF control panel + its `DokiDex.Control.Tests` |
-| `docs/` | this doc, `TDD.md`, `media-recipes.md`, `benchmarks.md`, `decisions.md`, `frontier-roadmap.md`, the `wiki/` |
+| `docs/` | `TDD.md`, `decisions.md`, `frontier-roadmap.md`, the design specs + `scorecards/` |
+| `docs/wiki/` | the ELI5 guide + this doc, `9-features`, `11-media-recipes`, `12-benchmarks` |
 | `models/` · `media/` · `tts/` · `stt/` | model weights & local installs — **git-ignored** |
 
 ---
 
-*Everything here is verified live (`doki verify`) and measured ([benchmarks.md](benchmarks.md)).
+*Everything here is verified live (`doki verify`) and measured ([benchmarks.md](12-benchmarks.md)).
 This document reflects the as-built system on 2026-06-14.*
