@@ -117,6 +117,24 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Music_lyrics_duration_bpm_pass_through_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("lofi", "music", Lyrics: "la la la", Duration: 30, Bpm: 90, OutPath: "o"));
+        var li = a.IndexOf("-Lyrics"); Assert.True(li >= 0); Assert.Equal("la la la", a[li + 1]);
+        var di = a.IndexOf("-Duration"); Assert.True(di >= 0); Assert.Equal("30", a[di + 1]);
+        var bi = a.IndexOf("-Bpm"); Assert.True(bi >= 0); Assert.Equal("90", a[bi + 1]);
+    }
+
+    [Fact]
+    public void Music_knobs_are_omitted_when_unset()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("lofi", "music", OutPath: "o"));
+        Assert.DoesNotContain("-Lyrics", a);
+        Assert.DoesNotContain("-Duration", a);
+        Assert.DoesNotContain("-Bpm", a);
+    }
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));

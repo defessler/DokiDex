@@ -84,6 +84,11 @@
         <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
         <span id="initname" class="hint" style="cursor:pointer"></span>
       </div>
+      <div id="musicbox" class="mods" style="display:none">
+        <label style="flex:1 1 100%">Lyrics <textarea id="lyrics" rows="2" placeholder="leave blank for an instrumental" class="kin" style="width:100%;resize:vertical"></textarea></label>
+        <label>Duration <input id="duration" type="number" min="1" max="240" placeholder="10" class="kin" style="width:64px"> s</label>
+        <label>BPM <input id="bpm" type="number" min="40" max="220" placeholder="128" class="kin" style="width:64px"></label>
+      </div>
       <div id="maskbox" style="display:none;margin:4px 0 12px">
         <div class="hint" style="margin-bottom:4px">Edit canvas — paint the area to change, then Generate:</div>
         <div style="position:relative;display:inline-block;border:1px solid var(--border);border-radius:6px;overflow:hidden">
@@ -133,7 +138,9 @@
       const m = document.getElementById('mods'); m.innerHTML='';
       MODS.forEach(([id,label]) => { const l=$(`<label><input type="checkbox" ${state.mods[id]?'checked':''}/> ${label}</label>`); l.querySelector('input').onchange=(e)=>state.mods[id]=e.target.checked; m.appendChild(l); });
       updateMaskBox();
+      updateMusicBox();
     }
+    function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
     let _maskDrawn=false, _maskDrawing=false;
     function updateMaskBox(){
       const show = state.kind==='edit' && !!state.initImage;
@@ -162,6 +169,11 @@
         const body = Object.assign({ prompt, kind:state.kind, count: parseInt(document.getElementById('count').value)||1 }, state.mods);
         if (seedVal!=='') body.seed = parseInt(seedVal);
         const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
+        if (state.kind==='music') {
+          const ly = document.getElementById('lyrics').value.trim(); if (ly) body.lyrics = ly;
+          const du = parseInt(document.getElementById('duration').value); if (du>0) body.duration = du;
+          const bp = parseInt(document.getElementById('bpm').value); if (bp>0) body.bpm = bp;
+        }
         if (state.initImage) body.initImage = state.initImage;
         if (state.kind==='edit' && state.initImage && _maskDrawn) body.maskImage = document.getElementById('maskcanvas').toDataURL('image/png');
         const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });

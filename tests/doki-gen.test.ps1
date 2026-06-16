@@ -105,5 +105,15 @@ $aDef = Test-Aspect '1:1';  Assert ($aDef.width -eq 1024 -and $aDef.height -eq 1
 $aNone = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
 Assert ($aNone.width -eq 1024 -and $aNone.height -eq 1024) "no aspect -> recipe default dims unchanged"
 
+# --- music composer: lyrics (vs [instrumental]) + duration/bpm overrides (ACE-Step) ---
+$mInst = Get-GenPromptFields -Kind music -Idea 'lofi hip hop'
+Assert ($mInst.prompt -eq '[instrumental]' -and $mInst.textaudiostyle -eq 'lofi hip hop') "music (no lyrics) -> [instrumental] + style"
+$mSong = Get-GenPromptFields -Kind music -Idea 'pop ballad' -Lyrics 'hello from the other side'
+Assert ($mSong.prompt -eq 'hello from the other side' -and $mSong.textaudiostyle -eq 'pop ballad') "music -Lyrics -> lyrics in prompt, idea stays the style"
+$mBody = Build-GenBody -Recipe (Get-GenRecipe -Kind music) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's' -Duration 45 -Bpm 90
+Assert ($mBody.textaudioduration -eq 45 -and $mBody.textaudiobpm -eq 90) "music -Duration/-Bpm -> override recipe defaults"
+$mDef = Build-GenBody -Recipe (Get-GenRecipe -Kind music) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's'
+Assert ($mDef.textaudioduration -eq 10 -and $mDef.textaudiobpm -eq 128) "music (no overrides) -> recipe defaults 10s / 128bpm"
+
 Write-Host "`ndoki-gen: $script:pass passed, $script:fail failed" -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })
 exit $(if ($script:fail) { 1 } else { 0 })

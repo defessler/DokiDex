@@ -20,7 +20,10 @@ public sealed record GenRequest(
     int Count = 1,            // batch size (images)
     double Strength = -1,     // img2img/i2v creativity (the "vary" dial); -1 = recipe default
     string? MaskImage = null, // inpaint mask (edit canvas); white = the region to change
-    string? Aspect = null)    // aspect-ratio preset (16:9 / 9:16 / 4:3 / 3:4 / 1:1) for image/edit
+    string? Aspect = null,    // aspect-ratio preset (16:9 / 9:16 / 4:3 / 3:4 / 1:1) for image/edit
+    string? Lyrics = null,    // music: lyrics ACE-Step sings (else [instrumental]); music kind only
+    int Duration = 0,         // music: track length in seconds (0 = recipe default 10)
+    int Bpm = 0)              // music: tempo override (0 = recipe default 128)
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -71,6 +74,9 @@ public static class GenCli
         if (!string.IsNullOrWhiteSpace(r.InitImage)) { a.Add("-InitImage"); a.Add(r.InitImage!); }
         if (!string.IsNullOrWhiteSpace(r.MaskImage)) { a.Add("-MaskImage"); a.Add(r.MaskImage!); }
         if (!string.IsNullOrWhiteSpace(r.Aspect)) { a.Add("-Aspect"); a.Add(r.Aspect!); }
+        if (!string.IsNullOrWhiteSpace(r.Lyrics)) { a.Add("-Lyrics"); a.Add(r.Lyrics!); }
+        if (r.Duration > 0) { a.Add("-Duration"); a.Add(r.Duration.ToString()); }
+        if (r.Bpm > 0) { a.Add("-Bpm"); a.Add(r.Bpm.ToString()); }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }

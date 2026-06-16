@@ -71,12 +71,14 @@ function Get-GenRecipe {
 function Get-GenPromptFields {
     param(
         [Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][string]$Idea,
-        [switch]$Raw, [switch]$Face, [switch]$Realism
+        [switch]$Raw, [switch]$Face, [switch]$Realism, [string]$Lyrics
     )
     # base on-disk name (no extension) of the Z-Image realism LoRA in SwarmUI's Models\Lora (setup.ps1).
     $RealismLora = 'Z-Image-Realism'
     switch ($Kind) {
-        'music' { return @{ prompt = '[instrumental]'; textaudiostyle = $Idea } }
+        # music: the idea is the STYLE/genre; the prompt field carries lyrics (ACE-Step sings them) or
+        # [instrumental] for no vocals. -Lyrics turns the instrumental composer into a song composer.
+        'music' { return @{ prompt = $(if ($Lyrics) { $Lyrics } else { '[instrumental]' }); textaudiostyle = $Idea } }
         'edit'  { $p = $Idea }
         default { $p = $(if ($Raw) { $Idea } else { "<mpprompt:$Idea>" }) }
     }
@@ -96,7 +98,8 @@ function Build-GenBody {
         [Parameter(Mandatory)][hashtable]$PromptFields,
         [Parameter(Mandatory)][string]$SessionId,
         [string]$InitImageB64, [string]$MaskImageB64,
-        [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect
+        [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
+        [int]$Duration = 0, [int]$Bpm = 0
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -115,6 +118,8 @@ function Build-GenBody {
             default { $body.width = 1024; $body.height = 1024 }
         }
     }
+    if ($Duration -gt 0) { $body.textaudioduration = $Duration }   # music: track length in seconds (recipe default 10)
+    if ($Bpm -gt 0)      { $body.textaudiobpm = $Bpm }             # music: tempo override (recipe default 128)
     return $body
 }
 
@@ -129,6 +134,7 @@ function Invoke-Gen {
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
+        [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0,
         [string]$InitImage, [string]$MaskImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -149,13 +155,17 @@ function Invoke-Gen {
         $maskB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $MaskImage).Path))
     }
     $aspectArg = $(if ($Kind -in @('image', 'edit')) { $Aspect } else { '' })   # aspect reshapes image/edit only; video dims are model-fixed
+    # music-only knobs (ACE-Step): lyrics replace [instrumental]; duration/bpm reshape the track. Ignored elsewhere.
+    $lyricsArg   = $(if ($Kind -eq 'music') { $Lyrics } else { '' })
+    $durationArg = $(if ($Kind -eq 'music') { $Duration } else { 0 })
+    $bpmArg      = $(if ($Kind -eq 'music') { $Bpm } else { 0 })
     # -BodyOnly: print the exact GenerateText2Image body (recipe + prompt fields + optional init image) and
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
     # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
-        $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg
+        $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -168,9 +178,9 @@ function Invoke-Gen {
     Write-Host "[gen] $tag  <-  ""$Prompt""" -ForegroundColor Cyan
 
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
-    $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
+    $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }
