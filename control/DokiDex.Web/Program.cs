@@ -72,9 +72,25 @@ api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
     if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
     var kind = (body.Kind ?? "image").Trim().ToLowerInvariant();
     if (Array.IndexOf(GenRequest.Kinds, kind) < 0) return Results.BadRequest(new { error = "unknown kind" });
+    // An init image arrives from the browser as a data: URL; the recipe's -InitImage wants a file path, so
+    // decode it to a temp file (edit/i2v/img2img). Non-data values pass through (a server-side path).
+    string? initPath = body.InitImage;
+    if (!string.IsNullOrEmpty(initPath) && initPath.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+    {
+        try
+        {
+            var comma = initPath.IndexOf(',');
+            var meta = comma > 5 ? initPath[5..comma] : "";
+            var ext = meta.Contains("png") ? ".png" : meta.Contains("webp") ? ".webp" : ".jpg";
+            var p = Path.Combine(Path.GetTempPath(), "dokidex-init-" + Guid.NewGuid().ToString("N") + ext);
+            File.WriteAllBytes(p, Convert.FromBase64String(initPath[(comma + 1)..]));
+            initPath = p;
+        }
+        catch { return Results.BadRequest(new { error = "bad init image" }); }
+    }
     var req = new GenRequest(body.Prompt.Trim(), kind,
         Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
-        Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: body.InitImage,
+        Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
         Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength);
     return Results.Json(jobs.Submit(req).ToDto());
 });

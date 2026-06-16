@@ -80,6 +80,8 @@
       <div class="mods">
         <label>Seed <input id="seed" type="number" placeholder="random" class="kin"></label>
         <label>Count <input id="count" type="number" value="1" min="1" max="9" class="kin" style="width:54px"></label>
+        <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
+        <span id="initname" class="hint" style="cursor:pointer"></span>
       </div>
       <div class="row">
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
@@ -106,7 +108,7 @@
     const KINDS = ['image','video','music','edit','i2v','foley'];
     const MODS = [['fast','Fast'],['refine','Refine'],['face','Face'],['realism','Realism'],['upscale','Upscale']];
     const VIDEO = new Set(['video','i2v','foley']);
-    let state = { view:'create', kind:'image', mods:{}, mediaActive:false };
+    let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
 
     function setView(v){ state.view=v;
       for (const x of ['create','status','library','models']) {
@@ -137,6 +139,7 @@
         const seedVal = document.getElementById('seed').value.trim();
         const body = Object.assign({ prompt, kind:state.kind, count: parseInt(document.getElementById('count').value)||1 }, state.mods);
         if (seedVal!=='') body.seed = parseInt(seedVal);
+        if (state.initImage) body.initImage = state.initImage;
         const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
         if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
         hint.textContent=''; pollJobs();
@@ -257,6 +260,12 @@
       } catch(e){}
     }
     document.getElementById('prompt').addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); generate(); } });
+    document.getElementById('initfile').addEventListener('change', e => {
+      const f = e.target.files[0]; const nm = document.getElementById('initname');
+      if(!f){ state.initImage=null; nm.textContent=''; return; }
+      const rd = new FileReader(); rd.onload = () => { state.initImage = rd.result; nm.textContent = f.name + '  ✕'; }; rd.readAsDataURL(f);
+    });
+    document.getElementById('initname').addEventListener('click', () => { state.initImage=null; document.getElementById('initfile').value=''; document.getElementById('initname').textContent=''; });
     renderControls(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
