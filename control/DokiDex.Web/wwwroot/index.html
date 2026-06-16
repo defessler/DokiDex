@@ -64,6 +64,7 @@
     <span class="brand">D O K I <b>DEX</b></span>
     <nav>
       <button id="nav-create" class="on" onclick="setView('create')">Create</button>
+      <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
     </nav>
     <span id="gpuPill" class="gpu-pill"></span>
@@ -85,6 +86,10 @@
       <div class="modes" id="modes"></div>
       <div id="statusBody"></div>
     </section>
+    <section id="view-library" style="display:none">
+      <h2>Library</h2>
+      <div class="grid" id="library"><p class="hint">Loading…</p></div>
+    </section>
   </main>
   <script>
     const $ = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
@@ -95,10 +100,11 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false };
 
     function setView(v){ state.view=v;
-      document.getElementById('view-create').style.display = v==='create'?'':'none';
-      document.getElementById('view-status').style.display = v==='status'?'':'none';
-      document.getElementById('nav-create').className = v==='create'?'on':'';
-      document.getElementById('nav-status').className = v==='status'?'on':'';
+      for (const x of ['create','status','library']) {
+        document.getElementById('view-'+x).style.display = v===x?'':'none';
+        document.getElementById('nav-'+x).className = v===x?'on':'';
+      }
+      if (v==='library') loadLibrary();
     }
     function renderControls(){
       const k = document.getElementById('kinds'); k.innerHTML='';
@@ -147,6 +153,26 @@
         g.innerHTML=''; jobs.forEach(j => g.appendChild($(jobCard(j))));
       } catch(e){}
     }
+    function libCard(it){
+      const m = it.kind==='music' ? `<audio controls src="${it.mediaUrl}" style="width:90%"></audio>`
+        : (VIDEO.has(it.kind) ? `<video controls src="${it.mediaUrl}"></video>` : `<img src="${it.mediaUrl}" alt=""/>`);
+      const p = esc(it.prompt) || '<span class="hint">(no prompt)</span>';
+      return `<div class="card"><div class="media">${m}</div><div class="body"><div class="p">${p}</div>
+        <div class="row" style="justify-content:space-between;margin-top:6px"><span class="s done">${it.kind}</span><span>
+        <button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
+        <a class="xbtn" href="${it.mediaUrl}" download style="text-decoration:none">save</a>
+        <button class="xbtn" onclick="delItem('${encodeURIComponent(it.name)}')">del</button></span></div></div></div>`;
+    }
+    async function loadLibrary(){
+      try {
+        const items = await (await fetch('/api/gallery')).json();
+        const g = document.getElementById('library');
+        g.innerHTML = items.length ? '' : '<p class="hint">No saved generations yet.</p>';
+        items.forEach(it => g.appendChild($(libCard(it))));
+      } catch(e){ document.getElementById('library').innerHTML='<p class="err">could not load the library</p>'; }
+    }
+    async function delItem(name){ try{ await fetch('/api/gallery/'+name,{method:'DELETE'}); }catch{} loadLibrary(); }
+    function remixItem(p,kind){ document.getElementById('prompt').value = decodeURIComponent(p); state.kind = kind; renderControls(); setView('create'); document.getElementById('prompt').focus(); }
     function renderGuard(){
       const el = document.getElementById('guard');
       if(state.mediaActive){ el.innerHTML=''; return; }

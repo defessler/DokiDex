@@ -91,7 +91,11 @@ public sealed class GenerationJobs
                     _ = Push(job);
                 }, ct).ConfigureAwait(false);
 
-                if (outcome.Ok) { job.ArtifactPath = outcome.ArtifactPath; job.Progress = 1; job.Preview = null; job.Status = "done"; job.Message = "done"; }
+                if (outcome.Ok)
+                {
+                    job.ArtifactPath = outcome.ArtifactPath; job.Progress = 1; job.Preview = null; job.Status = "done"; job.Message = "done";
+                    GalleryService.WriteSidecar(outcome.ArtifactPath!, job.Id, job.Kind, job.Prompt);   // persist for the Library
+                }
                 else { job.Status = "failed"; job.Message = StripAnsi(outcome.Message); }
             }
             finally { _gpu.Release(); }

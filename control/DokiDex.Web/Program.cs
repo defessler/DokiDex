@@ -19,6 +19,7 @@ builder.WebHost.ConfigureKestrel(k => k.ListenLocalhost(port));   // 127.0.0.1 +
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<DokiService>();
 builder.Services.AddSingleton<GenerationJobs>();
+builder.Services.AddSingleton<GalleryService>();
 
 var app = builder.Build();
 
@@ -83,14 +84,18 @@ api.MapGet("/media/{id}", (string id, GenerationJobs jobs) =>
 {
     var j = jobs.Get(id);
     if (j is null || !j.HasArtifact) return Results.NotFound();
-    var mime = Path.GetExtension(j.ArtifactPath!).ToLowerInvariant() switch
-    {
-        ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", ".gif" => "image/gif",
-        ".mp4" => "video/mp4", ".webm" => "video/webm", ".mp3" => "audio/mpeg", ".wav" => "audio/wav", ".flac" => "audio/flac",
-        _ => "application/octet-stream",
-    };
-    return Results.File(j.ArtifactPath!, mime);   // scoped: only files the app generated for a known job id
+    return Results.File(j.ArtifactPath!, GalleryService.Mime(j.ArtifactPath!));   // scoped: only files the app generated for a known job id
 });
+
+// ---- library / gallery (P2: persistent over the app-owned output folder + JSON sidecars) ----
+api.MapGet("/gallery", (GalleryService gal) => Results.Json(gal.List()));
+api.MapGet("/gallery/media/{name}", (string name, GalleryService gal) =>
+{
+    var full = gal.Resolve(name);
+    return full is null ? Results.NotFound() : Results.File(full, GalleryService.Mime(full));
+});
+api.MapDelete("/gallery/{name}", (string name, GalleryService gal) =>
+    gal.Delete(name) ? Results.Ok() : Results.NotFound());
 
 app.MapHub<StudioHub>("/hub");
 app.MapFallbackToFile("index.html");
