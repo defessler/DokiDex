@@ -16,4 +16,9 @@ public partial class InstallerWindow : Window
         vm.CloseRequested += ok => { try { DialogResult = ok; } catch { } Close(); };
         LogBox.TextChanged += (_, _) => LogBox.ScrollToEnd();   // keep the live install log pinned to newest output
     }
+
+    // Custom-chrome window controls (WindowStyle=None has no OS caption buttons). Closing the wizard
+    // before it persists an InstallRoot leaves DialogResult unset -> App treats it as cancel and exits.
+    private void OnMinimize(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void OnClose(object sender, RoutedEventArgs e) => Close();
 }

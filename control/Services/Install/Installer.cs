@@ -25,8 +25,11 @@ public static class Installer
         }
 
         var setupArgs = InstallPlan.SetupArgs(choice);
-        log($"Running setup.ps1 {string.Join(" ", setupArgs)} …");
-        var pwshArgs = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(home, "setup.ps1") };
+        // -Managed: this is the self-contained app installing itself. The WPF panel IS this running exe,
+        // so setup.ps1 must NOT install the .NET SDK to rebuild it from source (it isn't even in the
+        // payload). The SDK is then only fetched when -Media needs it to build SwarmUI.
+        log($"Running setup.ps1 -Managed {string.Join(" ", setupArgs)} …");
+        var pwshArgs = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(home, "setup.ps1"), "-Managed" };
         pwshArgs.AddRange(setupArgs);
         if (!await ShellStreamAsync(home, "pwsh", pwshArgs, log, ct).ConfigureAwait(false)) return false;
 
