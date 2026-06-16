@@ -95,7 +95,7 @@ function Build-GenBody {
         [Parameter(Mandatory)][hashtable]$Recipe,
         [Parameter(Mandatory)][hashtable]$PromptFields,
         [Parameter(Mandatory)][string]$SessionId,
-        [string]$InitImageB64,
+        [string]$InitImageB64, [string]$MaskImageB64,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
@@ -105,6 +105,7 @@ function Build-GenBody {
     # an init image turns text2image into img2img / image-edit; creativity 0 = keep the input faithfully,
     # higher = more variation (the -Strength "vary" dial). Defaults to 0 when no strength is given.
     if ($InitImageB64) { $body.initimage = $InitImageB64; $body.initimagecreativity = $(if ($Strength -ge 0) { $Strength } else { 0 }) }
+    if ($MaskImageB64) { $body.maskimage = $MaskImageB64 }   # white = the inpaint region (edit canvas)
     return $body
 }
 
@@ -119,7 +120,7 @@ function Invoke-Gen {
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1,
-        [string]$InitImage, [string]$Out,
+        [string]$InitImage, [string]$MaskImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
     if ($Kind -eq 'edit' -and -not $InitImage) { throw "-Edit needs -InitImage <path-to-image>" }
@@ -127,10 +128,16 @@ function Invoke-Gen {
     if ($Refine -and $Kind -notin @('image', 'edit')) { throw "-Refine only applies to image/edit gens (got $Kind)" }
     if ($Face -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Face only applies to image/edit/i2v gens (got $Kind)" }
     if ($Realism -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Realism only applies to image/edit/i2v gens (got $Kind)" }
+    if ($MaskImage -and $Kind -ne 'edit') { throw "-MaskImage only applies to -Edit gens (got $Kind)" }
     $initB64 = $null
     if ($InitImage) {
         if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }
         $initB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $InitImage).Path))
+    }
+    $maskB64 = $null
+    if ($MaskImage) {
+        if (-not (Test-Path -LiteralPath $MaskImage)) { throw "mask image not found: $MaskImage" }
+        $maskB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $MaskImage).Path))
     }
     # -BodyOnly: print the exact GenerateText2Image body (recipe + prompt fields + optional init image) and
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
@@ -138,7 +145,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -Seed $Seed -Count $Count -Strength $Strength
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -153,7 +160,7 @@ function Invoke-Gen {
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -Seed $Seed -Count $Count -Strength $Strength) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }

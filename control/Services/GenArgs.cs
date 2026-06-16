@@ -18,7 +18,8 @@ public sealed record GenRequest(
     bool Realism = false,
     int Seed = -1,            // >=0 = reproducible; -1 = random (SwarmUI picks)
     int Count = 1,            // batch size (images)
-    double Strength = -1)     // img2img/i2v creativity (the "vary" dial); -1 = recipe default
+    double Strength = -1,     // img2img/i2v creativity (the "vary" dial); -1 = recipe default
+    string? MaskImage = null) // inpaint mask (edit canvas); white = the region to change
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -67,6 +68,7 @@ public static class GenCli
         if (r.Realism) a.Add("-Realism");
         if (r.Raw) a.Add("-Raw");
         if (!string.IsNullOrWhiteSpace(r.InitImage)) { a.Add("-InitImage"); a.Add(r.InitImage!); }
+        if (!string.IsNullOrWhiteSpace(r.MaskImage)) { a.Add("-MaskImage"); a.Add(r.MaskImage!); }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }

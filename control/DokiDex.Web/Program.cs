@@ -72,26 +72,30 @@ api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
     if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
     var kind = (body.Kind ?? "image").Trim().ToLowerInvariant();
     if (Array.IndexOf(GenRequest.Kinds, kind) < 0) return Results.BadRequest(new { error = "unknown kind" });
-    // An init image arrives from the browser as a data: URL; the recipe's -InitImage wants a file path, so
-    // decode it to a temp file (edit/i2v/img2img). Non-data values pass through (a server-side path).
-    string? initPath = body.InitImage;
-    if (!string.IsNullOrEmpty(initPath) && initPath.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+    // Init/mask images arrive from the browser as data: URLs; the recipe wants file paths, so decode each to
+    // a temp file (edit/i2v/img2img + inpaint). Non-data values pass through (a server-side path).
+    static string? SaveDataUrl(string? v, string tag)
     {
+        if (string.IsNullOrEmpty(v) || !v.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return v;
         try
         {
-            var comma = initPath.IndexOf(',');
-            var meta = comma > 5 ? initPath[5..comma] : "";
+            var comma = v.IndexOf(',');
+            var meta = comma > 5 ? v[5..comma] : "";
             var ext = meta.Contains("png") ? ".png" : meta.Contains("webp") ? ".webp" : ".jpg";
-            var p = Path.Combine(Path.GetTempPath(), "dokidex-init-" + Guid.NewGuid().ToString("N") + ext);
-            File.WriteAllBytes(p, Convert.FromBase64String(initPath[(comma + 1)..]));
-            initPath = p;
+            var p = Path.Combine(Path.GetTempPath(), $"dokidex-{tag}-" + Guid.NewGuid().ToString("N") + ext);
+            File.WriteAllBytes(p, Convert.FromBase64String(v[(comma + 1)..]));
+            return p;
         }
-        catch { return Results.BadRequest(new { error = "bad init image" }); }
+        catch { return null; }
     }
+    var initPath = SaveDataUrl(body.InitImage, "init");
+    if (body.InitImage is not null && initPath is null) return Results.BadRequest(new { error = "bad init image" });
+    var maskPath = SaveDataUrl(body.MaskImage, "mask");
+    if (body.MaskImage is not null && maskPath is null) return Results.BadRequest(new { error = "bad mask image" });
     var req = new GenRequest(body.Prompt.Trim(), kind,
         Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
         Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
-        Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength);
+        Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath);
     return Results.Json(jobs.Submit(req).ToDto());
 });
 api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
