@@ -1,7 +1,7 @@
 # Media & Speech Recipes — exact local API calls
 
 Every capability, with the precise (often non-obvious) request that actually works on this
-setup. All verified live (`doki verify` 16/16). Media calls go to SwarmUI on `:7801`; speech to
+setup. All verified live (`doki verify` 17/17). Media calls go to SwarmUI on `:7801`; speech to
 the TTS/STT services; memory via the MCP tools.
 
 > Switch the GPU first: **`.\doki.ps1 up media`** for image/video/audio, **`up agent`** for

@@ -97,7 +97,7 @@ The VS Code extension that shows the autocomplete suggestions (from the FIM brai
 A short "house rules" note you leave in each project: the test command, the code style, "always run the tests before saying you're done." The cheapest way to make the robot reliable.
 
 **Eval / golden‑task suite**
-The robot's "driving test" — a fixed set of real coding jobs, each with an automatic pass/fail check. Re‑run after any change to prove things got better, not worse. DokiDex's score: 10/11 (91%).
+The robot's "driving test" — a 15‑task golden eval suite of real coding jobs, each with an automatic pass/fail check. Re‑run after any change to prove things got better, not worse.
 
 **Headless**
 Running the robot automatically with no human watching — used for the driving test. In this mode it acts *without* asking permission, which is why it's only ever pointed at throwaway copies.

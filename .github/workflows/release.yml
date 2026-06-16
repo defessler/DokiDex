@@ -3,8 +3,9 @@ name: release
 # Build the self-contained single-file Windows panel and publish a GitHub release whenever a
 # version tag is pushed:   git tag v0.1.0 && git push origin v0.1.0
 # The in-app Updater (control/Services/Updater.cs) checks these releases and swaps the exe in place.
-# NOTE: the exe is the auto-update payload and must live INSIDE a cloned DokiDex repo (the panel
-# shells doki.ps1 and walks up to find it); running it standalone elsewhere is unsupported.
+# The exe is standalone: on first run it installs the stack via the Setup Wizard (or adopts an existing
+# DokiDex folder) and then manages it — no cloned repo required. It bundles the runtime scripts as an
+# embedded payload and refreshes them after an update.
 # workflow_dispatch builds/validates only — publishing is gated to tag pushes below.
 on:
   push:

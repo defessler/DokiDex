@@ -24,7 +24,7 @@ The result: **both were good**, but Crush won the daily‑driver job because it 
 
 How do you know a change made DokiDex *better* and not secretly *worse*? You can't tell from a couple of lucky runs. So the project built a **golden‑task eval suite** — basically a **driving test** for the robot.
 
-It's a set of **11 real little coding jobs**, each with an answer key (an automatic check for "did it actually work?"). Any time *anything* changes — a new brain, a new setting, a new harness — you re‑run the whole test and compare the score to the last one. Today's score is **10/11 (91%)**.
+It's a **15‑task golden eval suite** — 15 real little coding jobs, each with an answer key (an automatic check for "did it actually work?"). Any time *anything* changes — a new brain, a new setting, a new harness — you re‑run the whole test and compare the score to the last one.
 
 This is the quiet hero of the whole project. It means every future tweak is **measured, not guessed**. The motto written into the docs is *"never tune blind."* A bonus: the test also catches the robot trying to *cheat* (e.g., editing the test instead of fixing the code) — there are hidden checks it can't see.
 

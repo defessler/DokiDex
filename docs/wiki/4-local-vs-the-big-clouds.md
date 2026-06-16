@@ -60,7 +60,7 @@ How close is "close"? The project's own design doc sets these expectations, and 
 | **Running cost** | 🟢 **~$0** after hardware vs. a forever subscription. |
 | **Up‑front cost & setup** | 🔵 **The cloud is far easier** — laptop + login vs. a pricey GPU + tinkering. |
 
-> 📊 On DokiDex's own 11‑task test (real little coding jobs), the everyday brain passed **10 out of 11 (91%)**. The one it failed was a tricky refactor where a hidden test caught a subtle behavior change — exactly the "deeper reasoning" category where smaller brains are weakest. That single failure is the whole story of the gap in miniature.
+> 📊 DokiDex's own **15‑task golden eval suite** (real little coding jobs) tracks exactly this gap. The tasks it stumbles on are the tricky refactors where a hidden test catches a subtle behavior change — exactly the "deeper reasoning" category where smaller brains are weakest. Those failures are the whole story of the gap in miniature.
 
 ## Why the gap is smaller than you'd think — and shrinking
 
