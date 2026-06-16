@@ -13,10 +13,13 @@ public sealed class DokiService
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
+    // Status is NATIVE now (no pwsh on the hot path): StatusProbe probes health + pidfiles + nvidia-smi +
+    // llama-swap directly and returns the same StatusDoc the panel already parses. Null only when the home is
+    // missing/moved, so the overlay's "Locate DokiDex folder…" recovery still fires for that case.
     public async Task<StatusDoc?> GetStatusAsync(CancellationToken ct = default)
     {
-        var json = await CaptureAsync(new[] { "status", "json" }, ct).ConfigureAwait(false);
-        return ParseStatus(json);
+        if (!RepoPaths.HasValidRoot) return null;
+        return await StatusProbe.GetAsync(ct).ConfigureAwait(false);
     }
 
     // Pure, testable: deserialize the `doki status json` payload. Returns null on empty/invalid.
@@ -27,13 +30,13 @@ public sealed class DokiService
         catch { return null; }
     }
 
-    // Control actions are fire-and-forget: doki runs in its own hidden pwsh and the 2s poll
-    // reflects the new state. Mode switches can take a while (model loads) — we don't block.
-    public void Up(string profile) => Spawn(new[] { "up", profile });
-    public void Down() => Spawn(new[] { "down" });
-    public void StartService(string svc) => Spawn(new[] { "start", svc });
-    public void StopService(string svc) => Spawn(new[] { "stop", svc });
-    public void RestartService(string svc) => Spawn(new[] { "restart", svc });
+    // Control actions are native + fire-and-forget: Lifecycle evicts the opposite GPU group and shells the
+    // bundled per-service launcher (detached); the 2s native status poll reflects the new state. We don't block.
+    public void Up(string profile) => Lifecycle.Up(profile);
+    public void Down() => Lifecycle.Down();
+    public void StartService(string svc) => Lifecycle.Start(svc);
+    public void StopService(string svc) => Lifecycle.Stop(svc);
+    public void RestartService(string svc) => Lifecycle.Restart(svc);
 
     // Launch an http(s) URL only. UseShellExecute resolves the string against Windows protocol/file
     // associations, so anything non-http(s) (file://, UNC \\host\share, ms-msdt:/search-ms:/vscode: handlers)
@@ -164,41 +167,8 @@ public sealed class DokiService
         catch { }
     }
 
-    private static void Spawn(string[] args)
-    {
-        var psi = NewPsi(args, capture: false);
-        try { Process.Start(psi)?.Dispose(); } catch { }   // fire-and-forget: release the handle (no output read)
-    }
-
-    private static async Task<string> CaptureAsync(string[] args, CancellationToken ct)
-    {
-        var psi = NewPsi(args, capture: true);
-        Process? p = null;
-        try
-        {
-            p = Process.Start(psi);
-            if (p == null) return "";
-            // Drain BOTH streams. stderr is redirected, so leaving it unread would let a large
-            // stderr write fill the OS pipe buffer, block the child, and deadlock WaitForExit —
-            // hanging the status poll. The 30s cap guards against an otherwise-wedged pwsh.
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
-            var outTask = p.StandardOutput.ReadToEndAsync();
-            var errTask = p.StandardError.ReadToEndAsync();
-            await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-            await Task.WhenAll(outTask, errTask).ConfigureAwait(false);
-            return outTask.Result;
-        }
-        catch
-        {
-            try { if (p is { HasExited: false }) p.Kill(entireProcessTree: true); } catch { }
-            return "";
-        }
-        finally { p?.Dispose(); }
-    }
-
-    // Like CaptureAsync but returns exit-success + BOTH streams, with a caller-set timeout (gen runs for
-    // minutes, not the 30s status budget). Same pipe-drain discipline so a chatty child can't deadlock.
+    // Capture exit-success + BOTH streams with a caller-set timeout (gen runs for minutes). Drains both pipes
+    // so a chatty child can't fill the OS pipe buffer and deadlock WaitForExit.
     private static async Task<(bool ok, string stdout, string stderr)> CaptureFullAsync(IReadOnlyList<string> args, TimeSpan timeout, CancellationToken ct)
     {
         var psi = NewPsi(args, capture: true);
