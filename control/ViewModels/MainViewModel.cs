@@ -169,9 +169,13 @@ public partial class MainViewModel : ObservableObject
         return $"{mode.ToUpperInvariant()}: {names}  (~{sum} GB · {fit})";
     }
 
-    [RelayCommand]
+    // CanExecute is false for the already-active mode, so that button auto-disables (WPF binds IsEnabled to
+    // the command) — you can't re-trigger a switch into the mode you're already in. The early-return is the
+    // same guard for non-button callers (e.g. the Studio "Switch to MEDIA" hand-off).
+    [RelayCommand(CanExecute = nameof(CanSwitchMode))]
     private void SwitchMode(string target)
     {
+        if (target == ActiveMode) return;
         var targetGroup = target == "media" ? "media" : "llm";
         var current = ActiveGroup;
         bool evicting = current is "llm" or "media" && current != targetGroup;
@@ -195,6 +199,10 @@ public partial class MainViewModel : ObservableObject
             $"Switch to {target.ToUpperInvariant()} mode?",
             stop, start, headroom, sum <= 32, Go));
     }
+
+    // The active mode can't be re-selected; flipping ActiveMode re-queries the buttons' enabled state.
+    private bool CanSwitchMode(string target) => target != ActiveMode;
+    partial void OnActiveModeChanged(string value) => SwitchModeCommand.NotifyCanExecuteChanged();
 
     private string GroupOf(string svc)
     {
