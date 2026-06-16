@@ -128,6 +128,7 @@ public partial class InstallerViewModel : ObservableObject
         var s = AppSettings.Load();
         s.InstallRoot = Home;
         s.InstallManaged = managed;
+        if (managed) s.InstalledVersion = Updater.RunningVersion();
         s.Save();
         RepoPaths.Refresh();
     }

@@ -1,5 +1,30 @@
 # Decision log
 
+## 2026-06-16 — Control panel becomes an all-in-one **installer + manager** (repo-independent)
+
+The downloaded exe is now the product, built from the repo by CI but **independent of any cloned repo at
+runtime** — fixing the "status unavailable / must live in a repo" failure when run standalone.
+
+**Hybrid engine** (chosen over a full C# rewrite or pure-script): native C# **control plane** (status poll +
+up/down/start/stop) so the everyday path needs no pwsh, + **bundled PowerShell** for the heavy install
+(setup.ps1, ~100 GB model downloads, SwarmUI) and gen. A `ServiceRegistry` mirrors doki.ps1's
+`$Services`/`$Profiles`, drift-guarded by a test that parses doki.ps1.
+
+**Home resolution:** `RepoPaths.Root` prefers a saved `InstallRoot` (`%LocalAppData%\dokidex\settings.json`),
+else walks up to doki.ps1 (dev), else the exe dir — never a hardcoded path. First run opens a **Setup Wizard**
+(fresh install OR adopt an existing folder); the status overlay gained a "Locate DokiDex folder" recovery.
+
+**Embedded payload:** the csproj zips the runtime scripts/configs into the exe (`make-payload.ps1` →
+`DokiDex.payload.zip`); a fresh install extracts them to the chosen home, and a self-update refreshes them once
+per version (never an adopted repo, never the downloaded models). Heavy assets still download via setup.
+
+**Setup Wizard:** one user-picked install folder, a component checklist → setup.ps1 flags, prereqs detected
+with **one-click-each** winget install (git/python/uv/pwsh) + guidance for App Installer + GPU driver, live log.
+
+Built in two phases (foundation + native control plane; then the installer). Verified: `doki test` green (PS 107,
+Py 53, .NET 122) + a local single-file publish (66 MB) confirms the payload embeds in the release artifact.
+Spec: `docs/superpowers/specs/2026-06-16-allinone-installer-manager-design.md`.
+
 ## 2026-06-16 — Project-move fallout fixed + **Z-Image Base is the new image default** + media-quality upgrades
 
 Triggered by moving/renaming the project `DokiCode → DokiDex` and a "make quality the default" pass.

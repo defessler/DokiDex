@@ -101,6 +101,20 @@ public partial class App : Application
             if (installer.ShowDialog() != true) { Shutdown(); return; }
         }
 
+        // After a self-update the new exe carries newer bundled scripts: refresh an app-managed home's scripts
+        // once per version (never an adopted repo — git owns those; never models — they aren't in the payload).
+        try
+        {
+            var st = Services.AppSettings.Load();
+            if (st.InstallManaged && Services.RepoPaths.HasValidRoot && st.InstalledVersion != Services.Updater.RunningVersion())
+            {
+                Services.Payload.ExtractBundledTo(Services.RepoPaths.Root, overwriteExisting: true);
+                st.InstalledVersion = Services.Updater.RunningVersion();
+                st.Save();
+            }
+        }
+        catch { }
+
         new BootWindow().Show();
     }
 
