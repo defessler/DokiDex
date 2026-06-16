@@ -82,6 +82,15 @@ Assert ($pfReal.prompt -match '<lora:')                            "-Realism -> 
 Assert ($pfReal.prompt -match '<lora:Z-Image-Realism:0\.7>')       "-Realism -> the Z-Image realism LoRA at 0.7"
 $pfBoth = Get-GenPromptFields -Kind edit -Idea 'fix it' -Face -Realism
 Assert ($pfBoth.prompt -match '<lora:' -and $pfBoth.prompt -match '<segment:face') "edit -Face -Realism -> both tags after the literal instruction"
+
+# --- LoRA mixer: -Lora "name:weight,name" -> <lora:name:weight> tags (image-family only; bare name -> 1) ---
+$pfLora = Get-GenPromptFields -Kind image -Idea 'a cat' -Lora 'anime-style:0.8, detail-boost'
+Assert ($pfLora.prompt -match '<lora:anime-style:0\.8>')          "-Lora name:weight -> <lora:name:weight>"
+Assert ($pfLora.prompt -match '<lora:detail-boost:1>')            "-Lora bare name -> weight defaults to 1"
+$pfLoraEdit = Get-GenPromptFields -Kind edit -Idea 'fix' -Lora 'subdir/foo:0.5'
+Assert ($pfLoraEdit.prompt -match '<lora:subdir/foo:0\.5>')       "-Lora supports a subdir-relative name"
+Assert (-not ((Get-GenPromptFields -Kind music -Idea 'x' -Lora 'a:0.5').prompt -match '<lora:')) "-Lora ignored on non-image-family kinds (music)"
+Assert (-not ($pf.prompt -match '<lora:'))                        "no -Lora -> no <lora:> tag (opt-in)"
 # music/video are NOT image-family: tags must never leak onto them
 Assert (-not ((Get-GenPromptFields -Kind music -Idea 'x' -Face -Realism).prompt -match '<segment:face|<lora:')) "music -Face/-Realism -> no SwarmUI tags (not image-family)"
 

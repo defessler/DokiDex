@@ -91,6 +91,10 @@
         <label>Duration <input id="duration" type="number" min="1" max="240" placeholder="10" class="kin" style="width:64px"> s</label>
         <label>BPM <input id="bpm" type="number" min="40" max="220" placeholder="128" class="kin" style="width:64px"></label>
       </div>
+      <details id="lorabox" style="display:none;margin:4px 0">
+        <summary class="hint" style="cursor:pointer">LoRAs (mix installed LoRAs with per-LoRA weights)</summary>
+        <div id="loralist" class="mods" style="margin-top:6px"></div>
+      </details>
       <div id="maskbox" style="display:none;margin:4px 0 12px">
         <div class="hint" style="margin-bottom:4px">Edit canvas — paint the area to change, then Generate:</div>
         <div style="position:relative;display:inline-block;border:1px solid var(--border);border-radius:6px;overflow:hidden">
@@ -175,6 +179,27 @@
       updateMusicBox();
     }
     function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
+    let _loras=[];
+    async function loadLoras(){
+      try{ _loras = await (await fetch('/api/loras')).json(); }catch{ _loras=[]; }
+      const box=document.getElementById('lorabox'), list=document.getElementById('loralist');
+      if(!_loras.length){ box.style.display='none'; return; }
+      box.style.display=''; list.innerHTML='';
+      _loras.forEach(n=>{
+        const lab=document.createElement('label'); lab.style.display='flex'; lab.style.gap='4px'; lab.style.alignItems='center';
+        const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.lora=n;
+        const wt=document.createElement('input'); wt.type='number'; wt.className='kin'; wt.style.width='52px'; wt.step='0.05'; wt.value='0.8';
+        lab.appendChild(cb); lab.append(' '+n+' '); lab.appendChild(wt); list.appendChild(lab);
+      });
+    }
+    function collectLoras(){
+      const out=[];
+      document.querySelectorAll('#loralist label').forEach(lab=>{
+        const cb=lab.querySelector('input[type=checkbox]'), wt=lab.querySelector('input[type=number]');
+        if(cb && cb.checked) out.push(cb.dataset.lora+':'+((wt&&wt.value)||'0.8'));
+      });
+      return out.join(',');
+    }
     let _maskDrawn=false, _maskDrawing=false;
     function updateMaskBox(){
       const show = state.kind==='edit' && !!state.initImage;
@@ -203,6 +228,7 @@
         const body = Object.assign({ prompt, kind:state.kind, count: parseInt(document.getElementById('count').value)||1 }, state.mods);
         if (seedVal!=='') body.seed = parseInt(seedVal);
         const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
+        const loras = collectLoras(); if (loras) body.lora = loras;
         if (state.kind==='music') {
           const ly = document.getElementById('lyrics').value.trim(); if (ly) body.lyrics = ly;
           const du = parseInt(document.getElementById('duration').value); if (du>0) body.duration = du;
@@ -445,7 +471,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); renderCast(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>

@@ -135,6 +135,19 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Lora_passes_through_as_a_separate_value_arg_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Lora: "anime:0.8,detail", OutPath: "o"));
+        var i = a.IndexOf("-Lora");
+        Assert.True(i >= 0);
+        Assert.Equal("anime:0.8,detail", a[i + 1]);
+    }
+
+    [Fact]
+    public void Lora_is_omitted_when_blank()
+        => Assert.DoesNotContain("-Lora", GenCli.BuildArgs(new GenRequest("x", "image", Lora: "  ", OutPath: "o")));
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));

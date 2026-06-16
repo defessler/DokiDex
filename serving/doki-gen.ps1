@@ -97,7 +97,7 @@ function Get-GenRecipe {
 function Get-GenPromptFields {
     param(
         [Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][string]$Idea,
-        [switch]$Raw, [switch]$Face, [switch]$Realism, [string]$Lyrics
+        [switch]$Raw, [switch]$Face, [switch]$Realism, [string]$Lyrics, [string]$Lora
     )
     # base on-disk name (no extension) of the Z-Image realism LoRA in SwarmUI's Models\Lora (setup.ps1).
     $RealismLora = 'Z-Image-Realism'
@@ -113,6 +113,19 @@ function Get-GenPromptFields {
     if ($Kind -in @('image', 'edit', 'i2v')) {
         if ($Realism) { $p += " <lora:$($RealismLora):0.7>" }
         if ($Face)    { $p += ' <segment:face,0.4,0.5>' }
+        # -Lora "name:0.8,other" -> <lora:name:0.8> tags (the LoRA mixer); bare name defaults to weight 1.
+        if ($Lora) {
+            foreach ($entry in ($Lora -split ',')) {
+                $e = $entry.Trim(); if (-not $e) { continue }
+                $name = $e; $wt = '1'
+                $ci = $e.LastIndexOf(':')
+                if ($ci -gt 0) {
+                    $maybe = $e.Substring($ci + 1).Trim()
+                    if ($maybe -match '^\d+(\.\d+)?$') { $name = $e.Substring(0, $ci).Trim(); $wt = $maybe }
+                }
+                if ($name) { $p += " <lora:$($name):$wt>" }
+            }
+        }
     }
     return @{ prompt = $p }
 }
@@ -160,7 +173,7 @@ function Invoke-Gen {
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
-        [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0,
+        [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora,
         [string]$InitImage, [string]$MaskImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -186,12 +199,13 @@ function Invoke-Gen {
     $lyricsArg   = $(if ($Kind -eq 'music') { $Lyrics } else { '' })
     $durationArg = $(if ($Kind -eq 'music') { $Duration } else { 0 })
     $bpmArg      = $(if ($Kind -eq 'music') { $Bpm } else { 0 })
+    $loraArg     = $(if ($Kind -in @('image', 'edit', 'i2v')) { $Lora } else { '' })   # LoRA mixer: image-family only
     # -BodyOnly: print the exact GenerateText2Image body (recipe + prompt fields + optional init image) and
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
     # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
-        $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg
+        $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg
         $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
@@ -205,7 +219,7 @@ function Invoke-Gen {
     Write-Host "[gen] $tag  <-  ""$Prompt""" -ForegroundColor Cyan
 
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
-    $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg
+    $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
     $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body

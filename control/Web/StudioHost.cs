@@ -136,7 +136,7 @@ public static class StudioHost
                 Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
                 Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
-                Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm);
+                Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
@@ -162,6 +162,7 @@ public static class StudioHost
 
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));
+        api.MapGet("/loras", () => Results.Json(Loras.List()));   // for the LoRA mixer (image-family)
         api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));
         api.MapDelete("/models/{id}", (string id, ModelManager mm) => mm.Delete(id) ? Results.Ok() : Results.NotFound());
 
