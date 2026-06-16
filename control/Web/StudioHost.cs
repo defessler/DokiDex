@@ -182,6 +182,9 @@ public static class StudioHost
         // regional tags reach SwarmUI unrewritten.
         api.MapPost("/compose/multichar", (MultiCharSpec body) => Results.Json(new { prompt = MultiCharacter.Compile(body) }));
 
+        // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
+        api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));
+
         // ---- steerable rewriter (user-directed prompt rewrite via the local LLM; conversational iterate) ----
         api.MapPost("/rewrite", async (RewriteRequest body, CancellationToken ct) =>
         {
