@@ -42,6 +42,15 @@
     <ApplicationDefinition Remove="DokiDex.Control.Tests\**" />
   </ItemGroup>
 
+  <!-- the web host project also lives under this folder; keep its sources/content out of the WPF app -->
+  <ItemGroup>
+    <Compile Remove="DokiDex.Web\**" />
+    <Content Remove="DokiDex.Web\**" />
+    <None Remove="DokiDex.Web\**" />
+    <Page Remove="DokiDex.Web\**" />
+    <EmbeddedResource Remove="DokiDex.Web\**" />
+  </ItemGroup>
+
   <!-- Embedded runtime payload: make-payload.ps1 zips the runtime scripts/configs (NOT the heavy models),
        embedded so the installed app extracts its own home and runs independent of any cloned repo. The
        EmbeddedResource is declared statically (the .zip is produced by StagePayload before CoreCompile);

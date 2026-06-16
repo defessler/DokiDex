@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DokiDex Studio</title>
+  <style>
+    :root {
+      --bg:#0A0E14; --surface:#0D121B; --surface2:#121826; --border:#243140;
+      --text:#E6EEF6; --dim:#7E8C99; --cyan:#35E0F0; --gold:#E8C77A; --amber:#E8C77A;
+      --danger:#FF6B6B;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+      font-family:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif; }
+    header { display:flex; align-items:center; gap:12px; padding:18px 28px;
+      border-bottom:1px solid var(--border); background:var(--surface); }
+    .brand { font-weight:300; letter-spacing:3px; font-size:18px; }
+    .brand b { color:var(--gold); font-weight:600; letter-spacing:1px; }
+    .tag { color:var(--dim); font-size:12px; font-family:"Cascadia Mono",Consolas,monospace; }
+    main { padding:24px 28px; max-width:1100px; margin:0 auto; }
+    .gpu { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin-bottom:20px; }
+    .gpu .head { display:flex; justify-content:space-between; font-family:"Cascadia Mono",Consolas,monospace; font-size:13px; }
+    .bar { height:6px; background:var(--bg); border-radius:3px; margin-top:8px; overflow:hidden; }
+    .bar > div { height:100%; background:var(--cyan); width:0; transition:width .4s; }
+    .modes { display:flex; gap:10px; margin-bottom:22px; flex-wrap:wrap; }
+    .mode { background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:var(--dim);
+      padding:10px 16px; cursor:pointer; font-size:13px; min-width:120px; text-align:left; }
+    .mode:hover { border-color:#80E8C77A; }
+    .mode.active { border-left:2px solid var(--cyan); color:var(--text); background:var(--surface); }
+    .mode small { display:block; color:var(--dim); font-size:10px; margin-top:2px; }
+    h2 { font-size:11px; letter-spacing:1px; color:var(--dim); font-weight:600; text-transform:uppercase; margin:18px 0 10px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+    .card { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+    .card .row { display:flex; justify-content:space-between; align-items:center; }
+    .card .name { font-size:13px; }
+    .card .meta { color:var(--dim); font-size:11px; font-family:"Cascadia Mono",Consolas,monospace; margin-top:4px; }
+    .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; }
+    .ok { background:var(--cyan); } .warn { background:var(--amber); } .down { background:#3a4452; } .bad { background:var(--danger); }
+    .err { color:var(--amber); font-family:"Cascadia Mono",Consolas,monospace; font-size:13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">D O K I <b>DEX</b></span>
+    <span class="tag">// local studio</span>
+  </header>
+  <main>
+    <div id="app"><p class="tag">connecting…</p></div>
+  </main>
+  <script>
+    const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
+    const MODES = [
+      ['agent','chat + code'], ['coexist','+ autocomplete'], ['media','image + video']
+    ];
+    async function post(url) { try { await fetch(url, { method:'POST' }); } catch {} setTimeout(refresh, 400); }
+    function svcCard(s) {
+      const cls = !s.installed ? 'down' : (s.running && s.healthy ? 'ok' : (s.running ? 'warn' : 'down'));
+      const state = !s.installed ? 'not installed' : (s.running ? (s.healthy ? 'healthy' : 'starting…') : 'stopped');
+      const meta = [s.port ? ':'+s.port : null, s.vramGb ? s.vramGb+' GB' : null, s.model].filter(Boolean).join(' · ');
+      return `<div class="card"><div class="row"><span class="name"><span class="dot ${cls}"></span>${s.name}</span>
+        <span class="tag">${state}</span></div><div class="meta">${meta || s.desc || ''}</div></div>`;
+    }
+    function render(doc) {
+      const app = document.getElementById('app');
+      const gpu = doc.gpu || {};
+      const pct = gpu.totalMB ? Math.round(100 * gpu.usedMB / gpu.totalMB) : 0;
+      const active = gpu.activeGroup || 'none';
+      const llm = (doc.services||[]).filter(s => s.group !== 'media');
+      const media = (doc.services||[]).filter(s => s.group === 'media');
+      app.innerHTML = '';
+      app.appendChild($(`<div class="gpu"><div class="head"><span>GPU · ${active.toUpperCase()}</span>
+        <span>${Math.round((gpu.usedMB||0)/1024)} / ${Math.round((gpu.totalMB||0)/1024)} GB · ${gpu.util||0}%</span></div>
+        <div class="bar"><div style="width:${pct}%"></div></div></div>`));
+      const modes = $('<div class="modes"></div>');
+      for (const [m, sub] of MODES) {
+        const b = $(`<button class="mode ${active===m||(m==='agent'&&active==='llm')?'active':''}"><span>${m.toUpperCase()}</span><small>${sub}</small></button>`);
+        b.onclick = () => post('/api/mode/' + m);
+        modes.appendChild(b);
+      }
+      app.appendChild(modes);
+      if (llm.length) { app.appendChild($('<h2>LLM group</h2>')); const g=$('<div class="grid"></div>'); llm.forEach(s=>g.appendChild($(svcCard(s)))); app.appendChild(g); }
+      if (media.length) { app.appendChild($('<h2>Media group</h2>')); const g=$('<div class="grid"></div>'); media.forEach(s=>g.appendChild($(svcCard(s)))); app.appendChild(g); }
+    }
+    async function refresh() {
+      try {
+        const r = await fetch('/api/status');
+        if (r.status === 503) { document.getElementById('app').innerHTML = '<p class="err">DokiDex home not found — is the stack installed?</p>'; return; }
+        render(await r.json());
+      } catch (e) {
+        document.getElementById('app').innerHTML = '<p class="err">web host unreachable</p>';
+      }
+    }
+    refresh(); setInterval(refresh, 2000);
+  </script>
+</body>
+</html>
