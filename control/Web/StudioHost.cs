@@ -136,7 +136,7 @@ public static class StudioHost
                 Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
                 Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
-                Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora);
+                Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
@@ -206,7 +206,8 @@ public static class StudioHost
                     Fast: BoolCell(row, "fast"), Upscale: BoolCell(row, "upscale"), Refine: BoolCell(row, "refine"),
                     Face: BoolCell(row, "face"), Realism: BoolCell(row, "realism"), Raw: BoolCell(row, "raw"),
                     Seed: IntCell(row, "seed", -1), Count: Math.Clamp(IntCell(row, "count", 1), 1, 9),
-                    Strength: DblCell(row, "strength", -1), Aspect: Cell(row, "aspect"), Lora: Cell(row, "lora"));
+                    Strength: DblCell(row, "strength", -1), Aspect: Cell(row, "aspect"), Lora: Cell(row, "lora"),
+                    Negative: Cell(row, "negative"));
                 ids.Add(jobs.Submit(req).Id);
             }
             return Results.Json(new { submitted = ids.Count, ids });

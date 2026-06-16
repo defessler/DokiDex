@@ -102,6 +102,14 @@ Assert (-not $body.ContainsKey('initimage'))                       "body has no 
 $bodyI = Build-GenBody -Recipe (Get-GenRecipe -Kind edit) -PromptFields (Get-GenPromptFields -Kind edit -Idea 'y') -SessionId 's' -InitImageB64 'BASE64DATA'
 Assert ($bodyI.initimage -eq 'BASE64DATA' -and $bodyI.initimagecreativity -eq 0) "init image -> initimage + creativity 0"
 
+# --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
+$bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
+Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"
+$bNegMus = Build-GenBody -Recipe (Get-GenRecipe -Kind music) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's' -Negative 'distorted'
+Assert ($bNegMus.negativeprompt -eq 'distorted') "-Negative -> sets negativeprompt when the recipe has none (music)"
+$bNoNeg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
+Assert ($bNoNeg.negativeprompt -notmatch 'extra limbs') "no -Negative -> recipe negative unchanged"
+
 # --- Build-GenBody: aspect-ratio presets reshape width/height (image/edit only) ---
 function Test-Aspect([string]$Aspect, [int]$W, [int]$H) {
     Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Aspect $Aspect

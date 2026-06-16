@@ -24,7 +24,8 @@ public sealed record GenRequest(
     string? Lyrics = null,    // music: lyrics ACE-Step sings (else [instrumental]); music kind only
     int Duration = 0,         // music: track length in seconds (0 = recipe default 10)
     int Bpm = 0,              // music: tempo override (0 = recipe default 128)
-    string? Lora = null)      // LoRA mixer: "name:0.8,other" -> <lora:..> tags; image-family only
+    string? Lora = null,      // LoRA mixer: "name:0.8,other" -> <lora:..> tags; image-family only
+    string? Negative = null)  // user negative prompt: appended to (image) or set as the recipe negativeprompt
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -79,6 +80,7 @@ public static class GenCli
         if (r.Duration > 0) { a.Add("-Duration"); a.Add(r.Duration.ToString()); }
         if (r.Bpm > 0) { a.Add("-Bpm"); a.Add(r.Bpm.ToString()); }
         if (!string.IsNullOrWhiteSpace(r.Lora)) { a.Add("-Lora"); a.Add(r.Lora!); }
+        if (!string.IsNullOrWhiteSpace(r.Negative)) { a.Add("-Negative"); a.Add(r.Negative!); }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }

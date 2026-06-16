@@ -87,6 +87,9 @@
         <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
         <span id="initname" class="hint" style="cursor:pointer"></span>
       </div>
+      <div class="mods">
+        <label style="flex:1;min-width:200px">Negative <input id="negPrompt" class="kin" style="width:100%" placeholder="things to avoid (appended to the recipe negative)"></label>
+      </div>
       <div id="musicbox" class="mods" style="display:none">
         <label style="flex:1 1 100%">Lyrics <textarea id="lyrics" rows="2" placeholder="leave blank for an instrumental" class="kin" style="width:100%;resize:vertical"></textarea></label>
         <label>Duration <input id="duration" type="number" min="1" max="240" placeholder="10" class="kin" style="width:64px"> s</label>
@@ -265,6 +268,7 @@
         const body = Object.assign({ prompt, kind:state.kind, count: parseInt(document.getElementById('count').value)||1 }, state.mods);
         if (seedVal!=='') body.seed = parseInt(seedVal);
         const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
+        const neg = document.getElementById('negPrompt').value.trim(); if (neg) body.negative = neg;
         const loras = collectLoras(); if (loras) body.lora = loras;
         if (state.kind==='music') {
           const ly = document.getElementById('lyrics').value.trim(); if (ly) body.lyrics = ly;

@@ -148,6 +148,19 @@ public class GenCliTests
         => Assert.DoesNotContain("-Lora", GenCli.BuildArgs(new GenRequest("x", "image", Lora: "  ", OutPath: "o")));
 
     [Fact]
+    public void Negative_passes_through_as_a_separate_value_arg_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Negative: "blurry, extra fingers", OutPath: "o"));
+        var i = a.IndexOf("-Negative");
+        Assert.True(i >= 0);
+        Assert.Equal("blurry, extra fingers", a[i + 1]);
+    }
+
+    [Fact]
+    public void Negative_is_omitted_when_blank()
+        => Assert.DoesNotContain("-Negative", GenCli.BuildArgs(new GenRequest("x", "image", Negative: "  ", OutPath: "o")));
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));
