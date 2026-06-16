@@ -42,4 +42,20 @@
     <ApplicationDefinition Remove="DokiDex.Control.Tests\**" />
   </ItemGroup>
 
+  <!-- Embedded runtime payload: make-payload.ps1 zips the runtime scripts/configs (NOT the heavy models),
+       embedded so the installed app extracts its own home and runs independent of any cloned repo. The
+       EmbeddedResource is declared statically (the .zip is produced by StagePayload before CoreCompile);
+       StagePayload is incremental (Inputs/Outputs) so dev builds re-zip only when a runtime file changes. -->
+  <ItemGroup>
+    <EmbeddedResource Include="$(IntermediateOutputPath)payload.zip" LogicalName="DokiDex.payload.zip" Visible="false" />
+  </ItemGroup>
+  <Target Name="StagePayload" BeforeTargets="CoreCompile"
+          Inputs="$(MSBuildProjectDirectory)\..\doki.ps1;$(MSBuildProjectDirectory)\..\verify.ps1;$(MSBuildProjectDirectory)\..\setup.ps1;$(MSBuildProjectDirectory)\..\serving\**\*;$(MSBuildProjectDirectory)\..\harness\**\*;$(MSBuildProjectDirectory)\..\media-assets\**\*"
+          Outputs="$(IntermediateOutputPath)payload.zip">
+    <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\make-payload.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Out &quot;$(IntermediateOutputPath)payload.zip&quot;" />
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)payload.zip" />
+    </ItemGroup>
+  </Target>
+
 </Project>
