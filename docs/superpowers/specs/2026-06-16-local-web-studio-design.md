@@ -149,6 +149,15 @@ Author one `media-assets/model-catalog.json` — ComfyUI-Manager's entry shape `
 
 **First concrete end-to-end demo (end of P1):** double-click exe → tray boots SwarmUI + server → browser opens → type a prompt → watch a generation card fill with live % and a resolving preview thumbnail → cancel mid-gen → final image lands in the (P2) library. That single flow proves launcher, web host, recipe port, WS bridge, queue, and cancel.
 
+### Build status (2026-06-16)
+
+**Shipped (all on `feat/web-studio`, green: control 161/0, doki-gen 59/0):**
+- **P0–P4 + prereqs** complete (`DokiDex.Web` host, control-plane API, live `GenerateText2ImageWS` gen, library/gallery, model manager, recipe knobs, SwarmUI commit-pin + eviction-confirm).
+- **Packaging decision RESOLVED to in-process** (decision #1 below): the studio server (`StudioHost`) is hosted **in-process by the WPF panel** via a `Microsoft.AspNetCore.App` FrameworkReference, and the SPA is an **embedded** single `index.html` served via `MapFallback`. So the existing single self-contained exe ships the whole studio with **zero CI change** — no second process to co-publish/find/kill. A thin standalone `DokiDex.Web.exe` remains for SPA dev iteration. (This supersedes the two-exe model and the `StageSpa`/Vite plan in §6.3/§6.6 — vanilla embedded SPA was sufficient; Vite deferred as YAGNI.)
+- **P5 — Edit canvas** (mask inpaint) + these **top backlog features**: aspect-ratio presets; structured **music composer** (lyrics/duration/BPM); **script-to-shotlist Director** (local LLM → editable shots → batch image gen); **multi-character "Cast" composer** (base + isolated per-character regions → SwarmUI `<object:>` tags); dynamic-prompt **wildcards** (`__name__` per-seed, resolved prompt recorded); **steerable rewriter** (user-directed, conversational iterate, shared `LocalLlm` helper). Each: pure tested core + graceful "start agent/media mode" degradation.
+
+**Remaining backlog = model-/server-/GPU-gated** (cannot be built AND verified in a headless dev env — tracked, not built): per-ref ControlNet stacking, LoRA mixer, character-reference (InstantID/PuLID/FaceID), Smart-Layers segmenter, retexture, novel-view re-angle, upscale engines (need the respective models/ControlNets); the **layout-first composer** (text-strong model) and **Scene-to-Image 3D blockout** (Depth-ControlNet); **Demucs stem separation** + the **TTS voice registry / dialogue** (need the Demucs install + the Chatterbox `:8004` server running, dir layout unverifiable headless); video keyframe/extend/camera (need FLF2V/motion nodes verified); realtime scratchpad / sketch-live (need the GPU to verify). See the platform backlog for the full list + per-item local-feasibility notes.
+
 ---
 
 ## 6. Decisions to Confirm (owner sign-off before building)

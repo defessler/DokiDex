@@ -2,6 +2,8 @@
 
 # DokiDex — Prioritized Feature Backlog (deduped, locally-feasible only)
 
+> **SHIPPED (2026-06-16, `feat/web-studio`):** the studio host + all of P0–P5's foundation, plus these backlog rows: **structured/section-aware music composer** (baseline: lyrics + duration + bpm), **Script-to-Shotlist Director Agent**, **Multi-Character Directorial Composer** (the "Cast" surface — base + isolated per-character `<object:>` regions), **Wildcards / dynamic-prompt randomizer** (per-seed, resolved-prompt recorded), and the **Steerable rewriter** (conversational iterate). The whole studio ships in the existing single self-contained exe (Kestrel hosted in-process; SPA embedded). Everything else below is still open; the highest-value remaining items are **model-/server-gated** (ControlNet/LoRA/FaceID/segmenter/upscaler models, the Demucs sidecar, the Chatterbox `:8004` voice registry, FLF2V/motion video nodes) — they need the user's GPU + installed models/tools to build AND verify, so they're deliberately not built blind.
+
 Each item is judged on two lenses: **adoption value** (`whyAdopt`/`capability`) and **local feasibility** (single-GPU 32GB + mutually-exclusive llm/media groups, no cloud, no social). Kept = both lenses positive, or one decisively strong. Round-N items that merely restate an earlier row were folded in as a strengthened "From" source rather than duplicated. Cloud/social/model-unavailable items are in DROPPED.
 
 Platforms: Leonardo, Krea, Ideogram, Runway, Civitai/Tensor/SeaArt (round 2); Midjourney, Pika+Kling, Recraft+Playground (round 3); Luma, Hailuo/MiniMax, Veo+Flow, Firefly, NovelAI, Freepik, Higgsfield (round 4); Suno, Udio, ElevenLabs, Dreamina/CapCut, PixVerse, Vidu, LTX Studio (round 5).
