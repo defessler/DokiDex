@@ -120,8 +120,7 @@ port) is a media-group rider — see §5.
 
 Three clients, all pointed at the local endpoint:
 
-- **Crush** — the agentic coder CLI (the bake-off winner: 91% on an 11-task golden suite vs Claw
-  Code's 45%). Configured in `harness/crush.json` (deployed to `~/.config/crush`): the `local`
+- **Crush** — the agentic coder CLI (the bake-off winner over Claw Code and OpenCode). Configured in `harness/crush.json` (deployed to `~/.config/crush`): the `local`
   provider → `:8080`, plus two **MCP servers**:
   - **web-search** — keyless DuckDuckGo MCP (`uvx duckduckgo-mcp-server`), no API key, no AI cloud.
   - **memory** — the persistent-memory server (§6).
@@ -186,13 +185,15 @@ audio are blocked; see [frontier-roadmap.md](frontier-roadmap.md).)
 ## 7. The control panel — `doki panel`
 
 A native **C# WPF (.NET 9)** app (`control/`) that's a thin, reactive face over the control plane.
-It **reads one source of truth** — `doki status json`, polled every 2 s — and **shells `doki`** for
-every action (it never re-implements the control logic). It shows: service cards grouped into
+It's a **standalone installer/manager**: first run installs the whole stack via a Setup Wizard (or
+adopts an existing folder), then manages it — no cloned repo required. It **polls status in-process**
+(native C#, ~2 s, via a native StatusProbe) and **shells `doki.ps1`** only for lifecycle actions
+(start/stop/verify/gen) — it never re-implements the control logic. It shows: service cards grouped into
 LLM/MEDIA bands (the idle band recessed so the 32 GB rule is *visible*), a GPU trust-meter, a mode
 switcher with 32 GB-headroom math + an eviction-confirm sheet, live file-tailed logs, a
 per-modality ⚡test, a coder model-swap, and update badges. It opens with a cinematic boot sequence,
 wears a premium void/cyan/gold theme, and **self-updates** from its own GitHub releases (`Services/Updater.cs`,
-applied in place on launch — distinct from the upstream SwarmUI/llama-swap badges). It has **41 unit
+applied in place on launch — distinct from the upstream SwarmUI/llama-swap badges). It has **124 unit
 tests** (`doki test`) on its parsing + state + auto-updater logic. (Design: [control-panel-design.md](control-panel-design.md).)
 
 ---
@@ -200,9 +201,9 @@ tests** (`doki test`) on its parsing + state + auto-updater logic. (Design: [con
 ## 8. Verification & ops
 
 - **`doki verify`** — the trust anchor. Cycles agent → coexist → media and hits **every** capability
-  with a real API call (chat, autocomplete, TTS, STT, memory, image, three video paths, image-to-
-  video, image-edit, music, upscale, Foley audio) — 15 live smokes, each skipping cleanly if its
-  asset isn't installed. Restores agent mode at the end. This is run before any capability is
+  with a real API call (chat, autocomplete, TTS, STT, memory, codebase-RAG (`:8090`), image, three
+  video paths, image-to-video, image-edit, music, upscale, Foley audio) — 17 live checks, each
+  skipping cleanly if its asset isn't installed. Restores agent mode at the end. This is run before any capability is
   called "done."
 - **`doki doctor`** — environment + install diagnostics: GPU/driver/VRAM, disk, the toolchain,
   model inventory (multi-part-aware), the media kit, per-service installable+port state, memory +

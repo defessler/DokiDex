@@ -14,6 +14,8 @@ param(
     [switch]$Media,
     [switch]$Tts,
     [switch]$Stt,
+    [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
+                        # so don't install the .NET SDK to rebuild it — only -Media needs the SDK (SwarmUI).
     [ValidateSet("lean", "full")][string]$Models = "lean"
 )
 $ErrorActionPreference = "Stop"
@@ -63,6 +65,13 @@ function Git-Clone($url, $dest) {
     # as the .part-then-Move model downloads). Line 20 mutes native errors, so check $LASTEXITCODE.
     git clone $url $dest
     if ($LASTEXITCODE -ne 0) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue; throw "git clone failed (exit $LASTEXITCODE): $url" }
+}
+function Ensure-DotNet9 {
+    # The single SDK for the whole stack: builds the WPF panel (dev) AND SwarmUI's net8.0. Probe via
+    # Get-Command (a bare `dotnet` throws CommandNotFoundException that 2>$null can't suppress when absent).
+    $hasNet9 = $false
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) { $hasNet9 = [bool]((dotnet --list-sdks 2>$null) -match '9\.0\.') }
+    if (-not $hasNet9) { Ensure-WinGet "Microsoft.DotNet.SDK.9" $null } else { Ok ".NET 9 SDK present" }
 }
 
 # ---- 1. Preflight ---------------------------------------------------------
@@ -174,32 +183,38 @@ if ($Stt) {
 }
 
 # ---- 4b. Control panel: .NET 9 SDK + build the app + create the launcher ---------------------------
-# The panel (control/, net9.0-windows WPF) is the PRIMARY UI and doctor lists dotnet as REQUIRED, so
-# core setup must provision it — otherwise a fresh box runs control.bat / `doki panel` and hits a hard
-# build failure (no SDK, or only .NET 8). The .NET 9 SDK bundles the WindowsDesktop runtime AND builds
-# SwarmUI (net8.0) too, so it is the single SDK for the whole stack. Probe via Get-Command (a bare
-# `dotnet` throws CommandNotFoundException that 2>$null can't suppress when dotnet is absent).
-$hasNet9 = $false
-if (Get-Command dotnet -ErrorAction SilentlyContinue) { $hasNet9 = [bool]((dotnet --list-sdks 2>$null) -match '9\.0\.') }
-if (-not $hasNet9) { Ensure-WinGet "Microsoft.DotNet.SDK.9" $null } else { Ok ".NET 9 SDK present" }
-$panelProj = Join-Path $root "control\DokiDex.Control.csproj"
-if ((Get-Command dotnet -ErrorAction SilentlyContinue) -and (Test-Path $panelProj)) {
-    Info "building control panel ..."
-    $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
-    dotnet build $panelProj -c Release | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {}
-        Ok "control panel built — double-click DokiDex.lnk (or run: .\doki.ps1 panel)"
-    } else { Warn "panel build failed — run .\control.bat to see the build errors" }
-} else { Warn "dotnet not found — run .\control.bat to build + launch the panel" }
+# Dev repo: the panel (control/, net9.0-windows WPF) is the PRIMARY UI, so provision the .NET 9 SDK and
+# build it (else control.bat / `doki panel` hits a hard build failure). The .NET 9 SDK is the single SDK
+# for the whole stack — it bundles the WindowsDesktop runtime AND builds SwarmUI's net8.0 too.
+# Managed (all-in-one) install: the panel IS this self-contained exe — already built, ships its own
+# runtime, and control/ isn't even in the payload. So skip the SDK + build entirely; the media stack
+# below fetches the SDK on its own only if SwarmUI needs it. This is why a core-only managed install
+# pulls NO .NET SDK: the app is baked into the exe, not rebuilt from source.
+if ($Managed) {
+    Ok "control panel = this app (managed install) — no SDK/build needed"
+} else {
+    Ensure-DotNet9
+    $panelProj = Join-Path $root "control\DokiDex.Control.csproj"
+    if ((Get-Command dotnet -ErrorAction SilentlyContinue) -and (Test-Path $panelProj)) {
+        Info "building control panel ..."
+        $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+        dotnet build $panelProj -c Release | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            try { & pwsh -NoProfile -File (Join-Path $root "control\make-shortcut.ps1") | Out-Null } catch {}
+            Ok "control panel built — double-click DokiDex.lnk (or run: .\doki.ps1 panel)"
+        } else { Warn "panel build failed — run .\control.bat to see the build errors" }
+    } else { Warn "dotnet not found — run .\control.bat to build + launch the panel" }
+}
 
 if (-not $Media) { Info "core setup done — launch via DokiDex.lnk (or '.\doki.ps1 panel').  -Media adds image/video,  -Tts speech,  -Stt transcription."; return }
 
 # ---- 5. Media stack: SwarmUI + ComfyUI + uncensored models ----------------
 Info "media stack (SwarmUI + ComfyUI + uncensored image/video models)"
 
-# 5a. prereqs: git (the .NET 9 SDK was ensured in core setup above — it builds SwarmUI's net8.0 too)
+# 5a. prereqs: git + the .NET 9 SDK (it builds SwarmUI's net8.0). A managed install skipped the SDK in
+#     4b (the panel ships prebuilt), so ensure it here — SwarmUI still needs it. Idempotent either way.
 Ensure-WinGet "Git.Git" "git"
+Ensure-DotNet9
 
 # 5b. clone SwarmUI
 $swarm = Join-Path $root "media\SwarmUI"

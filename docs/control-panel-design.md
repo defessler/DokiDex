@@ -143,7 +143,7 @@ as a card with zero UI code.
 
 ## File / build plan
 
-Root: **`D:\Projects\DokiCode\control\`** (new). Launched via `control.bat` (regenerated to
+Root: **`D:\Projects\DokiDex\control`** (new). Launched via `control.bat` (regenerated to
 run the built exe / `dotnet run` in dev) and via **`doki.ps1 panel`**.
 
 - **Phase 1 — skeleton + status board (read-only MVP):** `DokiDex.Control.csproj`,

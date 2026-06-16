@@ -1,7 +1,7 @@
 # DokiGen Studio — design
 
 **Status:** **Phase 1 (shell) built + render-verified** (2026-06-15) — the page, nav, design-mode sample,
-and inline framed preview all draw via `--render --page studio` with no backend/GPU; 6 `StudioViewModel`
+and inline framed preview all draw via `--render --page studio` with no backend/GPU; 14 `StudioViewModel`
 state-machine tests pass. **Phases 2–4 pending** (live gen wiring needs a media-mode card session). The
 biggest *easier-to-use* win from the Sora 2 / Fable 5 UX research (`memory: dokidex-ux-sora-fable-research`):
 turn the `doki gen` CLI into a visual in-panel surface, the way Sora's *app* makes generation feel easy.
@@ -52,7 +52,7 @@ A third left-rail nav item **Studio** (beside Dashboard / Logs), hosting one pag
    visual analogue of `MainViewModel`'s canned `StatusDoc`), so the happy-path renders an inline result
    with no GPU. `--page <name>` opens `--design`/`--render` straight to a chosen page.
 2. 🔨 **Gen wiring** — *GPU-free parts built; the live run alone awaits a card session.* `GenCli.BuildArgs`
-   (pure, 13 unit tests, mirrors doki-gen.ps1 1:1) + `DokiService.RunGenAsync` (a 10-min capture over it)
+   (pure, 12 unit tests, mirrors doki-gen.ps1 1:1) + `DokiService.RunGenAsync` (a 10-min capture over it)
    + async Generate/Remix commands + inline `BitmapImage` load (OnLoad, so Remix can overwrite) + a
    security-scoped `OpenLocalMedia` (gen-temp-dir + media-ext allowlist) + a Raw toggle + an init-image
    picker (edit/i2v). The end-to-end live gen is the only thing that needs media mode → folds into Phase 3.
@@ -71,5 +71,5 @@ A third left-rail nav item **Studio** (beside Dashboard / Logs), hosting one pag
 ## Verification
 
 `--render --page studio:<variant>` renders every Studio state (empty / generating / result / guard) — all
-four render-verified off-GPU. `GenCli.BuildArgs` + `StudioViewModel` state transitions are unit-tested
-(96 panel tests). The live gen alone is verified in a media-mode session (folds into Phase-3 live verification).
+five render-verified off-GPU. `GenCli.BuildArgs` + `StudioViewModel` state transitions are unit-tested
+(124 panel tests). The live gen alone is verified in a media-mode session (folds into Phase-3 live verification).

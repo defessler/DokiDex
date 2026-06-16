@@ -38,9 +38,13 @@ small enough to run **alongside** the image/video model, so switching to media m
 ## What's under the hood
 
 - **Tool:** [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) on the ComfyUI engine —
-  installed and wired up **completely automatically** by `setup.ps1 -Media` (no install wizard).
-- **Image:** **Z-Image Turbo** — fast, photoreal, uncensored (1024² in a few seconds). With
-  `-Models full` you also get **Z-Image Base** (a higher-detail "quality" preset) and **Chroma**
+  installed and wired up **completely automatically** by `setup.ps1 -Media` (no install wizard). The
+  lean `-Media` install ships only **Z-Image Turbo + Wan 2.1 1.3B**; the rich model set below
+  (Wan 2.2 5B, Z-Image Base, the editor, music, Foley, Chroma, upscaler) is the **full kit** you get
+  with `-Models full`.
+- **Image:** **Z-Image Base** is the default — the non-distilled "quality" model (a real CFG, working
+  negative prompt, ~35 steps) for the most detail. **Z-Image Turbo** is the **`-Fast`** tier — photoreal
+  and uncensored in a few seconds (1024²) at a small quality trade. `-Models full` also adds **Chroma**
   (a softer/filmic FLUX-derived style).
 - **Edit an image:** **Qwen-Image-Edit** — give it a picture and a plain instruction
   ("change the apple to a green apple", "remove the background") and it edits just that, keeping
