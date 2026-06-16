@@ -115,5 +115,18 @@ Assert ($mBody.textaudioduration -eq 45 -and $mBody.textaudiobpm -eq 90) "music 
 $mDef = Build-GenBody -Recipe (Get-GenRecipe -Kind music) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's'
 Assert ($mDef.textaudioduration -eq 10 -and $mDef.textaudiobpm -eq 128) "music (no overrides) -> recipe defaults 10s / 128bpm"
 
+# --- Expand-Wildcards: __name__ -> a random line from <name>.txt, seed-reproducible, unknown left as-is ---
+$wcDir = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-wc-$([guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Force $wcDir | Out-Null
+Set-Content (Join-Path $wcDir 'color.txt') @('# a comment', 'red', 'green', 'blue', '')
+$w1 = Expand-Wildcards -Text 'a __color__ car' -Seed 7 -WildcardDir $wcDir
+Assert ($w1 -in @('a red car', 'a green car', 'a blue car')) "wildcard -> one of the file's lines (comments/blanks skipped)"
+$w2 = Expand-Wildcards -Text 'a __color__ car' -Seed 7 -WildcardDir $wcDir
+Assert ($w1 -eq $w2)                                                "same seed -> same draw (reproducible)"
+Assert ((Expand-Wildcards -Text 'plain text' -Seed 1 -WildcardDir $wcDir) -eq 'plain text') "no wildcard token -> text unchanged"
+Assert ((Expand-Wildcards -Text 'a __nope__ x' -Seed 1 -WildcardDir $wcDir) -eq 'a __nope__ x') "unknown wildcard -> token left literal"
+Assert ((Expand-Wildcards -Text '__color__ vs __color__' -Seed 3 -WildcardDir $wcDir) -match '^(red|green|blue) vs (red|green|blue)$') "multiple tokens all expand"
+Remove-Item $wcDir -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Host "`ndoki-gen: $script:pass passed, $script:fail failed" -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })
 exit $(if ($script:fail) { 1 } else { 0 })

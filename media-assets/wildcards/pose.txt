@@ -1,0 +1,11 @@
+# pose wildcard — one phrase per line; __pose__ in a prompt draws one at random per seed.
+standing confidently
+sitting cross-legged
+mid-action leap
+looking over the shoulder
+arms crossed
+leaning against a wall
+dynamic running pose
+kneeling
+hands on hips
+caught mid-turn

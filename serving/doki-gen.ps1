@@ -21,6 +21,32 @@ function Resolve-GenKind {
     return 'image'
 }
 
+# Dynamic-prompt wildcards: replace each __name__ token with a random line drawn from
+# media-assets/wildcards/<name>.txt (# comments + blank lines ignored), BEFORE the prompt is built — so the
+# RESOLVED prompt is what generates AND what the sidecar records (reproducible: tie the draw to the gen seed;
+# unknown/empty wildcards are left as the literal token). Single-pass (no nested expansion -> no infinite loop).
+function Expand-Wildcards {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [int]$Seed = -1, [string]$WildcardDir)
+    if (-not $Text -or $Text -notmatch '__[A-Za-z0-9_]+__') { return $Text }
+    if (-not $WildcardDir) { $WildcardDir = Join-Path (Split-Path $PSScriptRoot) 'media-assets/wildcards' }
+    $rng = $(if ($Seed -ge 0) { [System.Random]::new($Seed) } else { [System.Random]::new() })
+    $sb = [System.Text.StringBuilder]::new()
+    $last = 0
+    foreach ($m in [regex]::Matches($Text, '__([A-Za-z0-9_]+)__')) {
+        [void]$sb.Append($Text.Substring($last, $m.Index - $last))
+        $file = Join-Path $WildcardDir "$($m.Groups[1].Value).txt"
+        $rep = $m.Value   # default: leave the token if the wildcard is unknown/empty
+        if (Test-Path -LiteralPath $file) {
+            $lines = @(Get-Content -LiteralPath $file | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+            if ($lines.Count -gt 0) { $rep = $lines[$rng.Next($lines.Count)] }
+        }
+        [void]$sb.Append($rep)
+        $last = $m.Index + $m.Length
+    }
+    [void]$sb.Append($Text.Substring($last))
+    return $sb.ToString()
+}
+
 # kind (+ -Fast / -Upscale modifiers) -> the SwarmUI body fields for that recipe (model + sampler knobs),
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
@@ -154,6 +180,7 @@ function Invoke-Gen {
         if (-not (Test-Path -LiteralPath $MaskImage)) { throw "mask image not found: $MaskImage" }
         $maskB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $MaskImage).Path))
     }
+    $Prompt = Expand-Wildcards -Text $Prompt -Seed $Seed   # __name__ -> a media-assets/wildcards line; resolved prompt is what generates + records
     $aspectArg = $(if ($Kind -in @('image', 'edit')) { $Aspect } else { '' })   # aspect reshapes image/edit only; video dims are model-fixed
     # music-only knobs (ACE-Step): lyrics replace [instrumental]; duration/bpm reshape the track. Ignored elsewhere.
     $lyricsArg   = $(if ($Kind -eq 'music') { $Lyrics } else { '' })

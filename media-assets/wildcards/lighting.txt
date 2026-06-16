@@ -1,0 +1,11 @@
+# lighting wildcard — __lighting__ draws one at random per seed.
+golden hour sunlight
+soft studio lighting
+neon rim lighting
+moody low-key lighting
+overcast diffused light
+dramatic chiaroscuro
+backlit silhouette glow
+candlelit warmth
+cool blue moonlight
+volumetric god rays

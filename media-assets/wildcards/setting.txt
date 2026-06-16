@@ -1,0 +1,11 @@
+# setting wildcard — __setting__ draws one at random per seed.
+a neon-lit cyberpunk alley
+a misty ancient forest
+a sunlit coastal cliff
+a cozy rain-streaked cafe
+a vast desert at dusk
+a futuristic space station interior
+a cherry-blossom courtyard
+a snowbound mountain pass
+a bioluminescent cavern
+a bustling night market
