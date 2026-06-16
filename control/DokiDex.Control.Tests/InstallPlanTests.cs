@@ -36,4 +36,25 @@ public class InstallPlanTests
         Assert.True(full > lean);
         Assert.True(full >= 150);
     }
+
+    [Fact]
+    public void RequiredGb_is_estimate_plus_headroom()
+    {
+        var c = new InstallChoice(CoderModels: false, Media: false, ModelsFull: false);
+        Assert.Equal(InstallPlan.EstimateGb(c) + InstallPlan.HeadroomGb, InstallPlan.RequiredGb(c));
+    }
+
+    [Fact]
+    public void FitsFreeSpace_blocks_below_required_and_allows_at_or_above()
+    {
+        const long gb = 1_000_000_000L;
+        var c = new InstallChoice(CoderModels: true, Media: true, ModelsFull: true);   // a large install
+        long need = InstallPlan.RequiredGb(c);
+        Assert.False(InstallPlan.FitsFreeSpace(c, (need - 1) * gb));   // one GB short -> blocked
+        Assert.True(InstallPlan.FitsFreeSpace(c, need * gb));          // exactly enough -> allowed
+        Assert.True(InstallPlan.FitsFreeSpace(c, (need + 50) * gb));   // ample -> allowed
+
+        var tiny = new InstallChoice(CoderModels: false, Media: false, ModelsFull: false);  // ~core only
+        Assert.True(InstallPlan.FitsFreeSpace(tiny, 20 * gb));         // fits on a modest drive
+    }
 }

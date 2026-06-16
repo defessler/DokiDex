@@ -112,6 +112,7 @@ public partial class InstallerViewModel : ObservableObject
     private async Task Install()
     {
         if (string.IsNullOrWhiteSpace(Home)) { StatusLine = "Choose an install folder first."; return; }
+        if (!HasEnoughSpace(out var spaceMsg)) { StatusLine = spaceMsg; return; }
         Installing = true; Log = ""; StatusLine = "installing…";
         void Append(string line) => _ui.Invoke(() => Log += line + "\n");
         var ok = await Installer.RunAsync(Home, Choice, fresh: true, Append, CancellationToken.None).ConfigureAwait(true);
@@ -122,6 +123,28 @@ public partial class InstallerViewModel : ObservableObject
 
     [RelayCommand] private void Launch() => CloseRequested?.Invoke(true);
     [RelayCommand] private void Cancel() => CloseRequested?.Invoke(false);
+
+    // Block a fresh install when the chosen drive measurably can't hold the selected components (+ headroom).
+    // If free space can't be measured (UNC / unmounted path), don't false-block — setup would fail loudly anyway.
+    private bool HasEnoughSpace(out string message)
+    {
+        message = "";
+        try
+        {
+            var root = Path.GetPathRoot(Home);
+            if (!string.IsNullOrEmpty(root))
+            {
+                var free = new DriveInfo(root).AvailableFreeSpace;
+                if (!InstallPlan.FitsFreeSpace(Choice, free))
+                {
+                    message = $"Not enough space on {root} — need ≈{InstallPlan.RequiredGb(Choice)} GB, {free / 1_000_000_000} GB free. Free space or pick another drive.";
+                    return false;
+                }
+            }
+        }
+        catch { }
+        return true;
+    }
 
     private void Persist(bool managed)
     {

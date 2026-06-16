@@ -34,4 +34,15 @@ public static class InstallPlan
         if (c.Stt) gb += 1;
         return gb;
     }
+
+    // Extra GB on top of the estimate for download scratch / extraction temp during install.
+    public const int HeadroomGb = 5;
+
+    // Disk the install actually needs on the target drive (estimate + headroom).
+    public static int RequiredGb(InstallChoice c) => EstimateGb(c) + HeadroomGb;
+
+    // Does the target drive's free space cover the requirement? Pure + unit-tested (decimal GB, matching
+    // DriveInfo.AvailableFreeSpace). Used to BLOCK a fresh install when the chosen drive is too small.
+    public static bool FitsFreeSpace(InstallChoice c, long availableBytes) =>
+        availableBytes >= (long)RequiredGb(c) * 1_000_000_000L;
 }
