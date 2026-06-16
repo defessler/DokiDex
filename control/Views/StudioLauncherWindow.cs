@@ -1,26 +1,26 @@
 using System;
 using System.Diagnostics;
-using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Microsoft.AspNetCore.Builder;
 
 namespace DokiDex.Control.Views;
 
-// The web-studio launcher (the "app sets up a web server" entry, `--studio`). Starts the DokiDex.Web host as
-// a child process, waits for it to come up, opens the browser, and shows a small status window with
-// Open / Stop. Closing the window stops the web host. Code-only (no XAML) to keep the surface minimal.
-// NOTE: finds DokiDex.Web.exe next to the app (or a ./web subdir) — production packaging must co-publish it
-// (or fold the host in-process); until then this works from a build/publish where both exes sit together.
+// The web-studio launcher (the "app sets up a web server" entry, `--studio`). Hosts the studio web server
+// IN-PROCESS (DokiDex.Web.StudioHost via Kestrel on 127.0.0.1), waits for /api/health, opens the browser,
+// and shows a small status window with Open / Stop. Closing the window stops the server. Code-only (no XAML)
+// to keep the surface minimal. In-process => a release ships ONE self-contained exe (no second process to
+// co-publish, find, or kill).
 public sealed class StudioLauncherWindow : Window
 {
-    private const int Port = 5111;
+    private const int Port = DokiDex.Web.StudioHost.DefaultPort;
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly TextBlock _status;
-    private Process? _web;
+    private WebApplication? _host;
 
     public StudioLauncherWindow()
     {
@@ -41,7 +41,7 @@ public sealed class StudioLauncherWindow : Window
         Content = panel;
 
         Loaded += async (_, _) => await StartAsync();
-        Closed += (_, _) => StopWeb();
+        Closed += (_, _) => StopHost();
     }
 
     private static SolidColorBrush Rgb(byte r, byte g, byte b) => new(Color.FromRgb(r, g, b));
@@ -60,29 +60,19 @@ public sealed class StudioLauncherWindow : Window
 
     private async Task StartAsync()
     {
-        var exe = WebExePath();
-        if (exe is null) { _status.Text = "DokiDex.Web.exe not found next to the app (packaging pending)."; return; }
-        if (!await HealthyAsync())   // not already running from a prior launch
+        if (!await HealthyAsync())   // not already running (e.g. a standalone dev host on the same port)
         {
-            try { _web = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)! }); }
+            try { _host = await DokiDex.Web.StudioHost.StartInProcessAsync(Port); }
             catch (Exception ex) { _status.Text = "could not start the web host: " + ex.Message; return; }
         }
-        for (int i = 0; i < 40 && !await HealthyAsync(); i++) await Task.Delay(500);
+        for (int i = 0; i < 40 && !await HealthyAsync(); i++) await Task.Delay(250);
         if (await HealthyAsync()) { _status.Text = $"running at {Url()}"; OpenBrowser(); }
         else _status.Text = "the web host did not come up — see %LocalAppData%\\dokidex.";
-    }
-
-    private static string? WebExePath()
-    {
-        var dir = Services.RepoPaths.ExeDir;
-        foreach (var c in new[] { Path.Combine(dir, "DokiDex.Web.exe"), Path.Combine(dir, "web", "DokiDex.Web.exe") })
-            if (File.Exists(c)) return c;
-        return null;
     }
 
     private static string Url() => $"http://127.0.0.1:{Port}";
     private static async Task<bool> HealthyAsync()
     { try { var r = await Http.GetAsync($"{Url()}/api/health"); return r.IsSuccessStatusCode; } catch { return false; } }
     private void OpenBrowser() { try { Process.Start(new ProcessStartInfo(Url()) { UseShellExecute = true })?.Dispose(); } catch { } }
-    private void StopWeb() { try { if (_web is { HasExited: false }) _web.Kill(true); } catch { } }
+    private void StopHost() { try { _ = _host?.DisposeAsync(); } catch { } }
 }

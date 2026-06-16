@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <!-- net9.0-windows so it can reference the existing DokiDex.Control (WPF) assembly for all the
-         control-plane services. The web host is the new primary product surface; the WPF app becomes a
-         tray launcher that starts this as a managed subprocess. (A later refactor extracts the shared
-         services into a windowless DokiDex.Core; until then this reuse keeps the green build intact.) -->
+    <!-- net9.0-windows so it can reference DokiDex.Control (WPF) for the shared control-plane services AND
+         the StudioHost server definition. This project is now a THIN dev wrapper: the studio is hosted
+         in-process by the WPF panel for releases (one self-contained exe). Run this project standalone only
+         to iterate on the SPA without launching WPF. -->
     <TargetFramework>net9.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -14,13 +14,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- StudioHost + all host code now live in DokiDex.Control (control/Web/**); the SPA is embedded there. -->
     <ProjectReference Include="..\DokiDex.Control.csproj" />
-  </ItemGroup>
-
-  <!-- P0: copy the static SPA to the output dir so the bare exe serves it from its own wwwroot.
-       (Task #20 will instead embed the built Vite SPA as a resource for the single-file exe.) -->
-  <ItemGroup>
-    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

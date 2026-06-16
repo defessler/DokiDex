@@ -20,6 +20,21 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
   </ItemGroup>
 
+  <!-- The web studio (control/Web/**) is hosted IN-PROCESS by this WPF exe (StudioHost.StartInProcessAsync),
+       so a release ships ONE self-contained artifact — no second exe to co-publish, find, or kill. A WPF
+       (Microsoft.NET.Sdk) project gets the ASP.NET Core minimal-API/Kestrel/SignalR types via this shared
+       framework reference; self-contained publish bundles both runtimes. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- The SPA is a single self-contained index.html, embedded (LogicalName below) so the single-file exe
+       carries it with no wwwroot on disk; StudioHost serves it from this assembly's resources. -->
+  <ItemGroup>
+    <None Remove="Web\wwwroot\index.html" />
+    <EmbeddedResource Include="Web\wwwroot\index.html" LogicalName="DokiDex.studio.index.html" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- let the test project exercise the updater's internal swap/rollback path -->
     <InternalsVisibleTo Include="DokiDex.Control.Tests" />

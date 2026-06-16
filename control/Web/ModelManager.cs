@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DokiDex.Control.Services;

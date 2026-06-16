@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Text;
 using DokiDex.Control.Services;
 using Microsoft.AspNetCore.SignalR;
