@@ -181,3 +181,21 @@ Author one `media-assets/model-catalog.json` — ComfyUI-Manager's entry shape `
 - **Gallery scoping:** the HTTP `/api/media` route must scope to the persisted index + canonicalized path-prefix (reject `..`, resolve symlinks), **not** the in-memory `_generated` HashSet (empty on restart).
 
 Relevant files (absolute): `D:\Projects\DokiDex\control\DokiDex.Control.csproj`, `D:\Projects\DokiDex\control\App.xaml.cs`, `D:\Projects\DokiDex\control\Services\Control\{Lifecycle,StatusProbe,ServiceRegistry}.cs`, `D:\Projects\DokiDex\control\Services\{GenArgs,DokiService,Payload,AppSettings,RepoPaths}.cs`, `D:\Projects\DokiDex\control\Services\Install\{InstallPlan,Installer}.cs`, `D:\Projects\DokiDex\control\Models\Status.cs`, `D:\Projects\DokiDex\serving\doki-gen.ps1`, `D:\Projects\DokiDex\serving\download_models.py`, `D:\Projects\DokiDex\setup.ps1`, `D:\Projects\DokiDex\media-assets\WanFoley.json`.
+
+---
+
+## 8. Platform-research feature backlog (folded in)
+
+Two double-validated research rounds across **13 platforms** (Sora 2, Grok Imagine, Midjourney, Leonardo, Krea, Ideogram, Runway, Pika, Kling, Recraft, Playground, Civitai, Tensor/SeaArt) produced a deduped, locally-feasible backlog — the full list with priorities + per-item SwarmUI implementation notes is in **`2026-06-16-platform-backlog.md`**. Research has converged (round-3 mostly strengthened/deduped existing rows rather than adding new feasible ones). P1 additions to fold into the sections above:
+
+**Top 5 highest-leverage:** Draft<->Final + Enhance-from-card · layout-first bounding-box composer · Smart-Layers auto-decompose edit · Exploration Mode (prompt-free remix) · start/end keyframe + per-axis camera sliders.
+
+- **Composer:** `@`-references (character/style/ingredient tokens w/ per-ref weight) · steerable rewriter + Magic-Prompt tri-state (store original + expanded) · wildcards/dynamic-prompt · conversational iterate-by-instruction · aesthetic dials (stylize/weird/variety) · Draft<->Final turbo toggle.
+- **Generation card:** per-reference ControlNet/IP-Adapter stacking · LoRA blend mixer · training-free character reference · per-card downstream actions (face-fix / hi-res / tiered upscale) · Image-Set series w/ per-cell reroll · CSV batch · model A/B compare.
+- **Edit canvas:** multi-region annotation edit (one batched pass) · Smart-Layers auto-decompose · mixed inpaint+outpaint+sketch · retexture/restyle (structure-locked) · drag-the-border outpaint · rich mask toolkit (invert / load-previous) · replace/remove background · dual-axis creative upscale (resemblance/detail) + split-view compare.
+- **Live surface:** realtime "scratchpad" (turbo, as-you-type over SignalR) · sketch-to-image canvas.
+- **Video controls:** keyframe storyboard strip · start/end keyframes + signed per-axis camera sliders + loop · reusable Ingredients library · unified extend · motion brush (+ anchor / auto-segment).
+- **Model + Workflow manager:** custom-style creation + test-preview · moodboard->train + switchable style profiles · random-style shuffle + lock.
+- **Library:** saved searches/filters + timeline + bulk ops + generate-into-folder · keyboard image-ranking triage.
+
+Dropped as not locally feasible (no cataloged model / cloud / social): video region-edit (no native VACE), lip-sync/talking-head (no native S2V), virtual relight/lens rigs, Act-Two performance, shareable style codes — see the backlog's DROPPED section.
