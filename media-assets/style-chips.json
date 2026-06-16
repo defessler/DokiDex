@@ -1,0 +1,14 @@
+{
+  "chips": [
+    { "id": "cinematic",   "name": "Cinematic",    "add": "cinematic lighting, dramatic composition, shallow depth of field, film grain", "neg": "flat lighting" },
+    { "id": "anime",       "name": "Anime",        "add": "anime style, clean line art, cel shading, vibrant colors", "neg": "photorealistic, 3d render" },
+    { "id": "watercolor",  "name": "Watercolor",   "add": "watercolor painting, soft washes, visible paper texture, delicate brushwork", "neg": "hard edges, digital" },
+    { "id": "3d-render",   "name": "3D Render",    "add": "octane render, physically based rendering, soft global illumination, subsurface scattering", "neg": "flat, 2d, sketch" },
+    { "id": "film-noir",   "name": "Film Noir",    "add": "black and white, high-contrast chiaroscuro, deep shadows, venetian-blind light", "neg": "colorful, bright, low contrast" },
+    { "id": "neon",        "name": "Neon",         "add": "neon glow, vivid magenta and cyan, wet reflective surfaces, night", "neg": "daylight, muted colors" },
+    { "id": "concept-art", "name": "Concept Art",  "add": "professional concept art, painterly, dynamic lighting, detailed environment", "neg": "amateur, flat" },
+    { "id": "vintage-film","name": "Vintage Film", "add": "vintage 35mm film, faded colors, light leaks, halation, analog grain", "neg": "digital, oversharpened" },
+    { "id": "studio-photo","name": "Studio Photo", "add": "studio photography, softbox lighting, sharp focus, clean background", "neg": "noise, motion blur" },
+    { "id": "storybook",   "name": "Storybook",    "add": "children's storybook illustration, warm gouache, whimsical, soft edges", "neg": "gritty, photorealistic" }
+  ]
+}

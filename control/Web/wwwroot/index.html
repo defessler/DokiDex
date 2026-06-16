@@ -79,6 +79,7 @@
       <div id="guard"></div>
       <textarea id="prompt" placeholder="Describe what to generate…  (__wildcards__ supported · Ctrl+Enter to generate)"></textarea>
       <div class="pills" id="kinds"></div>
+      <div class="pills" id="styleChips"></div>
       <div class="mods" id="mods"></div>
       <div class="mods">
         <label>Seed <input id="seed" type="number" placeholder="random" class="kin"></label>
@@ -219,6 +220,18 @@
     }
     function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
     function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; }
+    let _styleSel=new Set();
+    async function loadStyleChips(){
+      try{
+        const chips = await (await fetch('/api/style-chips')).json();
+        const wrap=document.getElementById('styleChips'); if(!wrap||!chips.length) return;
+        chips.forEach(c=>{
+          const b=$(`<button class="pill" title="${esc(c.add)}">${esc(c.name)}</button>`);
+          b.onclick=()=>{ if(_styleSel.has(c.id)){_styleSel.delete(c.id);b.className='pill';} else {_styleSel.add(c.id);b.className='pill on';} };
+          wrap.appendChild(b);
+        });
+      }catch{}
+    }
     let _loras=[];
     async function loadLoras(){
       try{ _loras = await (await fetch('/api/loras')).json(); }catch{ _loras=[]; }
@@ -269,6 +282,9 @@
         if (seedVal!=='') body.seed = parseInt(seedVal);
         const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
         const neg = document.getElementById('negPrompt').value.trim(); if (neg) body.negative = neg;
+        if (_styleSel.size) {
+          try { const sc = await (await fetch('/api/compose/style',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:body.prompt, negative:body.negative||'', chips:[..._styleSel]})})).json(); if(sc.prompt) body.prompt=sc.prompt; if(sc.negative) body.negative=sc.negative; } catch {}
+        }
         const loras = collectLoras(); if (loras) body.lora = loras;
         if (state.kind==='music') {
           const ly = document.getElementById('lyrics').value.trim(); if (ly) body.lyrics = ly;
@@ -552,7 +568,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); renderCast(); loadLoras(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); loadStyleChips(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>

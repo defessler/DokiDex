@@ -185,6 +185,14 @@ public static class StudioHost
         // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
         api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));
 
+        // ---- style chips (stackable aesthetic bundles -> appended +/- prompt fragments; pure, no GPU) ----
+        api.MapGet("/style-chips", () => Results.Json(StyleChips.All()));
+        api.MapPost("/compose/style", (StyleRequest body) =>
+        {
+            var (p, n) = StyleChips.Compose(body.Prompt, body.Negative, body.Chips);
+            return Results.Json(new { prompt = p, negative = n });
+        });
+
         // ---- steerable rewriter (user-directed prompt rewrite via the local LLM; conversational iterate) ----
         api.MapPost("/rewrite", async (RewriteRequest body, CancellationToken ct) =>
         {
