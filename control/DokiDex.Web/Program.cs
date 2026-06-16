@@ -20,6 +20,7 @@ builder.Services.AddSignalR();
 builder.Services.AddSingleton<DokiService>();
 builder.Services.AddSingleton<GenerationJobs>();
 builder.Services.AddSingleton<GalleryService>();
+builder.Services.AddSingleton<ModelManager>();
 
 var app = builder.Build();
 
@@ -97,6 +98,11 @@ api.MapGet("/gallery/media/{name}", (string name, GalleryService gal) =>
 });
 api.MapDelete("/gallery/{name}", (string name, GalleryService gal) =>
     gal.Delete(name) ? Results.Ok() : Results.NotFound());
+
+// ---- model & workflow manager (P3: capability catalog + presence + direct download + delete) ----
+api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));
+api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));
+api.MapDelete("/models/{id}", (string id, ModelManager mm) => mm.Delete(id) ? Results.Ok() : Results.NotFound());
 
 app.MapHub<StudioHub>("/hub");
 app.MapFallbackToFile("index.html");

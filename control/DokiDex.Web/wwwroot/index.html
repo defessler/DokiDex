@@ -66,6 +66,7 @@
     <nav>
       <button id="nav-create" class="on" onclick="setView('create')">Create</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
+      <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
     </nav>
     <span id="gpuPill" class="gpu-pill"></span>
@@ -95,6 +96,9 @@
       <h2>Library</h2>
       <div class="grid" id="library"><p class="hint">Loading…</p></div>
     </section>
+    <section id="view-models" style="display:none">
+      <div id="models"><p class="hint">Loading…</p></div>
+    </section>
   </main>
   <script>
     const $ = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
@@ -105,11 +109,12 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','status','library']) {
+      for (const x of ['create','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
       if (v==='library') loadLibrary();
+      if (v==='models') loadModels();
     }
     function renderControls(){
       const k = document.getElementById('kinds'); k.innerHTML='';
@@ -189,6 +194,33 @@
     }
     async function delItem(name){ try{ await fetch('/api/gallery/'+name,{method:'DELETE'}); }catch{} loadLibrary(); }
     function remixItem(p,kind){ document.getElementById('prompt').value = decodeURIComponent(p); state.kind = kind; renderControls(); setView('create'); document.getElementById('prompt').focus(); }
+    let modelsTimer=null;
+    function modelRow(m){
+      const status = m.installed ? '<span class="s done">installed</span>'
+        : m.downloading ? `<span class="s running">downloading ${Math.round(m.progress*100)}%</span>`
+        : m.error ? `<span class="s failed">failed: ${esc(m.error)}</span>`
+        : '<span class="hint">not installed</span>';
+      const btn = m.installed ? `<button class="xbtn" onclick="delModel('${m.id}')">remove</button>`
+        : m.downloading ? '' : `<button class="xbtn" onclick="installModel('${m.id}')">install</button>`;
+      return `<div class="scard"><div class="row" style="justify-content:space-between"><span>${esc(m.name)}${m.isDefault?' <span class="hint">· default</span>':''}</span>${btn}</div>
+        <div class="hint" style="margin-top:5px;font-family:monospace">~${m.sizeGb} GB · ${m.tier} · ${status}</div></div>`;
+    }
+    async function loadModels(){
+      try {
+        const models = await (await fetch('/api/models')).json();
+        const el = document.getElementById('models'); el.innerHTML='';
+        for (const c of [...new Set(models.map(m=>m.capability))]) {
+          el.appendChild($(`<h2>${c}</h2>`));
+          const g=$('<div class="scards"></div>');
+          models.filter(m=>m.capability===c).forEach(m=>g.appendChild($(modelRow(m))));
+          el.appendChild(g);
+        }
+        if (models.some(m=>m.downloading) && state.view==='models' && !modelsTimer)
+          modelsTimer = setTimeout(()=>{ modelsTimer=null; loadModels(); }, 2000);
+      } catch(e){ document.getElementById('models').innerHTML='<p class="err">could not load models</p>'; }
+    }
+    async function installModel(id){ try{ await fetch('/api/models/'+id+'/install',{method:'POST'}); }catch{} loadModels(); }
+    async function delModel(id){ if(!confirm('Remove this model file?')) return; try{ await fetch('/api/models/'+id,{method:'DELETE'}); }catch{} loadModels(); }
     function renderGuard(){
       const el = document.getElementById('guard');
       if(state.mediaActive){ el.innerHTML=''; return; }
