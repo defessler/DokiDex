@@ -15,7 +15,10 @@ public sealed record GenRequest(
     string OutPath = "",
     bool Refine = false,
     bool Face = false,
-    bool Realism = false)
+    bool Realism = false,
+    int Seed = -1,            // >=0 = reproducible; -1 = random (SwarmUI picks)
+    int Count = 1,            // batch size (images)
+    double Strength = -1)     // img2img/i2v creativity (the "vary" dial); -1 = recipe default
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -65,6 +68,9 @@ public static class GenCli
         if (r.Raw) a.Add("-Raw");
         if (!string.IsNullOrWhiteSpace(r.InitImage)) { a.Add("-InitImage"); a.Add(r.InitImage!); }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
+        if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
+        if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }
+        if (r.Strength >= 0) { a.Add("-Strength"); a.Add(r.Strength.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
         a.Add("-NoOpen");
         return a;
     }

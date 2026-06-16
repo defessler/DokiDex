@@ -10,7 +10,8 @@ namespace DokiDex.Web;
 public sealed record GenSubmit(
     string Prompt, string? Kind = "image",
     bool Fast = false, bool Upscale = false, bool Refine = false,
-    bool Face = false, bool Realism = false, bool Raw = false, string? InitImage = null);
+    bool Face = false, bool Realism = false, bool Raw = false, string? InitImage = null,
+    int Seed = -1, int Count = 1, double Strength = -1);
 
 // One generation job, tracked in memory for the session.
 public sealed class GenJob

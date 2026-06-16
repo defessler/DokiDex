@@ -73,7 +73,8 @@ api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
     if (Array.IndexOf(GenRequest.Kinds, kind) < 0) return Results.BadRequest(new { error = "unknown kind" });
     var req = new GenRequest(body.Prompt.Trim(), kind,
         Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
-        Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: body.InitImage);
+        Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: body.InitImage,
+        Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength);
     return Results.Json(jobs.Submit(req).ToDto());
 });
 api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));

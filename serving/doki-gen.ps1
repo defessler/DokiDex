@@ -95,13 +95,16 @@ function Build-GenBody {
         [Parameter(Mandatory)][hashtable]$Recipe,
         [Parameter(Mandatory)][hashtable]$PromptFields,
         [Parameter(Mandatory)][string]$SessionId,
-        [string]$InitImageB64
+        [string]$InitImageB64,
+        [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1
     )
-    $body = @{ session_id = $SessionId; images = 1 }
+    $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
     foreach ($kv in $PromptFields.GetEnumerator()) { $body[$kv.Key] = $kv.Value }
-    # an init image turns text2image into img2img / image-edit; creativity 0 = keep the input faithfully.
-    if ($InitImageB64) { $body.initimage = $InitImageB64; $body.initimagecreativity = 0 }
+    if ($Seed -ge 0) { $body.seed = $Seed }   # >=0 = reproducible; omit (-1) lets SwarmUI pick a random seed
+    # an init image turns text2image into img2img / image-edit; creativity 0 = keep the input faithfully,
+    # higher = more variation (the -Strength "vary" dial). Defaults to 0 when no strength is given.
+    if ($InitImageB64) { $body.initimage = $InitImageB64; $body.initimagecreativity = $(if ($Strength -ge 0) { $Strength } else { 0 }) }
     return $body
 }
 
@@ -115,6 +118,7 @@ function Invoke-Gen {
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
+        [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1,
         [string]$InitImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -134,7 +138,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -Seed $Seed -Count $Count -Strength $Strength
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -149,7 +153,7 @@ function Invoke-Gen {
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -Seed $Seed -Count $Count -Strength $Strength) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }
