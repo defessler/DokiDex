@@ -132,12 +132,15 @@ public static class StudioHost
             if (body.InitImage is not null && initPath is null) return Results.BadRequest(new { error = "bad init image" });
             var maskPath = SaveDataUrl(body.MaskImage, "mask");
             if (body.MaskImage is not null && maskPath is null) return Results.BadRequest(new { error = "bad mask image" });
+            var controlPath = SaveDataUrl(body.ControlImage, "control");
+            if (body.ControlImage is not null && controlPath is null) return Results.BadRequest(new { error = "bad control image" });
             var req = new GenRequest(body.Prompt.Trim(), kind,
                 Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
                 Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
                 Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative,
-                Upscaler: body.Upscaler, Segment: body.Segment);
+                Upscaler: body.Upscaler, Segment: body.Segment,
+                ControlImage: controlPath, ControlModel: body.ControlModel, ControlStrength: body.ControlStrength, ControlPreprocessor: body.ControlPreprocessor);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
@@ -172,6 +175,7 @@ public static class StudioHost
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));
         api.MapGet("/loras", () => Results.Json(Loras.List()));   // for the LoRA mixer (image-family)
+        api.MapGet("/controlnet-models", () => Results.Json(Loras.ControlNets()));   // for the ControlNet model picker
         api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));
         api.MapDelete("/models/{id}", (string id, ModelManager mm) => mm.Delete(id) ? Results.Ok() : Results.NotFound());
 

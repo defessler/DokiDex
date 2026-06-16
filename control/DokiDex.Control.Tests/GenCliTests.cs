@@ -83,6 +83,19 @@ public class GenCliTests
     }
 
     [Fact]
+    public void ControlNet_is_emitted_only_with_a_model_on_image_edit()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", ControlModel: "canny.safetensors", ControlStrength: 0.8, ControlImage: "c.png", ControlPreprocessor: "canny", OutPath: "o"));
+        var mi = a.IndexOf("-ControlModel"); Assert.True(mi >= 0); Assert.Equal("canny.safetensors", a[mi + 1]);
+        Assert.Contains("-ControlStrength", a);
+        var ii = a.IndexOf("-ControlImage"); Assert.True(ii >= 0); Assert.Equal("c.png", a[ii + 1]);
+        Assert.Contains("-ControlPreprocessor", a);
+        // no model -> nothing; wrong kind -> nothing
+        Assert.DoesNotContain("-ControlModel", GenCli.BuildArgs(new GenRequest("x", "image", ControlImage: "c.png", OutPath: "o")));
+        Assert.DoesNotContain("-ControlModel", GenCli.BuildArgs(new GenRequest("x", "video", ControlModel: "canny.safetensors", OutPath: "o")));
+    }
+
+    [Fact]
     public void Init_image_is_passed_as_a_separate_value_arg()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "edit", InitImage: @"C:\pics\in.png", OutPath: "o"));

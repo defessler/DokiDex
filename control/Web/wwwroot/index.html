@@ -114,6 +114,16 @@
         <label>Zoom <input id="camZoom" type="range" min="-10" max="10" value="0" style="width:72px"></label>
         <label>Roll <input id="camRoll" type="range" min="-10" max="10" value="0" style="width:72px"></label>
       </div>
+      <details id="controlbox" style="display:none;margin:4px 0">
+        <summary class="hint" style="cursor:pointer">ControlNet (guide structure from an image)</summary>
+        <div class="mods" style="margin-top:6px">
+          <label>Model <select id="cnModel" class="kin" style="width:auto"><option value="">(none)</option></select></label>
+          <label>Type <select id="cnPre" class="kin" style="width:auto"><option value="">auto</option><option>canny</option><option>depth</option><option>openpose</option><option>scribble</option><option>none</option></select></label>
+          <label>Strength <input id="cnStrength" type="range" min="0" max="2" step="0.05" value="1" style="width:90px"></label>
+          <label class="xbtn" style="cursor:pointer">+ control image<input id="cnFile" type="file" accept="image/*" style="display:none"></label>
+          <span id="cnName" class="hint"></span>
+        </div>
+      </details>
       <div id="maskbox" style="display:none;margin:4px 0 12px">
         <div class="hint" style="margin-bottom:4px">Edit canvas — paint the area to change, then Generate:</div>
         <div style="position:relative;display:inline-block;border:1px solid var(--border);border-radius:6px;overflow:hidden">
@@ -226,9 +236,16 @@
       updateMaskBox();
       updateMusicBox();
       updateCameraBox();
+      updateControlBox();
     }
     function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
     function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; }
+    function updateControlBox(){ document.getElementById('controlbox').style.display = (state.kind==='image'||state.kind==='edit') ? '' : 'none'; }
+    let _cnImage=null, _cnLoaded=false;
+    async function loadControlNets(){
+      if(_cnLoaded) return; _cnLoaded=true;
+      try{ const cns = await (await fetch('/api/controlnet-models')).json(); const sel=document.getElementById('cnModel'); cns.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); }); }catch{}
+    }
     let _styleSel=new Set();
     async function loadStyleChips(){
       try{
@@ -301,6 +318,10 @@
           const ly = document.getElementById('lyrics').value.trim(); if (ly) body.lyrics = ly;
           const du = parseInt(document.getElementById('duration').value); if (du>0) body.duration = du;
           const bp = parseInt(document.getElementById('bpm').value); if (bp>0) body.bpm = bp;
+        }
+        if ((state.kind==='image'||state.kind==='edit')) {
+          const cm=document.getElementById('cnModel').value;
+          if(cm){ body.controlModel=cm; body.controlStrength=+document.getElementById('cnStrength').value; const pp=document.getElementById('cnPre').value; if(pp) body.controlPreprocessor=pp; if(_cnImage) body.controlImage=_cnImage; }
         }
         if (state.kind==='video' || state.kind==='i2v') {
           const cam={ preset:document.getElementById('camPreset').value, pan:+document.getElementById('camPan').value, tilt:+document.getElementById('camTilt').value, zoom:+document.getElementById('camZoom').value, roll:+document.getElementById('camRoll').value };
@@ -588,6 +609,11 @@
       const rd = new FileReader(); rd.onload = () => { state.initImage = rd.result; nm.textContent = f.name + '  ✕'; updateMaskBox(); }; rd.readAsDataURL(f);
     });
     document.getElementById('initname').addEventListener('click', () => { state.initImage=null; document.getElementById('initfile').value=''; document.getElementById('initname').textContent=''; updateMaskBox(); });
+    document.getElementById('cnFile').addEventListener('change', e => {
+      const f=e.target.files[0]; const nm=document.getElementById('cnName');
+      if(!f){ _cnImage=null; nm.textContent=''; return; }
+      const rd=new FileReader(); rd.onload=()=>{ _cnImage=rd.result; nm.textContent=f.name; }; rd.readAsDataURL(f);
+    });
     (function(){
       const cv = document.getElementById('maskcanvas');
       const at = e => { const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
@@ -596,7 +622,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); renderCast(); loadLoras(); loadStyleChips(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>

@@ -156,7 +156,8 @@ function Build-GenBody {
         [Parameter(Mandatory)][string]$SessionId,
         [string]$InitImageB64, [string]$MaskImageB64,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
-        [int]$Duration = 0, [int]$Bpm = 0, [string]$Negative
+        [int]$Duration = 0, [int]$Bpm = 0, [string]$Negative,
+        [string]$ControlImageB64, [string]$ControlModel, [double]$ControlStrength = 1, [string]$ControlPreprocessor
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -180,6 +181,15 @@ function Build-GenBody {
     if ($Negative) {   # user negative prompt: append to the recipe's negative (image) or set it (else)
         $body.negativeprompt = $(if ($body.ContainsKey('negativeprompt') -and $body.negativeprompt) { "$($body.negativeprompt), $Negative" } else { $Negative })
     }
+    # ControlNet (structure conditioning). Keys are SwarmUI-source-confirmed via CleanTypeName (lowercase
+    # letters only of the display name): "ControlNet Model/Strength/Image Input/Preprocessor". A model selection
+    # activates it; the control image is a SEPARATE input (not the init image), so structure guides a fresh gen.
+    if ($ControlModel) {
+        $body.controlnetmodel = $ControlModel
+        $body.controlnetstrength = $ControlStrength
+        if ($ControlImageB64) { $body.controlnetimageinput = $ControlImageB64 }
+        if ($ControlPreprocessor) { $body.controlnetpreprocessor = $ControlPreprocessor }
+    }
     return $body
 }
 
@@ -195,6 +205,7 @@ function Invoke-Gen {
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Segment,
+        [string]$ControlImage, [string]$ControlModel, [double]$ControlStrength = 1, [string]$ControlPreprocessor,
         [string]$InitImage, [string]$MaskImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -214,8 +225,14 @@ function Invoke-Gen {
         if (-not (Test-Path -LiteralPath $MaskImage)) { throw "mask image not found: $MaskImage" }
         $maskB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $MaskImage).Path))
     }
+    $controlB64 = $null
+    if ($ControlImage) {
+        if (-not (Test-Path -LiteralPath $ControlImage)) { throw "control image not found: $ControlImage" }
+        $controlB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $ControlImage).Path))
+    }
     $Prompt = Expand-Wildcards -Text $Prompt -Seed $Seed   # __name__ -> a media-assets/wildcards line; resolved prompt is what generates + records
     $aspectArg = $(if ($Kind -in @('image', 'edit')) { $Aspect } else { '' })   # aspect reshapes image/edit only; video dims are model-fixed
+    $controlModelArg = $(if ($Kind -in @('image', 'edit')) { $ControlModel } else { '' })   # ControlNet: image/edit only
     # music-only knobs (ACE-Step): lyrics replace [instrumental]; duration/bpm reshape the track. Ignored elsewhere.
     $lyricsArg   = $(if ($Kind -eq 'music') { $Lyrics } else { '' })
     $durationArg = $(if ($Kind -eq 'music') { $Duration } else { 0 })
@@ -228,7 +245,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlImageB64 $controlB64 -ControlModel $controlModelArg -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -240,10 +257,10 @@ function Invoke-Gen {
     $tag = "$Kind$(if ($Fast) { ' (fast)' })$(if ($Upscale) { ' +4x' })$(if ($Refine) { ' +refine' })$(if ($Realism) { ' +realism' })$(if ($Face) { ' +face' })"
     Write-Host "[gen] $tag  <-  ""$Prompt""" -ForegroundColor Cyan
 
-    $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
+    $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlImageB64 $controlB64 -ControlModel $controlModelArg -ControlStrength $ControlStrength -ControlPreprocessor $ControlPreprocessor) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }

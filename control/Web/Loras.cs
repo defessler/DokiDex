@@ -10,12 +10,14 @@ namespace DokiDex.Web;
 // / model manager.
 public static class Loras
 {
-    private static string Root => Path.Combine(RepoPaths.Root, "media", "SwarmUI", "Models", "Lora");
-    private static readonly string[] Ext = { ".safetensors", ".ckpt", ".pt" };
+    private static readonly string[] Ext = { ".safetensors", ".ckpt", ".pt", ".pth" };
 
-    public static IEnumerable<string> List()
+    // SwarmUI references a model by its name relative to its model-class root, extensionless + forward-slashed
+    // (so <lora:subdir/name> / a ControlNet model dropdown value both work). Returns exactly those strings;
+    // file-based + graceful-empty (like the gallery / model manager).
+    private static IReadOnlyList<string> Scan(string subdir)
     {
-        var root = Root;
+        var root = Path.Combine(RepoPaths.Root, "media", "SwarmUI", "Models", subdir);
         if (!Directory.Exists(root)) return Array.Empty<string>();
         return Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
             .Where(f => Ext.Contains(Path.GetExtension(f).ToLowerInvariant()))
@@ -23,4 +25,7 @@ public static class Loras
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    public static IReadOnlyList<string> List() => Scan("Lora");
+    public static IReadOnlyList<string> ControlNets() => Scan("controlnet");
 }

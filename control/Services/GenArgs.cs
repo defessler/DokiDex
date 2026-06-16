@@ -27,7 +27,11 @@ public sealed record GenRequest(
     string? Lora = null,      // LoRA mixer: "name:0.8,other" -> <lora:..> tags; image-family only
     string? Negative = null,  // user negative prompt: appended to (image) or set as the recipe negativeprompt
     string? Upscaler = null,  // upscale engine (balanced/photo/anime) or a raw model file; needs -Upscale/-Refine
-    string? Segment = null)   // promptable region refine: "hair,hands:0.6" -> <segment:..> tags; image-family
+    string? Segment = null,   // promptable region refine: "hair,hands:0.6" -> <segment:..> tags; image-family
+    string? ControlImage = null,       // ControlNet control image (structure source); image/edit only
+    string? ControlModel = null,       // ControlNet model name (activates ControlNet); from /api/controlnet-models
+    double ControlStrength = 1,        // ControlNet strength (0..2)
+    string? ControlPreprocessor = null)// ControlNet preprocessor (canny/depth/openpose/…)
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -86,6 +90,14 @@ public static class GenCli
         if (!string.IsNullOrWhiteSpace(r.Lora)) { a.Add("-Lora"); a.Add(r.Lora!); }
         if (!string.IsNullOrWhiteSpace(r.Negative)) { a.Add("-Negative"); a.Add(r.Negative!); }
         if (!string.IsNullOrWhiteSpace(r.Segment)) { a.Add("-Segment"); a.Add(r.Segment!); }
+        // ControlNet: a model activates it; image/preprocessor only matter then, gated to image/edit.
+        if (!string.IsNullOrWhiteSpace(r.ControlModel) && GenRequest.UpscaleApplies(r.Kind))
+        {
+            a.Add("-ControlModel"); a.Add(r.ControlModel!);
+            a.Add("-ControlStrength"); a.Add(r.ControlStrength.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(r.ControlImage)) { a.Add("-ControlImage"); a.Add(r.ControlImage!); }
+            if (!string.IsNullOrWhiteSpace(r.ControlPreprocessor)) { a.Add("-ControlPreprocessor"); a.Add(r.ControlPreprocessor!); }
+        }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }

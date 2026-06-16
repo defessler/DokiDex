@@ -114,6 +114,15 @@ Assert (-not $body.ContainsKey('initimage'))                       "body has no 
 $bodyI = Build-GenBody -Recipe (Get-GenRecipe -Kind edit) -PromptFields (Get-GenPromptFields -Kind edit -Idea 'y') -SessionId 's' -InitImageB64 'BASE64DATA'
 Assert ($bodyI.initimage -eq 'BASE64DATA' -and $bodyI.initimagecreativity -eq 0) "init image -> initimage + creativity 0"
 
+# --- ControlNet body params (SwarmUI-source-confirmed keys via CleanTypeName): model activates it ---
+$bCN = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -ControlModel 'control_v11p_canny.safetensors' -ControlStrength 0.8 -ControlImageB64 'CTRLB64' -ControlPreprocessor 'canny'
+Assert ($bCN.controlnetmodel -eq 'control_v11p_canny.safetensors')   "ControlNet -> controlnetmodel set (activates)"
+Assert ($bCN.controlnetstrength -eq 0.8)                             "ControlNet -> controlnetstrength"
+Assert ($bCN.controlnetimageinput -eq 'CTRLB64')                     "ControlNet -> controlnetimageinput (the control image)"
+Assert ($bCN.controlnetpreprocessor -eq 'canny')                     "ControlNet -> controlnetpreprocessor"
+$bNoCN = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
+Assert (-not $bNoCN.ContainsKey('controlnetmodel'))                  "no ControlNet model -> no controlnet* params (opt-in)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"
