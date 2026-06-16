@@ -5,8 +5,16 @@
 param([switch]$Detach, [string]$PidFile, [string]$LogFile)
 
 $swap   = Join-Path $PSScriptRoot "llama-swap\llama-swap.exe"
-$config = Join-Path $PSScriptRoot "llama-swap.yaml"
 $listen = "127.0.0.1:8080"
+
+# llama-swap.yaml is a TEMPLATE: __DOKI_ROOT__ stands in for the repo root so a project move can't
+# break the absolute paths llama-server needs. llama-swap doesn't expand ${ENV} inside `cmd`, so we
+# substitute here and emit a concrete config into .run\ (regenerated every launch from the current
+# location), then point llama-swap at that.
+$root   = Split-Path $PSScriptRoot
+$runDir = Join-Path $root ".run"; New-Item -ItemType Directory -Force $runDir | Out-Null
+$config = Join-Path $runDir "llama-swap.generated.yaml"
+(Get-Content (Join-Path $PSScriptRoot "llama-swap.yaml") -Raw).Replace('__DOKI_ROOT__', $root) | Set-Content $config
 
 if ($Detach) {
     $sp = @{ FilePath = $swap; ArgumentList = @("--config", $config, "--listen", $listen); WindowStyle = "Hidden"; PassThru = $true }

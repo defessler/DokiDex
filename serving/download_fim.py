@@ -3,10 +3,12 @@
 ggml-org/Qwen2.5-Coder-3B-Q8_0-GGUF is the base (non-instruct) model
 llama.vscode recommends for local tab-completion. ~3.3GB.
 """
+import os
 from huggingface_hub import hf_hub_download, list_repo_files
 
 REPO = "ggml-org/Qwen2.5-Coder-3B-Q8_0-GGUF"
-MODELS_DIR = r"D:\Projects\DokiCode\models"
+# Repo-relative (serving\ -> ..\models) so a project move can't break it.
+MODELS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models"))
 
 ggufs = [f for f in list_repo_files(REPO) if f.endswith(".gguf")]
 print("GGUF files:", ggufs, flush=True)

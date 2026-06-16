@@ -46,6 +46,23 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Face_and_realism_pass_through_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Face: true, Realism: true, OutPath: "o"));
+        Assert.Contains("-Face", a);
+        Assert.Contains("-Realism", a);
+    }
+
+    [Fact]
+    public void Face_and_realism_are_off_by_default()
+    {
+        // both flags are opt-in: a plain request must never emit them (no behavior change)
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", OutPath: "o"));
+        Assert.DoesNotContain("-Face", a);
+        Assert.DoesNotContain("-Realism", a);
+    }
+
+    [Fact]
     public void Upscale_is_emitted_only_for_image_and_edit()
     {
         Assert.Contains("-Upscale", GenCli.BuildArgs(new GenRequest("x", "image", Upscale: true, OutPath: "o")));

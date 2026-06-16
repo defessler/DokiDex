@@ -81,8 +81,12 @@ Ensure-WinGet "astral-sh.uv" "uv"              # runs the DuckDuckGo search MCP
 Info "deploy configs"
 $crushDst = Join-Path $env:USERPROFILE ".config\crush"
 New-Item -ItemType Directory -Force $crushDst | Out-Null
-Copy-Item (Join-Path $root "harness\crush.json") (Join-Path $crushDst "crush.json") -Force
-Ok "crush.json -> $crushDst  (incl. the memory MCP; deps install on first launch via uv)"
+# Rewrite the memory MCP's server.py path to THIS install root before deploying. crush runs from
+# ~\.config\crush (an arbitrary CWD), so the path must be absolute + correct even after a project
+# move — patch it here rather than trusting the committed value.
+$crushJson = (Get-Content (Join-Path $root "harness\crush.json") -Raw) -replace '"[^"]*?/serving/memory-mcp/server\.py"', ('"' + ($root -replace '\\', '/') + '/serving/memory-mcp/server.py"')
+Set-Content (Join-Path $crushDst "crush.json") $crushJson
+Ok "crush.json -> $crushDst  (memory MCP path pinned to $root; deps install on first launch via uv)"
 # Seed the persistent-memory store with DokiDex's facts/gotchas (idempotent; needs python).
 if (Get-Command python -ErrorAction SilentlyContinue) {
     try { python (Join-Path $root "serving\memory-mcp\seed.py") | Out-Null; Ok "memory store seeded (serving\memory-mcp)" } catch { Warn "memory seed skipped ($($_.Exception.Message))" }
@@ -248,8 +252,11 @@ if (Swarm-Up) { Ok "SwarmUI serving :7801" } else { throw "SwarmUI failed to sta
 $fds = Join-Path $swarm "Data\Settings.fds"
 if (Test-Path $fds) {
     $s = [System.IO.File]::ReadAllText($fds)
-    if ($s -match '(?m)^Theme:\s*\S+') {
-        $s2 = [regex]::Replace($s, '(?m)^Theme:\s*\S+', 'Theme: dokigen')
+    # The Theme key lives INDENTED under the DefaultUser: block (e.g. "`tTheme: modern_dark"), so the
+    # anchor must allow AND preserve leading whitespace. The old column-0 '^Theme:' never matched, so
+    # the default was silently left at modern_dark on every install — this is why the theme looked unchanged.
+    if ($s -match '(?m)^(\s*)Theme:\s*\S+') {
+        $s2 = [regex]::Replace($s, '(?m)^(\s*)Theme:\s*\S+', '${1}Theme: dokigen')
         if ($s2 -ne $s) { [System.IO.File]::WriteAllText($fds, $s2); Ok "DokiGen Void set as default SwarmUI theme (applies next start)" } else { Ok "DokiGen Void already the default theme" }
     } else { Ok "DokiGen Void installed — select it in User Settings -> Theme" }
 } else { Ok "DokiGen Void installed — select it in User Settings -> Theme" }
@@ -335,8 +342,10 @@ if ($Models -eq "full") {
     $foley = Join-Path $swarm "dlbackend\comfy\ComfyUI\models\foley"; New-Item -ItemType Directory -Force $foley | Out-Null
     $modelsDir = Join-Path $root "models"
 
-    # Video quality+fast tier: Wan 2.2 14B MoE (high+low noise pair, fp8_scaled). Only ONE
-    # expert is GPU-resident per phase (SwarmUI StepSwap), so this fits 32GB with headroom.
+    # Video tier: Wan 2.2 14B MoE (high+low noise pair, fp8_scaled). NOTE: the fp8 dual-expert does
+    # NOT fit 32GB in SwarmUI's StepSwap (state is held across the high->low handoff) — it OOM'd >300s
+    # live (docs\decisions.md 2026-06-14). Kept on disk only for the eval-gated GGUF-Q4 A/B; the default
+    # video path is the Wan 2.2 5B (serving\doki-gen.ps1). Downloaded with -Models full.
     # NOTE: Wan 2.5/2.6/2.7 are API-only — Wan 2.2 is the newest OPEN-weight Wan that exists.
     $w22 = "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files"
     Get-Model "$w22/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors" (Join-Path $diff "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors")
@@ -356,9 +365,16 @@ if ($Models -eq "full") {
     Get-Model "$lite/Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors"   (Join-Path $loraD "Wan22-Lightning-I2V-HIGH.safetensors")
     Get-Model "$lite/Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors"    (Join-Path $loraD "Wan22-Lightning-I2V-LOW.safetensors")
 
-    # Image quality ceiling: Z-Image Base (non-distilled). Reuses the qwen_3_4b text encoder
-    # + Flux ae VAE that SwarmUI already auto-fetched for Z-Image Turbo. Turbo stays default.
+    # Image quality ceiling: Z-Image Base (non-distilled) — now the DEFAULT image model for `doki gen`,
+    # reusing the qwen_3_4b text encoder + Flux ae VAE SwarmUI auto-fetched for Turbo (now the -Fast tier).
     Get-Model "https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/diffusion_models/z_image_bf16.safetensors" (Join-Path $diff "z_image_bf16.safetensors")
+
+    # Realism LoRA for `doki gen -Realism` — a photoreal Z-Image LoRA (Apache-2.0, public/non-gated HF
+    # repo, scriptable resolve/ URL like the Wan-Lightning LoRAs above). Source ships the generic
+    # pytorch_lora_weights.safetensors, so RENAME on save so it doesn't collide and SwarmUI references it
+    # as <lora:Z-Image-Realism:0.7> (the exact base name doki-gen.ps1's Get-GenPromptFields emits). If this
+    # download ever fails, drop any Z-Image realism .safetensors into Models\Lora named Z-Image-Realism.safetensors.
+    Get-Model "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA/resolve/main/pytorch_lora_weights.safetensors" (Join-Path $loraD "Z-Image-Realism.safetensors")
 
     # Chroma — uncensored, FLUX-derived stylized complement. Use the *-final STABLE variant
     # (the repo's do_not_use/ files error in ComfyUI with a tensor mismatch).

@@ -1,6 +1,11 @@
 # llama-swap config — one OpenAI-compatible endpoint on :8080,
 # swaps the right llama-server per requested model name.
 # llama.cpp build b9616 (CUDA 13.3), llama-swap v224.
+#
+# TEMPLATE: __DOKI_ROOT__ is substituted with the repo root at launch by start-serving.ps1
+# (which emits .run\llama-swap.generated.yaml and points llama-swap at that). This keeps the
+# absolute paths llama-server needs correct across a project move. Do NOT run this file directly;
+# llama-swap does not expand ${ENV} vars inside cmd, so the substitution is done in PowerShell.
 
 healthCheckTimeout: 900   # coder-big pages ~60GB from disk on first load
 logLevel: info
@@ -10,8 +15,8 @@ models:
   # Weights ~17.7GB (UD-Q4_K_XL) + ~6.4GB KV (q8, 128k) + overhead ≈ ~26GB VRAM.
   "coder-fast":
     cmd: |
-      D:\Projects\DokiCode\serving\llama.cpp\llama-server.exe
-      -m D:\Projects\DokiCode\models\Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
+      __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+      -m __DOKI_ROOT__\models\Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
       --port ${PORT}
       -ngl 99
       -c 131072
@@ -27,8 +32,8 @@ models:
   # llama.vscode live. Full 128k coder-fast cannot coexist with FIM.
   "coder-fast-lite":
     cmd: |
-      D:\Projects\DokiCode\serving\llama.cpp\llama-server.exe
-      -m D:\Projects\DokiCode\models\Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
+      __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+      -m __DOKI_ROOT__\models\Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
       --port ${PORT}
       -ngl 99
       -c 65536
@@ -43,8 +48,8 @@ models:
   # Tune --n-cpu-moe DOWN (more experts on GPU = faster) until VRAM ~30GB.
   "coder-big":
     cmd: |
-      D:\Projects\DokiCode\serving\llama.cpp\llama-server.exe
-      -m D:\Projects\DokiCode\models\gpt-oss-120b-mxfp4-00001-of-00003.gguf
+      __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+      -m __DOKI_ROOT__\models\gpt-oss-120b-mxfp4-00001-of-00003.gguf
       --port ${PORT}
       -ngl 99
       --n-cpu-moe 22

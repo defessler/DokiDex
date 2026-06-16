@@ -174,7 +174,7 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\wan2.2_ti2v_5B_fp16.s
 } else {
     try {
         $sid3 = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-        $body = @{ session_id = $sid3; images = 1; prompt = "a cat walking across a floor, smooth motion"; model = "wan2.2_ti2v_5B_fp16.safetensors"; steps = 20; cfgscale = 3.5; width = 832; height = 480; textvideoframes = 49; videofps = 24; videoformat = "h264-mp4" } | ConvertTo-Json
+        $body = @{ session_id = $sid3; images = 1; prompt = "a cat walking across a floor, smooth motion"; model = "wan2.2_ti2v_5B_fp16.safetensors"; steps = 20; cfgscale = 3.5; width = 832; height = 480; textvideoframes = 49; videofps = 24; videoformat = "h264-mp4"; sampler = "uni_pc"; scheduler = "simple"; sigmashift = 8 } | ConvertTo-Json
         $v = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 300 -Body $body
         $results["Wan 2.2 video (5B)"] = if ($v.images) { "PASS  $(@($v.images)[0])" } else { "FAIL  no video" }
     } catch { $results["Wan 2.2 video (5B)"] = "FAIL  $($_.Exception.Message)" }
@@ -189,7 +189,7 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\wan2.2_ti2v_5B_fp16.s
 } else {
     try {
         $sidI = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-        $body = @{ session_id = $sidI; images = 1; prompt = "a red fox in fresh snow, gentle natural motion"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = "wan2.2_ti2v_5B_fp16.safetensors"; videoframes = 25; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = "Image"; videoformat = "h264-mp4" } | ConvertTo-Json
+        $body = @{ session_id = $sidI; images = 1; prompt = "a red fox in fresh snow, gentle natural motion"; model = "SwarmUI_Z-Image-Turbo-FP8Mix.safetensors"; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = "wan2.2_ti2v_5B_fp16.safetensors"; videoframes = 49; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = "Image"; videoformat = "h264-mp4" } | ConvertTo-Json
         $iv = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 400 -Body $body
         $mp4 = @($iv.images) | Where-Object { $_ -match '\.mp4$' }
         $results["image-to-video (5B)"] = if ($mp4) { "PASS  $(@($mp4)[0])" } else { "FAIL  no mp4 in output" }

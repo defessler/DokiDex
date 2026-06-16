@@ -1,6 +1,50 @@
 # Decision log
 
-## 2026-06-15 — Media quality research → **keep Z-Image Turbo + the current rewriter** (both already near-optimal)
+## 2026-06-16 — Project-move fallout fixed + **Z-Image Base is the new image default** + media-quality upgrades
+
+Triggered by moving/renaming the project `DokiCode → DokiDex` and a "make quality the default" pass.
+Investigated + implemented via multi-agent (ultracode) workflows with adversarial verification.
+
+**Move-proofed the paths.** The rename left hardcoded `D:\Projects\DokiCode` in committed files → broke the
+coder stack, the memory MCP, and the download helpers. `serving\llama-swap.yaml` is now a `__DOKI_ROOT__`
+template that `start-serving.ps1` substitutes into `.run\llama-swap.generated.yaml` at launch (llama-swap v224
+does **not** expand `${ENV}` inside `cmd`, so the macro/env route fails — substitute in PowerShell);
+`setup.ps1` pins the memory-MCP `server.py` path in `crush.json` on deploy; `download_{models,fim}.py` derive
+`MODELS_DIR` from `__file__`; `RepoPaths` resolves from `Environment.ProcessPath` (single-file-exe-safe), not a
+hardcoded fallback. A future move can't rebreak these.
+
+**SwarmUI theme — real fix.** The DokiGen Void theme never applied (even *before* the move) because
+`setup.ps1`'s default-theme step matched `^Theme:`, but the key in `Settings.fds` is **tab-indented** under
+`DefaultUser:` → never matched → the default silently stayed `modern_dark`. Anchored the regex to allow +
+preserve leading whitespace. Apply with `setup.ps1 -Media`.
+
+**Image default: Turbo → Z-Image Base — SUPERSEDES the 2026-06-15 "keep Turbo" call.** That entry kept Turbo as
+a near-optimal *speed* default; this changes the goal to *quality-by-default* (explicit request). `doki gen`
+(no flag) now uses **`z_image_bf16`, 35 steps, CFG 4.5, real negatives, dpmpp_2m/karras** — the non-distilled
+quality ceiling (Turbo's DMD/guidance distillation locks CFG 1 and caps detail). **Turbo moved to `-Fast`**
+(8 steps, CFG 1) for seconds-fast drafts. Heavier challengers (FLUX.1-Krea, Qwen-Image-2512) stay eval-gated,
+not defaults (`docs/frontier-roadmap.md`); FLUX.2-dev stays out (VRAM-tight).
+
+**Video tuning.** Wan 2.2 TI2V-5B (still the default) gained its missing tuned flow settings — **Sigma Shift 8
++ uni_pc/simple**; the I2V clip went 25→49 frames. 14B A14B stays **off** (fp8 dual-expert OOMs 32 GB in
+StepSwap, per 2026-06-14); the only zero-OOM 14B route (GGUF Q4_K_M) is an eval-gated A/B in the roadmap.
+
+**New `doki gen` / Studio modifiers (all opt-in, default-off):** `-Refine` (a real hi-res-fix — the old
+`-Upscale` set `refinercontrolpercentage=0`, i.e. pure ESRGAN that regenerates **zero** detail; `-Refine` uses
+0.35 + tiling), `-Face` (SwarmUI-native `<segment:face>` inpaint refine, no download), `-Realism` (appends
+`<lora:Z-Image-Realism:0.7>`; `setup.ps1 -Models full` fetches HF `suayptalha/Z-Image-Turbo-Realism-LoRA`,
+Apache-2.0, as `Z-Image-Realism.safetensors`).
+
+**DokiGen Studio output location.** Generations now default **beside the launched exe** (`<exeDir>\DokiGen`, via
+`Environment.ProcessPath`) with a **persisted folder picker** (`%LocalAppData%\dokidex\settings.json`) +
+mandatory writable fallback (Pictures → temp). Was `%TEMP%\dokigen`.
+
+**Verification:** full `doki test` green (PowerShell 100, Python 33+, .NET 100); recipe/contract + logic
+(template substitution, crush rewrite, theme regex, LoRA URL HEAD-check) verified. **Live** media behaviour
+(actual Base quality, theme render, llama-swap model load) confirms on a fresh `setup.ps1 -Media` at the new
+location — the git-ignored heavy assets (`models/`, `serving/llama.cpp`, `media/`) did not travel with the move.
+
+## 2026-06-15 — Media quality research → keep Z-Image Turbo + the current rewriter *(image default SUPERSEDED 2026-06-16 → Z-Image Base; see above. The rewriter conclusion still stands.)*
 
 Chasing the "quality" goal, researched the two GPU-free quality levers for `doki gen` / DokiGen Studio:
 the default image model and the `:8013` prompt-rewriter instruction. **Conclusion: both are already at/near

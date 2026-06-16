@@ -57,17 +57,44 @@ public sealed class DokiService
     }
 
     // ---- DokiGen Studio: text->media via `doki gen` (needs media mode; live run verified in a card session) ----
-    private static readonly string GenTempDir = Path.Combine(Path.GetTempPath(), "dokigen");
+    // Default output dir = a folder beside the LAUNCHED exe (RepoPaths.ExeDir is single-file-safe), NOT %TEMP%
+    // and NOT the repo. The user can override it (persisted) via AppSettings.GenOutputDir; resolved fresh each
+    // call so a pick mid-session takes effect with no restart. GenDirResolver is an overridable seam for tests.
+    internal static string DefaultGenDir => Path.Combine(RepoPaths.ExeDir, "DokiGen");
+    internal static Func<string> GenDirResolver { get; set; } =
+        () => { var s = AppSettings.Load().GenOutputDir; return string.IsNullOrWhiteSpace(s) ? DefaultGenDir : s!; };
+    public static string GenDir => GenDirResolver();
+
     private static readonly string[] AllowedMedia = { ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mp3", ".wav", ".flac" };
-
     private static int _genSeq;   // process-wide monotonic suffix: makes the path unique even for two gens in the same ms
+    // Every -Out path the panel itself created. OpenLocalMedia opens ONLY these — the tightest possible scope,
+    // and it survives an output-folder change mid-session (a single-dir prefix check would not).
+    private static readonly HashSet<string> _generated = new(StringComparer.OrdinalIgnoreCase);
 
-    // The panel owns the artifact's temp location (so it can both pass -Out and later scope-check the open).
+    // The panel owns the artifact's location (so it can both pass -Out and later scope-check the open). Writes
+    // into the resolved output dir; if that isn't writable (e.g. the exe lives in Program Files) it falls back
+    // to Pictures\DokiGen, then the temp dir — generation never fails for lack of a writable folder.
     public string NewGenOutPath(string kind)
     {
-        Directory.CreateDirectory(GenTempDir);
+        var dir = EnsureWritableDir();
         var seq = Interlocked.Increment(ref _genSeq);
-        return Path.Combine(GenTempDir, $"{kind}-{DateTime.Now:yyyyMMdd-HHmmss}-{seq}{GenRequest.OutExtensionFor(kind)}");
+        var path = Path.Combine(dir, $"{kind}-{DateTime.Now:yyyyMMdd-HHmmss}-{seq}{GenRequest.OutExtensionFor(kind)}");
+        lock (_generated) _generated.Add(Path.GetFullPath(path));
+        return path;
+    }
+
+    // The resolved output dir if creatable, else Pictures\DokiGen, else %TEMP%\dokigen — always returns a dir
+    // that exists. The fallback is mandatory so a read-only exe location can't break generation.
+    private static string EnsureWritableDir()
+    {
+        foreach (var dir in new[] {
+            GenDir,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "DokiGen"),
+            Path.Combine(Path.GetTempPath(), "dokigen") })
+        {
+            try { Directory.CreateDirectory(dir); return dir; } catch { }
+        }
+        return Path.GetTempPath();
     }
 
     // Shell `doki gen …` and wait (gen can take minutes). doki saves the artifact to req.OutPath; success =
@@ -83,14 +110,15 @@ public sealed class DokiService
         return new GenResult(false, req.OutPath, msg);
     }
 
-    // Open a media artifact the panel itself generated. Scoped to GenTempDir + an allowlisted media
-    // extension so this can never be coerced into shell-opening an arbitrary path (cf. OpenArtifact's note).
+    // Open a media artifact the panel itself generated. Scoped to the set of -Out paths THIS panel created
+    // (+ an allowlisted media extension) so it can never be coerced into shell-opening an arbitrary path, and
+    // it keeps working after the output folder is changed (cf. OpenArtifact's note).
     public void OpenLocalMedia(string path)
     {
         if (string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path) || !File.Exists(path)) return;
         var full = Path.GetFullPath(path);
-        var root = Path.GetFullPath(GenTempDir) + Path.DirectorySeparatorChar;
-        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+        bool ours; lock (_generated) ours = _generated.Contains(full);
+        if (!ours) return;
         if (Array.IndexOf(AllowedMedia, Path.GetExtension(full).ToLowerInvariant()) < 0) return;
         try { Process.Start(new ProcessStartInfo(full) { UseShellExecute = true })?.Dispose(); } catch { }
     }

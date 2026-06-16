@@ -118,8 +118,11 @@
           <Button DockPanel.Dock="Right" Style="{StaticResource GenerateBtn}" Content="✨ Generate"
                   Command="{Binding GenerateCommand}" IsEnabled="{Binding CanGenerate}" VerticalAlignment="Center"/>
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,14,0">
-            <ToggleButton Style="{StaticResource ModToggle}" Content="Fast" IsChecked="{Binding Fast}" ToolTip="LTXV video / fewer image steps"/>
-            <ToggleButton Style="{StaticResource ModToggle}" Content="Upscale" IsChecked="{Binding Upscale}" ToolTip="4× UltraSharp (image / edit)"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Fast" IsChecked="{Binding Fast}" ToolTip="Z-Image Turbo draft / LTXV video"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Upscale" IsChecked="{Binding Upscale}" ToolTip="4× UltraSharp pixel upscale (image / edit)"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Refine" IsChecked="{Binding Refine}" ToolTip="hi-res-fix: upscale + detail regen (image / edit)"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Face" IsChecked="{Binding Face}" ToolTip="Segment face-refine — inpaint-sharpen the face region (image / edit / i2v)"/>
+            <ToggleButton Style="{StaticResource ModToggle}" Content="Realism" IsChecked="{Binding Realism}" ToolTip="apply the Z-Image realism LoRA for photoreal skin/detail (image / edit / i2v)"/>
             <ToggleButton Style="{StaticResource ModToggle}" Content="Raw" IsChecked="{Binding Raw}" ToolTip="skip the prompt rewriter"/>
           </StackPanel>
           <!-- source-image picker: only edit / i2v take an init image (-InitImage) -->
@@ -144,6 +147,18 @@
                     Visibility="{Binding HasResult, Converter={StaticResource BoolVis}}">
           <Button Content="↻ remix" Style="{StaticResource IconBtn}" Command="{Binding RemixCommand}" IsEnabled="{Binding CanGenerate}" ToolTip="re-generate (re-seeds)"/>
           <Button Content="⎘ open" Style="{StaticResource IconBtn}" Command="{Binding OpenResultCommand}"/>
+        </StackPanel>
+        <!-- output folder: where generations are saved (persisted, beside the exe by default). Click the path to open it. -->
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
+          <Button Content="📁 folder" Style="{StaticResource IconBtn}" Command="{Binding PickOutputFolderCommand}"
+                  ToolTip="choose where generations are saved"/>
+          <TextBlock Text="{Binding OutputDir}" ToolTip="{Binding OutputDir}" Foreground="{StaticResource DimBrush}"
+                     Style="{StaticResource Mono}" FontSize="10.5" VerticalAlignment="Center" Margin="8,0,0,0"
+                     MaxWidth="300" TextTrimming="CharacterEllipsis" Cursor="Hand">
+            <TextBlock.InputBindings>
+              <MouseBinding MouseAction="LeftClick" Command="{Binding OpenOutputFolderCommand}"/>
+            </TextBlock.InputBindings>
+          </TextBlock>
         </StackPanel>
         <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource DimBrush}" Style="{StaticResource Mono}"
                    FontSize="11.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>

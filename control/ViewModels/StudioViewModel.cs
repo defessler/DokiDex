@@ -30,8 +30,12 @@ public partial class StudioViewModel : ObservableObject
     [ObservableProperty][NotifyPropertyChangedFor(nameof(PromptIsEmpty))] private string _promptText = "";
     [ObservableProperty] private bool _fast;
     [ObservableProperty] private bool _upscale;
+    [ObservableProperty] private bool _refine;              // -Refine: hi-res-fix (image / edit)
+    [ObservableProperty] private bool _face;                // -Face: Segment face-refine (image / edit / i2v)
+    [ObservableProperty] private bool _realism;             // -Realism: Z-Image realism LoRA (image / edit / i2v)
     [ObservableProperty] private bool _raw;                 // skip the :8013 prompt rewriter
     [ObservableProperty] private string? _initImagePath;    // -InitImage (required for edit; optional for i2v)
+    [ObservableProperty] private string _outputDir = DokiService.GenDir;   // where gens are saved; persisted on change
     [ObservableProperty][NotifyPropertyChangedFor(nameof(CanGenerate))][NotifyPropertyChangedFor(nameof(ShowEmpty))] private bool _isGenerating;
     [ObservableProperty] private string _statusText = "describe something to generate";
     // GPU in media mode? gen needs it (the panel keeps LLM/media mutually exclusive); the guard banner shows
@@ -67,6 +71,36 @@ public partial class StudioViewModel : ObservableObject
         if (dlg.ShowDialog() == true) InitImagePath = dlg.FileName;
     }
 
+    // Choose where generations are saved, and persist it (DokiService.GenDir reads the same setting on the
+    // next gen, so the change takes effect immediately — no restart).
+    [RelayCommand]
+    private void PickOutputFolder()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "choose where generations are saved",
+            InitialDirectory = System.IO.Directory.Exists(OutputDir) ? OutputDir : DokiService.DefaultGenDir,
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            OutputDir = dlg.FolderName;
+            var s = AppSettings.Load();
+            s.GenOutputDir = dlg.FolderName;
+            s.Save();
+        }
+    }
+
+    [RelayCommand]
+    private void OpenOutputFolder()
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(OutputDir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(OutputDir) { UseShellExecute = true })?.Dispose();
+        }
+        catch { }
+    }
+
     [RelayCommand]
     private void OpenResult()
     {
@@ -87,7 +121,7 @@ public partial class StudioViewModel : ObservableObject
 
         var req = new GenRequest(prompt, kind, Fast, Upscale, Raw,
                                  string.IsNullOrWhiteSpace(InitImagePath) ? null : InitImagePath,
-                                 _doki.NewGenOutPath(kind));
+                                 _doki.NewGenOutPath(kind), Refine, Face, Realism);
         IsGenerating = true;
         StatusText = $"generating {kind}…  (needs media mode)";
         try
@@ -95,7 +129,7 @@ public partial class StudioViewModel : ObservableObject
             var result = await _doki.RunGenAsync(req);   // resumes on the UI thread (command context)
             if (result.Ok)
             {
-                ResultCaption = CaptionFor(kind);
+                ResultCaption = CaptionFor(kind, Fast);
                 ResultPreview = GenRequest.IsInlineImageKind(kind) ? LoadFile(result.OutPath) : null;
                 ResultPath = result.OutPath;             // set LAST so HasResult flips after the preview is ready
                 StatusText = $"done · {ResultCaption}";
@@ -105,9 +139,9 @@ public partial class StudioViewModel : ObservableObject
         finally { IsGenerating = false; }
     }
 
-    private static string CaptionFor(string kind) => kind switch
+    private static string CaptionFor(string kind, bool fast) => kind switch
     {
-        "image" => "Z-Image Turbo · 1024²",
+        "image" => fast ? "Z-Image Turbo · 1024²" : "Z-Image Base · 1024²",
         "edit"  => "Qwen-Image-Edit",
         "video" => "Wan 2.2 · 832×480",
         "i2v"   => "Z-Image → Wan I2V",
@@ -139,7 +173,7 @@ public partial class StudioViewModel : ObservableObject
     internal void LoadDesignSample(string variant = "result")
     {
         SelectedKind = "image";
-        Fast = Upscale = Raw = false;
+        Fast = Upscale = Raw = Face = Realism = false;
         PromptText = "a coil of living light — teal to molten gold, drifting embers, volumetric haze through rain";
         ResultCaption = "Z-Image Turbo · 1024²";
         switch (variant)
@@ -168,7 +202,7 @@ public partial class StudioViewModel : ObservableObject
                 break;
             default:           // "result": the happy path with an inline preview
                 MediaActive = true; IsGenerating = false;
-                StatusText = "done · Z-Image Turbo · 1024² in 4.2s";
+                StatusText = "done · Z-Image Base · 1024² in 11s";
                 ResultPath = "(sample)";
                 ResultPreview = LoadBundled("assets/studio-sample.png");
                 break;

@@ -42,7 +42,7 @@
     "memory": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "--with", "mcp[cli]", "D:/Projects/DokiCode/serving/memory-mcp/server.py"],
+      "args": ["run", "--with", "mcp[cli]", "D:/Projects/DokiDex/serving/memory-mcp/server.py"],
       "timeout": 120
     }
   }

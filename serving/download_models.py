@@ -3,10 +3,12 @@
 Model A first (needed for first benchmarks), then model B's three shards.
 Re-running skips completed files.
 """
+import os
 import sys
 from huggingface_hub import hf_hub_download
 
-MODELS_DIR = r"D:\Projects\DokiCode\models"
+# Repo-relative (serving\ -> ..\models) so a project move can't break it.
+MODELS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models"))
 
 FILES = [
     ("unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",

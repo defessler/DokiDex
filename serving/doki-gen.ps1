@@ -26,31 +26,39 @@ function Resolve-GenKind {
 function Get-GenRecipe {
     param(
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
-        [switch]$Fast, [switch]$Upscale
+        [switch]$Fast, [switch]$Upscale, [switch]$Refine
     )
     $r = switch ($Kind) {
-        'image' { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8; cfgscale = 1; width = 1024; height = 1024 } }
+        # DEFAULT image = Z-Image BASE (non-distilled) — the quality ceiling: a real CFG + working negative
+        # prompt + ~35 steps recover the micro-detail Turbo's distillation throws away. -Fast swaps to Z-Image
+        # Turbo (8 steps, CFG 1) for seconds-fast drafts. Both reuse the same qwen_3_4b TE + Flux ae VAE.
+        'image' {
+            if ($Fast) { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8;  cfgscale = 1;   width = 1024; height = 1024; sampler = 'euler';    scheduler = 'simple' } }
+            else       { @{ model = 'z_image_bf16.safetensors';                  steps = 35; cfgscale = 4.5; width = 1024; height = 1024; sampler = 'dpmpp_2m'; scheduler = 'karras'; negativeprompt = 'blurry, lowres, deformed, extra fingers, jpeg artifacts, worst quality, low quality' } }
+        }
+        # Wan 2.2 5B is native 720p/24fps; sigmashift 8 + uni_pc/simple are its tuned flow settings (the
+        # config the missing sigma-shift left off). -Fast picks the distilled LTXV near-real-time model.
         'video' {
             if ($Fast) { @{ model = 'ltxv-2b-0.9.8-distilled.safetensors'; textvideoframes = 97; steps = 8;  cfgscale = 1;   width = 768; height = 512; videofps = 24; videoformat = 'h264-mp4' } }
-            else       { @{ model = 'wan2.2_ti2v_5B_fp16.safetensors';     textvideoframes = 49; steps = 20; cfgscale = 3.5; width = 832; height = 480; videofps = 24; videoformat = 'h264-mp4' } }
+            else       { @{ model = 'wan2.2_ti2v_5B_fp16.safetensors';     textvideoframes = 49; steps = 20; cfgscale = 3.5; width = 832; height = 480; videofps = 24; videoformat = 'h264-mp4'; sampler = 'uni_pc'; scheduler = 'simple'; sigmashift = 8 } }
         }
         'music' { @{ model = 'acestep_v1.5_turbo.safetensors'; textaudiobpm = 128; textaudioduration = 10; steps = 10; cfgscale = 1 } }
         'edit'  { @{ model = 'qwen_image_edit_2511_fp8mixed.safetensors'; steps = 20; cfgscale = 2.5 } }
-        # image->video: generate a frame (Z-Image) then animate it via the native videomodel pipeline. The
-        # videosteps/videocfg/videoresolution trio is what makes the I2V step fire (per media-recipes.md);
-        # add -InitImage to animate an EXISTING still instead of a fresh frame.
-        'i2v'   { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = 'wan2.2_ti2v_5B_fp16.safetensors'; videoframes = 25; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = 'Image'; videoformat = 'h264-mp4' } }
+        # image->video: generate a frame (Z-Image Turbo, fast seed) then animate it via the native videomodel
+        # pipeline. The videosteps/videocfg/videoresolution trio is what makes the I2V step fire (per
+        # media-recipes.md); add -InitImage to animate an EXISTING still instead of a fresh frame.
+        'i2v'   { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = 'wan2.2_ti2v_5B_fp16.safetensors'; videoframes = 49; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = 'Image'; videoformat = 'h264-mp4' } }
         # video + synced SFX via the WanFoley custom ComfyUI workflow -> one muxed mp4 with 48 kHz audio.
         'foley' { @{ comfyuicustomworkflow = 'WanFoley'; seed = -1 } }
     }
-    # -Fast on a still image just trims steps (Z-Image Turbo is already low; floor at 6). Video -Fast picked
-    # the distilled LTXV model above instead. Music/edit ignore -Fast.
-    if ($Fast -and $Kind -eq 'image') { $r.steps = 6 }
-    # -Upscale = the 4x-UltraSharp post pass (still images only). control% 0 = pure upscale, no refine pass;
-    # it only fires when refinermethod + refinercontrolpercentage are BOTH set.
-    if ($Upscale -and $Kind -in @('image', 'edit')) {
-        $r.refinermethod = 'PostApply'; $r.refinercontrolpercentage = 0
+    # -Upscale = pure 4x-UltraSharp post pass (control% 0 regenerates NO detail). -Refine = a real hi-res-fix:
+    # same upscaler but control% 0.35 regenerates coherent detail, + tiling to cap VRAM on the DiT model.
+    # Still images only; -Refine wins if both are passed.
+    if (($Upscale -or $Refine) -and $Kind -in @('image', 'edit')) {
+        $r.refinermethod = 'PostApply'
+        $r.refinercontrolpercentage = $(if ($Refine) { 0.35 } else { 0 })
         $r.refinerupscale = 2; $r.refinerupscalemethod = 'model-4x-UltraSharp.pth'
+        if ($Refine) { $r.refinerdotiling = $true }
     }
     return $r
 }
@@ -58,13 +66,27 @@ function Get-GenRecipe {
 # place the user's idea into the right field(s) for the kind: image/video wrap the lazy idea in
 # <mpprompt:...> so the always-on :8013 rewriter expands it at generate time (unless -Raw); music maps the
 # idea to the audio style with an [instrumental] prompt; edit uses the idea as a literal edit instruction.
+# -Realism / -Face are opt-in SwarmUI prompt TAGS (processed by SwarmUI itself, independent of the rewriter):
+# they're appended AFTER the <mpprompt:..> wrapper on the image-family kinds only (image / edit / i2v).
 function Get-GenPromptFields {
-    param([Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][string]$Idea, [switch]$Raw)
+    param(
+        [Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][string]$Idea,
+        [switch]$Raw, [switch]$Face, [switch]$Realism
+    )
+    # base on-disk name (no extension) of the Z-Image realism LoRA in SwarmUI's Models\Lora (setup.ps1).
+    $RealismLora = 'Z-Image-Realism'
     switch ($Kind) {
         'music' { return @{ prompt = '[instrumental]'; textaudiostyle = $Idea } }
-        'edit'  { return @{ prompt = $Idea } }
-        default { return @{ prompt = $(if ($Raw) { $Idea } else { "<mpprompt:$Idea>" }) } }
+        'edit'  { $p = $Idea }
+        default { $p = $(if ($Raw) { $Idea } else { "<mpprompt:$Idea>" }) }
     }
+    # SwarmUI tags ride OUTSIDE the rewriter wrapper. -Realism applies a Z-Image realism LoRA; -Face runs the
+    # CLIP-text Segment system as an inpaint face-refine (the ADetailer equivalent). image / edit / i2v only.
+    if ($Kind -in @('image', 'edit', 'i2v')) {
+        if ($Realism) { $p += " <lora:$($RealismLora):0.7>" }
+        if ($Face)    { $p += ' <segment:face,0.4,0.5>' }
+    }
+    return @{ prompt = $p }
 }
 
 # merge recipe + prompt fields + session (+ optional init image) into the final GenerateText2Image body.
@@ -91,12 +113,16 @@ function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
-        [switch]$Fast, [switch]$Upscale, [switch]$Raw, [switch]$NoOpen,
+        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
+        [switch]$Face, [switch]$Realism,
         [string]$InitImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
     if ($Kind -eq 'edit' -and -not $InitImage) { throw "-Edit needs -InitImage <path-to-image>" }
     if ($Upscale -and $Kind -notin @('image', 'edit')) { throw "-Upscale only applies to image/edit gens (got $Kind)" }
+    if ($Refine -and $Kind -notin @('image', 'edit')) { throw "-Refine only applies to image/edit gens (got $Kind)" }
+    if ($Face -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Face only applies to image/edit/i2v gens (got $Kind)" }
+    if ($Realism -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Realism only applies to image/edit/i2v gens (got $Kind)" }
     $initB64 = $null
     if ($InitImage) {
         if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }
@@ -106,11 +132,11 @@ function Invoke-Gen {
     try { Invoke-WebRequest "$Base/" -TimeoutSec 4 -UseBasicParsing | Out-Null }
     catch { throw "SwarmUI not reachable at $Base — start media mode first:  .\doki.ps1 up media" }
 
-    $tag = "$Kind$(if ($Fast) { ' (fast)' })$(if ($Upscale) { ' +4x' })"
+    $tag = "$Kind$(if ($Fast) { ' (fast)' })$(if ($Upscale) { ' +4x' })$(if ($Refine) { ' +refine' })$(if ($Realism) { ' +realism' })$(if ($Face) { ' +face' })"
     Write-Host "[gen] $tag  <-  ""$Prompt""" -ForegroundColor Cyan
 
-    $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale
-    $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw
+    $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine
+    $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
     $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body

@@ -105,3 +105,66 @@ coherent (a modest visual gap); speed/cost/control/uncensored win outright. Stay
 1080p+ and 10–25 s length, the hardest physics + multi-shot identity, and perfectly synced
 lip movement (Foley is V2A post-hoc; Wan2.2-S2V in Tier 2 is the lip-sync answer). The
 always-on prompt-rewriter is what manufactures the "just works from one sentence" feel.
+
+## Frontier-model watchlist (2026-06-16) — eval-gated challengers + cheap add-ons
+
+Verified candidates against the new **Z-Image Base** default (now the `doki gen` image default —
+`z_image_bf16`, 35 steps, real CFG 4.5 + negatives; Turbo is the `-Fast` tier). Per the project's
+**swap-only-on-a-measured-win** rule, none of these are defaults: each gets a **blind short-prompt
+bake-off vs the current default**, and is adopted **only on a measured win**. The cheap add-ons that
+ride alongside (LoRAs/upscalers) don't replace the default, so they only need a "is it better when
+asked for it" check. Already addressed this session is marked **✅**.
+
+### Image — eval-gated challengers (run a blind short-prompt A/B vs Z-Image Base; adopt only on a measured win)
+
+| Candidate | Why it might win | Download | VRAM | License | A/B gate → decision |
+|---|---|---|---|---|---|
+| **FLUX.1-Krea-dev** | Best-in-FLUX-family **natural skin** (kills the "plastic" look); best for portraits. Guidance-distilled → real CFG stays **1**, push the **FluxGuidance** knob ~3.5–4.5. | fp8 `huggingface.co/Clybius/FLUX.1-Krea-dev-scaled-fp8` (orig `black-forest-labs/FLUX.1-Krea-dev`); needs **T5-XXL + CLIP-L + flux ae VAE**. Loads via the standard **FLUX.1-dev path** in SwarmUI. | fp8 **~12 GB** | **NON-COMMERCIAL** (FLUX.1-dev non-comm) | Blind portrait/skin short-prompt set vs Z-Image Base → **adopt only if skin realism wins**; else keep Base, archive weights. License blocks any commercial use regardless of win. |
+| **Qwen-Image-2512** | Best open **prompt-adherence + in-image TEXT**; helps complex compositions where Z-Image is weaker. True-CFG ~4 **with a negative prompt**. | GGUF `huggingface.co/unsloth/Qwen-Image-2512-GGUF` — **Q5_K_M ~15 GB / Q6_K ~16.8 GB / Q8 ~21.8 GB** (all fit 32 GB). Reuses the **Qwen2.5-VL TE** (already on disk from the edit model) + **qwen_image VAE** (already on disk). | ~15–21.8 GB | **Apache-2.0** | Blind complex-composition + in-image-text short-prompt set → **adopt for text/adherence only on a measured win**; commercially clean either way. |
+| **FLUX.2-dev** | — (FLUX-family adherence) | — | **fp8 ~32 GB** | non-comm | **OFF the table** — fp8 ~32 GB is VRAM-tight on the 5090 (same wall decisions.md hit for the Wan 14B dual-expert). Do not download. |
+
+### Image — cheap add-ons (architecture-specific; ride alongside the default, no swap)
+
+- **✅ Realism LoRA (now wired via the `-Realism` flag):** `-Realism` appends `<lora:Z-Image-Realism:0.7>`.
+  `setup.ps1 -Models full` fetches it from HF **`suayptalha/Z-Image-Turbo-Realism-LoRA`** (Apache-2.0,
+  public/unauthenticated `resolve/` URL — the same scriptable pattern as the Wan-Lightning LoRAs) and saves it
+  as **`Z-Image-Realism.safetensors`** in `Models\Lora`. Civitai alternatives to A/B (**token-gated**, so not
+  auto-fetched — needs `CIVITAI_API_TOKEN`): **2268008** (Realistic Snapshot) / **2395852** (Radiant Realism
+  Pro) — drop either into `Models\Lora` renamed `Z-Image-Realism.safetensors` to swap. All
+  **architecture-specific to Z-Image** — generic SDXL detail LoRAs / negative embeddings will **NOT** load.
+  Gate: A/B `-Realism` on vs off on a skin/photo short-prompt set → keep opt-in (default-off); promote a
+  specific LoRA into the default recipe only on a measured win.
+- **4x-NMKD-Siax upscaler** (~67 MB) for skin/photo — **gentler than UltraSharp**; selectable via
+  `refinerupscalemethod`. **On-disk filename uses an underscore: `4x_NMKD-Siax_200k.pth`** — confirm the
+  exact name before wiring, because SwarmUI's selector string is **filename-exact** (the existing 4x-UltraSharp
+  is exposed as `model-4x-UltraSharp.pth`, i.e. a `model-` prefix on the on-disk `4x-UltraSharp.pth`). Gate:
+  A/B vs UltraSharp on a face/skin upscale → adopt as the photo-preset upscaler only if it's visibly gentler/better.
+- **Backlog ComfyUI nodes** (higher-effort, **explicitly-invoked** like the WanFoley workflow — not on by default):
+  - **Detail Daemon** (`Jonseed/ComfyUI-Detail-Daemon`) — **CFG-1-safe** detail for distilled Turbo; manipulates
+    the **sigma schedule, not CFG** (so it works where negatives/CFG are inert). Gate: A/B on a `-Fast`/Turbo gen.
+  - **Ultimate SD Upscale** (`ssitu/ComfyUI_UltimateSDUpscale`) — tiled img2img to **4K**. Gate: A/B vs the
+    current `-Refine` hi-res-fix on a single hero image (quality vs time).
+  - **SUPIR** — heavy diffusion restoration upscaler; **needs an SDXL base**; **single-hero-shot feasible on 32 GB**.
+    Gate: one-shot quality A/B vs UltraSharp/Ultimate SD Upscale; adopt only as an explicit "restore this one shot" path.
+
+### Video — eval-gated / recon
+
+- **Default stays Wan 2.2 TI2V-5B**, now tuned (**cfg 3.5, Sigma Shift 8, uni_pc/simple**; native res
+  **1280×704** available; i2v lengthened to **49f**). **LTXV-2b-distilled stays the `-Fast` tier** (optional
+  res bump toward its native **1216×704**). No A/B needed — these are the confirmed defaults.
+- **Wan 2.2 14B A14B — do NOT default.** The fp8 dual-expert **OOMs >300 s past 32 GB** in SwarmUI's StepSwap
+  (state held across the high→low handoff + resident ~6.3 GB umt5 + activations) — **proven live** (decisions.md
+  2026-06-14). The **only zero-OOM 14B route** worth an eval-gated A/B is **GGUF Q4_K_M** (~9.6 GB/expert,
+  `QuantStack/Wan2.2-T2V-A14B-GGUF`, **native SwarmUI GGUF loader**):
+  - base = **HIGH-noise** GGUF, **Refiner = LOW-noise** GGUF, **Refiner Method = Step-Swap**, **Refiner Control
+    Percentage 0.5**.
+  - pair the already-downloaded **Wan22-Lightning 4-step LoRAs** (HIGH strength **~0.7** / LOW **1.0** — community
+    practice, **not** a model-card spec), **steps 8 (4+4)**, **16 fps** (14B native, **NOT 24**).
+  - Gate: blind short-prompt A/B vs the tuned 5B → **adopt only on a measured quality win at acceptable time**;
+    **record the A/B result either way** (a clean negative is as useful as a win here).
+- **LTX-2.3 GGUF** (`unsloth/LTX-2.3-GGUF`, **22B**, **one-pass synced audio+video**) — **recon backlog.** SwarmUI
+  already detects the LTX-2 class (`isLtxv23`) but previously had **no loadable checkpoint** — **check whether its
+  native loader accepts the GGUF** (the plausible fix for the old "no checkpoint" blocker; see Tier 2's 2026-06-15
+  note). Floor is **32 GB VRAM (exactly the 5090)** → stay **≤720p / ≤4 s** to stay in-VRAM. License: **non-Apache
+  LTX-2 Community License** — **check terms before commercial use.** Decision: if the GGUF loads, this becomes the
+  Tier-2 keystone (native synced A/V, no S2V injection blocker); if not, it stays parked until a SwarmUI/ComfyUI update.

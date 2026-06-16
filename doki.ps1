@@ -15,11 +15,14 @@ param(
     [Parameter(Position = 1)][string]$Arg,
     [switch]$Clear,  # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
     # `doki gen "<idea>" ...` — text->media via SwarmUI (needs `doki up media`). Kind: -Video | -Music | -Edit
-    # | -I2v (animate a still: add -InitImage) | -Foley (video + synced SFX); default = still image. Modifiers:
-    # -Fast (LTXV video / fewer image steps), -Upscale (4x-UltraSharp), -InitImage <png> (required for -Edit;
-    # img2img / animate-still otherwise), -Raw (skip the :8013 rewriter), -Out <file>, -NoOpen.
+    # | -I2v (animate a still: add -InitImage) | -Foley (video + synced SFX); default = still image (Z-Image
+    # Base, quality). Modifiers: -Fast (Z-Image Turbo draft / LTXV video), -Upscale (4x-UltraSharp pixel
+    # upscale), -Refine (hi-res-fix: upscale + light detail regen), -Face (Segment face-refine, image/edit/i2v),
+    # -Realism (Z-Image realism LoRA, image/edit/i2v), -InitImage <png> (required for -Edit; img2img /
+    # animate-still otherwise), -Raw (skip the :8013 rewriter), -Out <file>, -NoOpen.
     [switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley,
-    [switch]$Fast, [switch]$Upscale, [switch]$Raw, [switch]$NoOpen,
+    [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
+    [switch]$Face, [switch]$Realism,
     [string]$InitImage, [string]$Out
 )
 $ErrorActionPreference = "Stop"
@@ -374,10 +377,10 @@ switch ($Command) {
         & python (Join-Path $serving "memory-mcp\code_index.py") $root
     }
     "gen" {
-        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley] [-Fast] [-Upscale] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
+        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
         $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley
-        Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Raw:$Raw -NoOpen:$NoOpen -InitImage $InitImage -Out $Out | Out-Null
+        Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -InitImage $InitImage -Out $Out | Out-Null
     }
     "test" {
         # unit tests (no GPU compute; fast). Live capability smokes are `doki verify`.

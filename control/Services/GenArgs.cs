@@ -12,7 +12,10 @@ public sealed record GenRequest(
     bool Upscale = false,
     bool Raw = false,
     string? InitImage = null,
-    string OutPath = "")
+    string OutPath = "",
+    bool Refine = false,
+    bool Face = false,
+    bool Realism = false)
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -56,6 +59,9 @@ public static class GenCli
         if (KindSwitch.TryGetValue(r.Kind, out var sw)) a.Add(sw);
         if (r.Fast) a.Add("-Fast");
         if (r.Upscale && GenRequest.UpscaleApplies(r.Kind)) a.Add("-Upscale");
+        if (r.Refine && GenRequest.UpscaleApplies(r.Kind)) a.Add("-Refine");
+        if (r.Face) a.Add("-Face");
+        if (r.Realism) a.Add("-Realism");
         if (r.Raw) a.Add("-Raw");
         if (!string.IsNullOrWhiteSpace(r.InitImage)) { a.Add("-InitImage"); a.Add(r.InitImage!); }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
