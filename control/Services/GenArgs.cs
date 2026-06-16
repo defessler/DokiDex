@@ -32,7 +32,9 @@ public sealed record GenRequest(
     string? ControlModel = null,       // ControlNet model name (activates ControlNet); from /api/controlnet-models
     double ControlStrength = 1,        // ControlNet strength (0..2)
     string? ControlPreprocessor = null,// ControlNet preprocessor (canny/depth/openpose/…)
-    string? EndImage = null)           // FLF2V end keyframe (video/i2v); needs an end-frame-capable model
+    string? EndImage = null,           // FLF2V end keyframe (video/i2v); needs an end-frame-capable model
+    bool Reference = false,            // use the init image as an IP-Adapter style/subject reference (image/edit)
+    double RefWeight = 0.6)            // IP-Adapter reference weight
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -100,6 +102,12 @@ public static class GenCli
             if (!string.IsNullOrWhiteSpace(r.ControlPreprocessor)) { a.Add("-ControlPreprocessor"); a.Add(r.ControlPreprocessor!); }
         }
         if (!string.IsNullOrWhiteSpace(r.EndImage) && r.Kind is "video" or "i2v") { a.Add("-EndImage"); a.Add(r.EndImage!); }
+        // IP-Adapter image reference: only with an init image on image/edit (the init image is the reference)
+        if (r.Reference && !string.IsNullOrWhiteSpace(r.InitImage) && GenRequest.UpscaleApplies(r.Kind))
+        {
+            a.Add("-Reference");
+            a.Add("-RefWeight"); a.Add(r.RefWeight.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }

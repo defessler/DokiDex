@@ -114,6 +114,16 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Reference_is_emitted_only_with_an_init_image_on_image_edit()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", InitImage: "ref.png", Reference: true, RefWeight: 0.7, OutPath: "o"));
+        Assert.Contains("-Reference", a);
+        var i = a.IndexOf("-RefWeight"); Assert.True(i >= 0); Assert.Equal("0.7", a[i + 1]);
+        Assert.DoesNotContain("-Reference", GenCli.BuildArgs(new GenRequest("x", "image", Reference: true, OutPath: "o")));   // no init image
+        Assert.DoesNotContain("-Reference", GenCli.BuildArgs(new GenRequest("x", "video", InitImage: "r.png", Reference: true, OutPath: "o"))); // wrong kind
+    }
+
+    [Fact]
     public void Blank_init_image_and_out_are_omitted()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "image", InitImage: "  ", OutPath: ""));

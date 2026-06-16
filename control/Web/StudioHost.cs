@@ -143,7 +143,7 @@ public static class StudioHost
                 Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative,
                 Upscaler: body.Upscaler, Segment: body.Segment,
                 ControlImage: controlPath, ControlModel: body.ControlModel, ControlStrength: body.ControlStrength, ControlPreprocessor: body.ControlPreprocessor,
-                EndImage: endPath);
+                EndImage: endPath, Reference: body.Reference, RefWeight: body.RefWeight);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));

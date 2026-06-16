@@ -84,10 +84,12 @@
       <div class="mods">
         <label>Seed <input id="seed" type="number" placeholder="random" class="kin"></label>
         <label>Count <input id="count" type="number" value="1" min="1" max="9" class="kin" style="width:54px"></label>
+        <label title="re-render on a turbo/low-step pass as you type"><input id="liveMode" type="checkbox"> Live</label>
         <label>Aspect <select id="aspect" class="kin" style="width:auto"><option value="">1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
         <label>Upscaler <select id="upscaler" class="kin" style="width:auto"><option value="">balanced</option><option value="photo">photo</option><option value="anime">anime</option></select></label>
         <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
         <span id="initname" class="hint" style="cursor:pointer"></span>
+        <label id="refLabel" style="display:none" title="use the init image as an IP-Adapter style/subject reference"><input id="refMode" type="checkbox"> as style ref</label>
       </div>
       <div class="mods">
         <label style="flex:1;min-width:200px">Negative <input id="negPrompt" class="kin" style="width:100%" placeholder="things to avoid (appended to the recipe negative)"></label>
@@ -239,10 +241,12 @@
       updateMusicBox();
       updateCameraBox();
       updateControlBox();
+      updateRefLabel();
     }
     function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
     function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; }
     function updateControlBox(){ document.getElementById('controlbox').style.display = (state.kind==='image'||state.kind==='edit') ? '' : 'none'; }
+    function updateRefLabel(){ document.getElementById('refLabel').style.display = (state.initImage && (state.kind==='image'||state.kind==='edit')) ? '' : 'none'; }
     let _cnImage=null, _cnLoaded=false;
     async function loadControlNets(){
       if(_cnLoaded) return; _cnLoaded=true;
@@ -333,6 +337,7 @@
           if (_endImage) body.endImage = _endImage;
         }
         if (state.initImage) body.initImage = state.initImage;
+        if (state.initImage && (state.kind==='image'||state.kind==='edit') && document.getElementById('refMode').checked) body.reference = true;
         if (state.kind==='edit' && state.initImage && _maskDrawn) body.maskImage = document.getElementById('maskcanvas').toDataURL('image/png');
         const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
         if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
@@ -606,12 +611,24 @@
       } catch(e){}
     }
     document.getElementById('prompt').addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); generate(); } });
+    // Realtime scratchpad: debounced turbo re-render as you type (image kind, media mode). Reuses the tested
+    // Fast gen path + single-flight queue; just submits on a pause so drafts stream into the results grid.
+    let _liveTimer=null;
+    document.getElementById('prompt').addEventListener('input', () => {
+      if(!document.getElementById('liveMode').checked || state.kind!=='image' || !state.mediaActive) return;
+      clearTimeout(_liveTimer);
+      _liveTimer=setTimeout(async()=>{
+        const p=document.getElementById('prompt').value.trim(); if(!p) return;
+        try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,kind:'image',fast:true})}); }catch{}
+        pollJobs();
+      }, 800);
+    });
     document.getElementById('initfile').addEventListener('change', e => {
       const f = e.target.files[0]; const nm = document.getElementById('initname');
       if(!f){ state.initImage=null; nm.textContent=''; updateMaskBox(); return; }
-      const rd = new FileReader(); rd.onload = () => { state.initImage = rd.result; nm.textContent = f.name + '  ✕'; updateMaskBox(); }; rd.readAsDataURL(f);
+      const rd = new FileReader(); rd.onload = () => { state.initImage = rd.result; nm.textContent = f.name + '  ✕'; updateMaskBox(); updateRefLabel(); }; rd.readAsDataURL(f);
     });
-    document.getElementById('initname').addEventListener('click', () => { state.initImage=null; document.getElementById('initfile').value=''; document.getElementById('initname').textContent=''; updateMaskBox(); });
+    document.getElementById('initname').addEventListener('click', () => { state.initImage=null; document.getElementById('initfile').value=''; document.getElementById('initname').textContent=''; updateMaskBox(); updateRefLabel(); });
     document.getElementById('cnFile').addEventListener('change', e => {
       const f=e.target.files[0]; const nm=document.getElementById('cnName');
       if(!f){ _cnImage=null; nm.textContent=''; return; }

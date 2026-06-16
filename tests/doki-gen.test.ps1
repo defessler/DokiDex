@@ -129,6 +129,12 @@ Assert ($bEnd.videoendimage -eq 'ENDB64')                           "end image -
 $bNoEnd = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's'
 Assert (-not $bNoEnd.ContainsKey('videoendimage'))                  "no end image -> no videoendimage (opt-in)"
 
+# --- IP-Adapter image reference: "Use IP-Adapter"/"IP-Adapter Weight" -> useipadapterforrevision/ipadapterweight ---
+$bRef = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -InitImageB64 'REFB64' -Reference $true -RefWeight 0.7
+Assert ($bRef.useipadapterforrevision -eq $true -and $bRef.ipadapterweight -eq 0.7) "-Reference + init -> useipadapterforrevision + ipadapterweight"
+$bRefNoInit = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Reference $true
+Assert (-not $bRefNoInit.ContainsKey('useipadapterforrevision'))    "-Reference without an init image -> no-op (needs the reference image)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"
