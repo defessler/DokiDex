@@ -101,6 +101,22 @@ public class GenCliTests
         => Assert.Equal(ext, GenRequest.OutExtensionFor(kind));
 
     [Fact]
+    public void Aspect_is_passed_as_a_separate_value_arg_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Aspect: "16:9", OutPath: "o"));
+        var i = a.IndexOf("-Aspect");
+        Assert.True(i >= 0);
+        Assert.Equal("16:9", a[i + 1]);   // value follows the flag as its own element
+    }
+
+    [Fact]
+    public void Aspect_is_omitted_when_blank_or_null()
+    {
+        Assert.DoesNotContain("-Aspect", GenCli.BuildArgs(new GenRequest("x", "image", OutPath: "o")));
+        Assert.DoesNotContain("-Aspect", GenCli.BuildArgs(new GenRequest("x", "image", Aspect: "  ", OutPath: "o")));
+    }
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));

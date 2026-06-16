@@ -93,5 +93,17 @@ Assert (-not $body.ContainsKey('initimage'))                       "body has no 
 $bodyI = Build-GenBody -Recipe (Get-GenRecipe -Kind edit) -PromptFields (Get-GenPromptFields -Kind edit -Idea 'y') -SessionId 's' -InitImageB64 'BASE64DATA'
 Assert ($bodyI.initimage -eq 'BASE64DATA' -and $bodyI.initimagecreativity -eq 0) "init image -> initimage + creativity 0"
 
+# --- Build-GenBody: aspect-ratio presets reshape width/height (image/edit only) ---
+function Test-Aspect([string]$Aspect, [int]$W, [int]$H) {
+    Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Aspect $Aspect
+}
+$a169 = Test-Aspect '16:9'; Assert ($a169.width -eq 1344 -and $a169.height -eq 768)  "aspect 16:9 -> 1344x768 (landscape)"
+$a916 = Test-Aspect '9:16'; Assert ($a916.width -eq 768  -and $a916.height -eq 1344) "aspect 9:16 -> 768x1344 (portrait)"
+$a43  = Test-Aspect '4:3';  Assert ($a43.width  -eq 1152 -and $a43.height  -eq 896)  "aspect 4:3 -> 1152x896"
+$a34  = Test-Aspect '3:4';  Assert ($a34.width  -eq 896  -and $a34.height  -eq 1152) "aspect 3:4 -> 896x1152"
+$aDef = Test-Aspect '1:1';  Assert ($aDef.width -eq 1024 -and $aDef.height -eq 1024) "aspect 1:1 -> 1024x1024 (square)"
+$aNone = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
+Assert ($aNone.width -eq 1024 -and $aNone.height -eq 1024) "no aspect -> recipe default dims unchanged"
+
 Write-Host "`ndoki-gen: $script:pass passed, $script:fail failed" -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })
 exit $(if ($script:fail) { 1 } else { 0 })

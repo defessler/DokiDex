@@ -23,7 +23,7 @@ param(
     [switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley,
     [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
     [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
-    [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1,
+    [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
     [string]$InitImage, [string]$MaskImage, [string]$Out
 )
 $ErrorActionPreference = "Stop"
@@ -381,7 +381,7 @@ switch ($Command) {
         if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
         $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley
-        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Seed $Seed -Count $Count -Strength $Strength -InitImage $InitImage -MaskImage $MaskImage -Out $Out -BodyOnly:$BodyOnly
+        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -InitImage $InitImage -MaskImage $MaskImage -Out $Out -BodyOnly:$BodyOnly
         if ($BodyOnly) { $genResult } else { $null = $genResult }   # -BodyOnly prints the GenerateText2Image body JSON for the web host (live-progress WS path)
     }
     "test" {

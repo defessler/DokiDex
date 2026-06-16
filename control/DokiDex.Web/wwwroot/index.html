@@ -80,6 +80,7 @@
       <div class="mods">
         <label>Seed <input id="seed" type="number" placeholder="random" class="kin"></label>
         <label>Count <input id="count" type="number" value="1" min="1" max="9" class="kin" style="width:54px"></label>
+        <label>Aspect <select id="aspect" class="kin" style="width:auto"><option value="">1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
         <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
         <span id="initname" class="hint" style="cursor:pointer"></span>
       </div>
@@ -160,6 +161,7 @@
         const seedVal = document.getElementById('seed').value.trim();
         const body = Object.assign({ prompt, kind:state.kind, count: parseInt(document.getElementById('count').value)||1 }, state.mods);
         if (seedVal!=='') body.seed = parseInt(seedVal);
+        const asp = document.getElementById('aspect').value; if (asp) body.aspect = asp;
         if (state.initImage) body.initImage = state.initImage;
         if (state.kind==='edit' && state.initImage && _maskDrawn) body.maskImage = document.getElementById('maskcanvas').toDataURL('image/png');
         const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });

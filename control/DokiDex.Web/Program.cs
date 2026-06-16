@@ -95,7 +95,7 @@ api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
     var req = new GenRequest(body.Prompt.Trim(), kind,
         Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
         Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
-        Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath);
+        Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect);
     return Results.Json(jobs.Submit(req).ToDto());
 });
 api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
