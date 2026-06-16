@@ -144,6 +144,14 @@ public static class StudioHost
         api.MapGet("/jobs/{id}", (string id, GenerationJobs jobs) =>
             jobs.Get(id) is { } j ? Results.Json(j.ToDto()) : Results.NotFound());
         api.MapPost("/jobs/{id}/cancel", async (string id, GenerationJobs jobs) => { await jobs.Cancel(id); return Results.Accepted(); });
+        // refine-from-result: re-run a finished card's image as img2img with one flag (face / hires / upscale)
+        api.MapPost("/jobs/{id}/refine", (string id, RefineRequest body, GenerationJobs jobs) =>
+        {
+            var j = jobs.Get(id);
+            if (j is null || !j.HasArtifact) return Results.NotFound();
+            var req = Refine.Build(j.Prompt, j.ArtifactPath!, body.Action);
+            return req is null ? Results.BadRequest(new { error = "unknown action" }) : Results.Json(jobs.Submit(req).ToDto());
+        });
         api.MapGet("/media/{id}", (string id, GenerationJobs jobs) =>
         {
             var j = jobs.Get(id);
