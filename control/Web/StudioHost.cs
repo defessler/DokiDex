@@ -170,6 +170,16 @@ public static class StudioHost
             var req = Refine.Build(j.Prompt, j.ArtifactPath!, body.Action);
             return req is null ? Results.BadRequest(new { error = "unknown action" }) : Results.Json(jobs.Submit(req).ToDto());
         });
+        // one-click effect presets: list + apply a stylistic transform to a finished card (img2img)
+        api.MapGet("/effects", () => Results.Json(EffectPresets.All()));
+        api.MapPost("/jobs/{id}/effect", (string id, RefineRequest body, GenerationJobs jobs) =>
+        {
+            var j = jobs.Get(id);
+            if (j is null || !j.HasArtifact) return Results.NotFound();
+            var preset = EffectPresets.Find(body.Action);   // RefineRequest.Action carries the preset id
+            return preset is null ? Results.BadRequest(new { error = "unknown effect" })
+                : Results.Json(jobs.Submit(EffectPresets.Build(preset, j.ArtifactPath!)).ToDto());
+        });
         api.MapGet("/media/{id}", (string id, GenerationJobs jobs) =>
         {
             var j = jobs.Get(id);

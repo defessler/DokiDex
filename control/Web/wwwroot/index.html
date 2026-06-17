@@ -601,6 +601,9 @@
     async function cancelJob(id){ try{ await fetch('/api/jobs/'+id+'/cancel',{method:'POST'}); }catch{} pollJobs(); }
     async function rerunJob(p,kind){ try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:decodeURIComponent(p),kind})}); }catch{} pollJobs(); }
     async function refineJob(id,action){ if(!await ensureMedia()) return; try{ await fetch('/api/jobs/'+id+'/refine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); }catch{} pollJobs(); }
+    let _effects=[];
+    async function loadEffects(){ try{ _effects=await (await fetch('/api/effects')).json(); }catch{} }
+    async function applyEffect(id,presetId){ if(!presetId||!await ensureMedia()) return; try{ await fetch('/api/jobs/'+id+'/effect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:presetId})}); }catch{} pollJobs(); }
     function jobCard(j){
       const pct = Math.round((j.progress||0)*100);
       let inner;
@@ -612,10 +615,11 @@
       const cancel = (j.status==='running'||j.status==='queued') ? `<button class="xbtn" onclick="cancelJob('${j.id}')">cancel</button>` : '';
       const rerun = j.status==='done' ? `<button class="xbtn" onclick="rerunJob('${encodeURIComponent(j.prompt)}','${j.kind}')">↻ rerun</button>` : '';
       const refine = (j.status==='done' && (j.kind==='image'||j.kind==='edit')) ? `<button class="xbtn" onclick="refineJob('${j.id}','vary')">vary</button><button class="xbtn" onclick="refineJob('${j.id}','face')">face</button><button class="xbtn" onclick="refineJob('${j.id}','hires')">hi-res</button><button class="xbtn" onclick="refineJob('${j.id}','upscale')">upscale</button>` : '';
+      const fx = (j.status==='done' && (j.kind==='image'||j.kind==='edit') && _effects.length) ? `<select class="kin" style="width:auto;font-size:10px" onchange="applyEffect('${j.id}',this.value);this.selectedIndex=0"><option value="">fx…</option>${_effects.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>` : '';
       const sub = j.status==='failed' ? esc(j.message||'failed') : (j.status==='running' ? pct+'%' : j.status);
       return `<div class="card"><div class="media">${inner}</div>${bar}<div class="body">
         <div class="p">${esc(j.prompt)}</div>
-        <div class="row" style="justify-content:space-between"><span class="s ${j.status}">${j.kind} · ${esc(sub)}</span><span>${refine}${rerun}${cancel}</span></div></div></div>`;
+        <div class="row" style="justify-content:space-between"><span class="s ${j.status}">${j.kind} · ${esc(sub)}</span><span>${fx}${refine}${rerun}${cancel}</span></div></div></div>`;
     }
     async function pollJobs(){
       try {
@@ -883,7 +887,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>

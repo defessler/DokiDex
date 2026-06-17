@@ -1,0 +1,14 @@
+{
+  "presets": [
+    { "id": "anime",       "name": "To Anime",      "prompt": "anime style, clean line art, cel shading, vibrant colors", "strength": 0.55 },
+    { "id": "night",       "name": "To Night",      "prompt": "at night, moonlit, deep shadows, cool blue tones", "strength": 0.45 },
+    { "id": "watercolor",  "name": "Watercolor",    "prompt": "watercolor painting, soft washes, visible paper texture", "strength": 0.55 },
+    { "id": "pixar",       "name": "3D / Pixar",    "prompt": "3d render, pixar style, soft global illumination, subsurface scattering", "strength": 0.55 },
+    { "id": "cyberpunk",   "name": "Cyberpunk",     "prompt": "cyberpunk, neon glow, wet reflective streets, night", "strength": 0.5 },
+    { "id": "oil",         "name": "Oil Painting",  "prompt": "oil painting, thick impasto brushstrokes, rich color", "strength": 0.55 },
+    { "id": "winter",      "name": "Winter",        "prompt": "snowy, winter, frost, cold overcast light", "strength": 0.45 },
+    { "id": "golden",      "name": "Golden Hour",   "prompt": "golden hour, warm sunlight, long shadows, glow", "strength": 0.4 },
+    { "id": "noir",        "name": "Film Noir",     "prompt": "black and white, high-contrast chiaroscuro, deep shadows", "strength": 0.5 },
+    { "id": "lineart",     "name": "Line Art",      "prompt": "clean black and white line art, ink drawing", "strength": 0.6 }
+  ]
+}
