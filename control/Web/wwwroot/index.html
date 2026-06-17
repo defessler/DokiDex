@@ -179,6 +179,16 @@
         <div class="row" style="margin-top:8px"><input id="recipeName" class="kin" style="width:160px" placeholder="recipe name"><button class="xbtn" onclick="saveRecipe()">save as recipe</button><span class="hint" id="recipeHint"></span></div>
         <div id="recipeList" class="hint" style="margin-top:6px"></div>
       </details>
+      <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Image Set — a series sharing one locked style</summary>
+        <p class="hint" style="margin:6px 0">One locked style + aspect across the set; <b>one prompt per line</b> (each its own cell + seed). The style is merged into every cell, so a card's <b>rerun</b> rerolls just that cell.</p>
+        <input id="seriesStyle" class="kin" style="width:100%;margin-bottom:6px" placeholder="locked style — e.g. flat icon, cel shading, soft rim light">
+        <textarea id="seriesCells" placeholder="happy face&#10;angry face&#10;surprised face&#10;sleeping face" style="min-height:80px"></textarea>
+        <div class="row" style="margin-top:6px">
+          <select id="seriesAspect" class="kin" style="width:auto"><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="16:9">16:9</option><option value="9:16">9:16</option></select>
+          <label class="hint"><input type="checkbox" id="seriesFast" checked> fast draft</label>
+          <button class="ghost" onclick="generateSeries()">Generate series</button><span class="hint" id="seriesHint"></span>
+        </div>
+      </details>
       <h2>Results</h2>
       <div class="grid" id="results"><p class="hint">Nothing generated yet.</p></div>
     </section>
@@ -585,6 +595,15 @@
     async function runRecipe(n){ if(!await ensureMedia()) return; try{ const j=await (await fetch('/api/recipes/'+encodeURIComponent(n)+'/run',{method:'POST'})).json(); document.getElementById('recipeHint').textContent=`queued ${j.submitted||0}`; }catch{} pollJobs(); }
     async function loadRecipe(n){ try{ const j=await (await fetch('/api/recipes/'+encodeURIComponent(n))).json(); document.getElementById('csvText').value=j.csv||''; document.getElementById('recipeName').value=n; }catch{} }
     async function delRecipe(n){ try{ await fetch('/api/recipes/'+encodeURIComponent(n),{method:'DELETE'}); }catch{} loadRecipes(); }
+    async function generateSeries(){
+      if(!await ensureMedia()) return;
+      const style=document.getElementById('seriesStyle').value.trim();
+      const cells=document.getElementById('seriesCells').value.split('\n').map(s=>s.trim()).filter(Boolean).map(p=>({prompt:p,seed:-1}));
+      const hint=document.getElementById('seriesHint');
+      if(!cells.length){ hint.textContent='add at least one prompt line'; return; }
+      const body={ style, aspect:document.getElementById('seriesAspect').value, fast:document.getElementById('seriesFast').checked, cells };
+      try{ const r=await fetch('/api/series',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json(); hint.textContent=r.ok?`queued ${j.submitted} cells`:(j.error||'error'); pollJobs(); }catch{ hint.textContent='series request failed'; }
+    }
     async function runBatch(){
       const csv=document.getElementById('csvText').value.trim();
       const hint=document.getElementById('csvHint');

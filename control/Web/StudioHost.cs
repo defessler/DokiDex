@@ -367,6 +367,15 @@ public static class StudioHost
             return ok ? Results.Json(new { pass = verdict!.Pass, reason = verdict.Reason }) : Results.Json(new { error = err }, statusCode: 503);
         });
 
+        // ---- Image Set / series: shared style+aspect locked, per-cell prompt+seed -> one job per cell ----
+        api.MapPost("/series", (SeriesSpec body, GenerationJobs jobs) =>
+        {
+            var reqs = ImageSet.Compile(body);
+            if (reqs.Count == 0) return Results.BadRequest(new { error = "no cells with a prompt" });
+            var ids = reqs.Select(r => jobs.Submit(r).ToDto()).ToList();
+            return Results.Json(new { submitted = ids.Count, jobs = ids });
+        });
+
         // ---- CSV batch generation: header row -> per-row GenRequest -> queued jobs (respects the GPU gate) ----
         api.MapPost("/batch", (BatchRequest body, GenerationJobs jobs) =>
         {
