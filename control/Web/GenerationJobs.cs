@@ -17,7 +17,7 @@ public sealed record GenSubmit(
     string? Upscaler = null, string? Segment = null,
     List<ControlUnit>? ControlNets = null,
     string? EndImage = null, bool Reference = false, double RefWeight = 0.6,
-    string? Interpolate = null, int InterpolateMult = 2, string? Workflow = null);
+    string? Interpolate = null, int InterpolateMult = 2, string? Workflow = null, string? Tile = null);
 
 // One generation job, tracked in memory for the session.
 public sealed class GenJob

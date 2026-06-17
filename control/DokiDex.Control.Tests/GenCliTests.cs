@@ -239,6 +239,14 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Tile_is_emitted_for_image_edit_only()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Tile: "true", OutPath: "o"));
+        var i = a.IndexOf("-Tile"); Assert.True(i >= 0); Assert.Equal("true", a[i + 1]);
+        Assert.DoesNotContain("-Tile", GenCli.BuildArgs(new GenRequest("x", "video", Tile: "true", OutPath: "o")));
+    }
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));

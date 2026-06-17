@@ -89,6 +89,7 @@
         <label title="re-render on a turbo/low-step pass as you type"><input id="liveMode" type="checkbox"> Live</label>
         <label>Aspect <select id="aspect" class="kin" style="width:auto"><option value="">1:1</option><option>16:9</option><option>9:16</option><option>4:3</option><option>3:4</option></select></label>
         <label>Upscaler <select id="upscaler" class="kin" style="width:auto"><option value="">balanced</option><option value="photo">photo</option><option value="anime">anime</option></select></label>
+        <label>Tile <select id="tile" class="kin" style="width:auto"><option value="">off</option><option value="true">seamless</option><option value="x">X-only</option><option value="y">Y-only</option></select></label>
         <label class="xbtn" style="cursor:pointer">+ init image<input id="initfile" type="file" accept="image/*" style="display:none"></label>
         <span id="initname" class="hint" style="cursor:pointer"></span>
         <label id="refLabel" style="display:none" title="use the init image as an IP-Adapter style/subject reference"><input id="refMode" type="checkbox"> as style ref</label>
@@ -481,6 +482,7 @@
         const neg = document.getElementById('negPrompt').value.trim(); if (neg) body.negative = neg;
         const seg = document.getElementById('segPrompt').value.trim(); if (seg) body.segment = seg;
         const wf = document.getElementById('workflow').value.trim(); if (wf) body.workflow = wf;
+        const tile = document.getElementById('tile').value; if (tile) body.tile = tile;
         if (state.mods.upscale || state.mods.refine) { const up=document.getElementById('upscaler').value; if(up) body.upscaler=up; }
         if (_styleSel.size) {
           try { const sc = await (await fetch('/api/compose/style',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:body.prompt, negative:body.negative||'', chips:[..._styleSel]})})).json(); if(sc.prompt) body.prompt=sc.prompt; if(sc.negative) body.negative=sc.negative; } catch {}

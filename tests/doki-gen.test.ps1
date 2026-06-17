@@ -147,6 +147,11 @@ Assert ($bWf.comfyuicustomworkflow -eq 'SUPIR')                      "-Workflow 
 $bNoWf = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
 Assert (-not $bNoWf.ContainsKey('comfyuicustomworkflow'))           "no -Workflow -> no custom workflow (opt-in)"
 
+# --- seamless tile: -Tile true/x/y -> seamlesstileable (SwarmUI enum); opt-in ---
+Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Tile 'true').seamlesstileable -eq 'true') "-Tile true -> seamlesstileable=true"
+Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Tile 'x').seamlesstileable -eq 'X-Only') "-Tile x -> seamlesstileable=X-Only"
+Assert (-not (Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's').ContainsKey('seamlesstileable')) "no -Tile -> no seamlesstileable (opt-in)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"
