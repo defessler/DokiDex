@@ -85,6 +85,7 @@
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
+      <button onclick="toggleKeyHelp()" title="keyboard shortcuts (?)">⌨</button>
     </nav>
     <span id="gpuPill" class="gpu-pill"></span>
   </header>
@@ -1063,6 +1064,38 @@
     }
     document.getElementById('prompt').addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); generate(); } });
     document.addEventListener('keydown', libKey);   // Library keyboard triage (F/X/U + arrows)
+    // ---- keyboard-first map (one consolidated set across views) ----
+    function toggleKeyHelp(){
+      const ex=document.getElementById('keyhelp'); if(ex){ ex.remove(); return; }
+      const o=$(`<div id="keyhelp" style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:50" onclick="if(event.target===this)this.remove()">
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:20px 26px;max-width:440px">
+          <h2 style="margin:0 0 10px;color:var(--cyan)">Keyboard</h2>
+          <table style="font-size:13px;line-height:1.85">
+          <tr><td style="padding-right:18px"><b>g</b></td><td>generate</td></tr>
+          <tr><td><b>e</b></td><td>explore ×8</td></tr>
+          <tr><td><b>1–6</b></td><td>switch kind (image…foley)</td></tr>
+          <tr><td><b>/</b></td><td>focus prompt / search</td></tr>
+          <tr><td><b>Ctrl/⌘+Enter</b></td><td>generate from the prompt</td></tr>
+          <tr><td colspan="2" style="color:var(--dim);padding-top:8px">Library</td></tr>
+          <tr><td><b>F / X / U</b></td><td>favorite / trash / clear</td></tr>
+          <tr><td><b>← →</b></td><td>move focus</td></tr>
+          <tr><td><b>?</b></td><td>toggle this help · <b>Esc</b> close</td></tr>
+          </table></div></div>`);
+      document.body.appendChild(o);
+    }
+    function appKeys(e){
+      const t=e.target.tagName, typing=(t==='INPUT'||t==='TEXTAREA'||t==='SELECT');
+      if(e.key==='Escape'){ const h=document.getElementById('keyhelp'); if(h){ h.remove(); e.preventDefault(); } return; }
+      if(e.key==='?'&&!typing){ e.preventDefault(); toggleKeyHelp(); return; }
+      if(e.key==='/'&&!typing){ e.preventDefault(); const id=state.view==='library'?'libQuery':(state.view==='voice'?'ttsText':'prompt'); const el=document.getElementById(id); if(el) el.focus(); return; }
+      if(typing) return;
+      if(state.view==='create'){
+        if(e.key==='g'){ e.preventDefault(); generate(); }
+        else if(e.key==='e'){ e.preventDefault(); explore(); }
+        else if(e.key>='1'&&e.key<='6'){ const k=KINDS[+e.key-1]; if(k){ e.preventDefault(); state.kind=k; renderControls(); } }
+      }
+    }
+    document.addEventListener('keydown', appKeys);
     // Realtime scratchpad: debounced turbo re-render as you type (image kind, media mode). Reuses the tested
     // Fast gen path + single-flight queue; just submits on a pause so drafts stream into the results grid.
     let _liveTimer=null;
