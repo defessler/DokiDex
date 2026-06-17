@@ -213,6 +213,13 @@ public static class StudioHost
         // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
         api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));
 
+        // ---- in-app LoRA training (kohya sd-scripts sidecar, gated on setup.ps1 -Train; output -> LoRA mixer) ----
+        api.MapPost("/train", async (TrainRequest body, GalleryService gal, CancellationToken ct) =>
+        {
+            var r = await Training.TrainAsync(body, gal, ct);
+            return r.Ok ? Results.Json(new { ok = true, message = r.Message }) : Results.Json(new { error = r.Message }, statusCode: 503);
+        });
+
         // ---- SAM point segmentation (semantic click->mask; sidecar, gated on setup.ps1 -Sam) ----
         api.MapPost("/segment-click", async (SegmentClickRequest body, CancellationToken ct) =>
         {

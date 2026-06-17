@@ -16,6 +16,7 @@ param(
     [switch]$Stt,
     [switch]$Demucs,    # optional audio-tools sidecar: stem separation (vocals/drums/bass/other) via Demucs
     [switch]$Sam,       # optional sidecar: Segment-Anything point segmentation (semantic click->mask in the edit canvas)
+    [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
                         # so don't install the .NET SDK to rebuild it — only -Media needs the SDK (SwarmUI).
     [ValidateSet("lean", "full")][string]$Models = "lean"
@@ -206,6 +207,27 @@ if ($Sam) {
         Invoke-WebRequest "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth" -OutFile $ckpt
     } else { Ok "SAM checkpoint present" }
     Ok "SAM ready -> audio-tools/sam (the edit canvas 'SAM' click mode uses it; magic-wand works without it)."
+}
+
+# ---- LoRA training: kohya sd-scripts — optional, GPU training ----
+if ($Train) {
+    Info "LoRA trainer (kohya sd-scripts)"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
+    Ensure-WinGet "Git.Git" "git"
+    $tRoot = Join-Path $root "audio-tools\sd-scripts"
+    if (-not (Test-Path (Join-Path $tRoot ".git"))) { Info "cloning kohya sd-scripts ..."; Git-Clone https://github.com/kohya-ss/sd-scripts $tRoot } else { Ok "sd-scripts cloned" }
+    $trpy = Join-Path $tRoot ".venv\Scripts\python.exe"
+    $trok = Join-Path $tRoot ".venv\.deps-ok"
+    if (-not (Test-Path $trok)) {
+        Info "creating venv + installing trainer deps (+ cu128 torch, large) ..."
+        if (-not (Test-Path $trpy)) { python -m venv (Join-Path $tRoot ".venv") }
+        & $trpy -m pip install --upgrade pip | Out-Null
+        Pip $trpy install torch --index-url https://download.pytorch.org/whl/cu128
+        Pip $trpy install -r (Join-Path $tRoot "requirements.txt")
+        Pip $trpy install accelerate bitsandbytes
+        New-Item -ItemType File -Force $trok | Out-Null
+    } else { Ok "trainer venv present" }
+    Ok "LoRA trainer ready -> audio-tools/sd-scripts (the studio 'Train' action builds a LoRA into Models/Lora; needs a base model sd-scripts supports)."
 }
 
 # ---- STT stack: fully-local speech-to-text (NVIDIA Parakeet via onnx-asr) — optional ----

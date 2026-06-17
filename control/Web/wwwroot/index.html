@@ -240,6 +240,15 @@
         </select>
       </div>
       <div class="grid" id="library"><p class="hint">Loading…</p></div>
+      <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Train a LoRA from the shown images</summary>
+        <div class="mods" style="margin-top:6px">
+          <label>Name <input id="trName" class="kin" style="width:140px" placeholder="my-style"></label>
+          <label>Base model <input id="trBase" class="kin" style="width:200px" placeholder="model file sd-scripts supports"></label>
+          <label>Steps <input id="trSteps" type="number" value="1600" class="kin" style="width:70px"></label>
+          <label>Dim <input id="trDim" type="number" value="16" class="kin" style="width:54px"></label>
+          <button class="ghost" onclick="trainLora()">Train</button><span class="hint" id="trHint"></span>
+        </div>
+      </details>
     </section>
     <section id="view-models" style="display:none">
       <div id="models"><p class="hint">Loading…</p></div>
@@ -608,15 +617,25 @@
       try{ const r=await fetch('/api/stems',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})}); const j=await r.json(); if(!r.ok){ alert(j.error||'stem separation failed'); return; } }catch{ alert('stem separation failed'); return; }
       loadLibrary();
     }
+    let _libItems=[];
     async function loadLibrary(){
       try {
         const q = encodeURIComponent(document.getElementById('libQuery')?.value||'');
         const kind = encodeURIComponent(document.getElementById('libKind')?.value||'');
         const items = await (await fetch(`/api/gallery?q=${q}&kind=${kind}`)).json();
+        _libItems = items;
         const g = document.getElementById('library');
         g.innerHTML = items.length ? '' : '<p class="hint">No matching generations.</p>';
         items.forEach(it => g.appendChild($(libCard(it))));
       } catch(e){ document.getElementById('library').innerHTML='<p class="err">could not load the library</p>'; }
+    }
+    async function trainLora(){
+      const h=document.getElementById('trHint');
+      const imgs=_libItems.filter(it=>it.kind==='image'||it.kind==='edit').map(it=>it.name);
+      if(!imgs.length){ h.textContent='no image items shown to train on'; return; }
+      const body={ name:document.getElementById('trName').value, images:imgs, baseModel:document.getElementById('trBase').value, steps:+document.getElementById('trSteps').value||1600, dim:+document.getElementById('trDim').value||16 };
+      h.textContent=`training on ${imgs.length} images… (this takes a while)`;
+      try{ const r=await fetch('/api/train',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json(); h.textContent=r.ok?(j.message||'done'):(j.error||'training failed'); }catch{ h.textContent='train request failed'; }
     }
     async function delItem(name){ try{ await fetch('/api/gallery/'+name,{method:'DELETE'}); }catch{} loadLibrary(); }
     function remixItem(p,kind){ document.getElementById('prompt').value = decodeURIComponent(p); state.kind = kind; renderControls(); setView('create'); document.getElementById('prompt').focus(); }
