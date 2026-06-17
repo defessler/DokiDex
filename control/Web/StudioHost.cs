@@ -373,6 +373,16 @@ public static class StudioHost
             return ok ? Results.Json(new { pass = verdict!.Pass, reason = verdict.Reason }) : Results.Json(new { error = err }, statusCode: 503);
         });
 
+        // ---- Parallel multi-model compare: one prompt -> one fast job per installed image base (grid) ----
+        api.MapPost("/compare", (CompareRequest body, GenerationJobs jobs, ModelManager mm) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
+            var models = mm.InstalledImageModels();
+            if (models.Count == 0) return Results.BadRequest(new { error = "no installed image bases to compare" });
+            var ids = models.Select(m => jobs.Submit(new GenRequest(body.Prompt!.Trim(), "image", Fast: true, Model: m.File)).ToDto()).ToList();
+            return Results.Json(new { submitted = ids.Count, jobs = ids });
+        });
+
         // ---- Image Set / series: shared style+aspect locked, per-cell prompt+seed -> one job per cell ----
         api.MapPost("/series", (SeriesSpec body, GenerationJobs jobs) =>
         {

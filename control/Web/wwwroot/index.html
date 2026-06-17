@@ -171,6 +171,7 @@
       <div class="row">
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
         <button class="ghost" id="exploreBtn" onclick="explore()" title="fan this prompt into 8 fast variations">Explore ×8</button>
+        <button class="ghost" id="cmpBtn" onclick="compareModels()" style="display:none" title="generate this prompt on every installed image base, side by side">Compare bases</button>
         <span class="hint" id="genHint"></span>
       </div>
       <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Batch (CSV) — one generation per row</summary>
@@ -656,7 +657,14 @@
     async function refineJob(id,action){ if(!await ensureMedia()) return; try{ await fetch('/api/jobs/'+id+'/refine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); }catch{} pollJobs(); }
     let _effects=[];
     async function loadEffects(){ try{ _effects=await (await fetch('/api/effects')).json(); }catch{} }
-    async function loadImageModels(){ try{ const ms=await (await fetch('/api/image-models')).json(); const sel=document.getElementById('genModel'); (ms||[]).forEach(m=>{ const o=document.createElement('option'); o.value=m.file; o.textContent=m.name; sel.appendChild(o); }); }catch{} }
+    let _imageModelCount=0;
+    async function loadImageModels(){ try{ const ms=await (await fetch('/api/image-models')).json(); _imageModelCount=(ms||[]).length; const sel=document.getElementById('genModel'); (ms||[]).forEach(m=>{ const o=document.createElement('option'); o.value=m.file; o.textContent=m.name; sel.appendChild(o); }); const cb=document.getElementById('cmpBtn'); if(cb) cb.style.display=_imageModelCount>1?'':'none'; }catch{} }
+    async function compareModels(){
+      const prompt=document.getElementById('prompt').value.trim(); const hint=document.getElementById('genHint');
+      if(!prompt){ hint.textContent='enter a prompt first'; return; }
+      if(!await ensureMedia()) return;
+      try{ const r=await fetch('/api/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})}); const j=await r.json(); hint.textContent=r.ok?`comparing ${j.submitted} bases`:(j.error||'error'); pollJobs(); }catch{ hint.textContent='compare failed'; }
+    }
     async function applyEffect(id,presetId){ if(!presetId||!await ensureMedia()) return; try{ await fetch('/api/jobs/'+id+'/effect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:presetId})}); }catch{} pollJobs(); }
     function jobCard(j){
       const pct = Math.round((j.progress||0)*100);
@@ -671,8 +679,9 @@
       const refine = (j.status==='done' && (j.kind==='image'||j.kind==='edit')) ? `<button class="xbtn" onclick="refineJob('${j.id}','vary')">vary</button><button class="xbtn" onclick="refineJob('${j.id}','face')">face</button><button class="xbtn" onclick="refineJob('${j.id}','hires')">hi-res</button><button class="xbtn" onclick="refineJob('${j.id}','upscale')">upscale</button>` : '';
       const fx = (j.status==='done' && (j.kind==='image'||j.kind==='edit') && _effects.length) ? `<select class="kin" style="width:auto;font-size:10px" onchange="applyEffect('${j.id}',this.value);this.selectedIndex=0"><option value="">fx…</option>${_effects.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>` : '';
       const sub = j.status==='failed' ? esc(j.message||'failed') : (j.status==='running' ? pct+'%' : j.status);
+      const mdl = j.model ? `<div class="hint" style="font-family:monospace;font-size:10px;margin-top:2px">▸ ${esc(j.model.replace(/\.[^.]+$/,''))}</div>` : '';
       return `<div class="card"><div class="media">${inner}</div>${bar}<div class="body">
-        <div class="p">${esc(j.prompt)}</div>
+        <div class="p">${esc(j.prompt)}</div>${mdl}
         <div class="row" style="justify-content:space-between"><span class="s ${j.status}">${j.kind} · ${esc(sub)}</span><span>${fx}${refine}${rerun}${cancel}</span></div></div></div>`;
     }
     async function pollJobs(){

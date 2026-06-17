@@ -6,6 +6,9 @@ namespace DokiDex.Web;
 // An installed image checkpoint the router may choose (File = the SwarmUI model name, basename w/ extension).
 public sealed record RoutableModel(string Id, string File, string Name, bool IsDefault);
 
+// A request to generate one prompt across every installed image base (the compare grid).
+public sealed record CompareRequest(string? Prompt);
+
 public enum ImgClass { Versatile, Photo, Illustration, Text }
 
 // Auto model router: a cheap, prompt-aware checkpoint picker (Freepik "Auto") — read the prompt, pick the

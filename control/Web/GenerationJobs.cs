@@ -27,6 +27,7 @@ public sealed class GenJob
     public required string Prompt { get; init; }
     public required string Kind { get; init; }
     public string? Parent { get; init; }              // source artifact name this was derived from (lineage)
+    public string? Model { get; init; }               // resolved checkpoint (for the model-compare grid label)
     public string Status { get; set; } = "queued";   // queued | running | done | failed
     public double Progress { get; set; }              // 0..1, fed by the GenerateText2ImageWS bridge
     public string? Preview { get; set; }              // in-flight preview (data: URL) while running
@@ -36,7 +37,7 @@ public sealed class GenJob
 
     public object ToDto() => new
     {
-        id = Id, prompt = Prompt, kind = Kind, status = Status, progress = Progress, message = Message,
+        id = Id, prompt = Prompt, kind = Kind, status = Status, progress = Progress, message = Message, model = Model,
         // scoped media URL by job id only (never a client-supplied path) -> no traversal
         mediaUrl = Status == "done" && HasArtifact ? $"/api/media/{Id}" : null,
         // only the running job carries a preview (keeps the /api/jobs payload small)
@@ -61,7 +62,7 @@ public sealed class GenerationJobs
 
     public GenJob Submit(GenRequest req, string? parent = null)
     {
-        var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind, Parent = parent };
+        var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind, Parent = parent, Model = req.Model };
         _jobs[job.Id] = job;
         var cts = new CancellationTokenSource();
         _cts[job.Id] = cts;
