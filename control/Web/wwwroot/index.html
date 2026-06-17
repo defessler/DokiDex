@@ -173,6 +173,7 @@
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
         <button class="ghost" id="exploreBtn" onclick="explore()" title="fan this prompt into 8 fast variations">Explore ×8</button>
         <button class="ghost" id="cmpBtn" onclick="compareModels()" style="display:none" title="generate this prompt on every installed image base, side by side">Compare bases</button>
+        <button class="ghost" onclick="animate2D()" title="set up image→video tuned for anime/illustration: subtle motion, line/style preserved">✨ Animate 2D</button>
         <span class="hint" id="genHint"></span>
       </div>
       <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Batch (CSV) — one generation per row</summary>
@@ -686,6 +687,16 @@
     async function loadEffects(){ try{ _effects=await (await fetch('/api/effects')).json(); }catch{} }
     let _imageModelCount=0;
     async function loadImageModels(){ try{ const ms=await (await fetch('/api/image-models')).json(); _imageModelCount=(ms||[]).length; const sel=document.getElementById('genModel'); (ms||[]).forEach(m=>{ const o=document.createElement('option'); o.value=m.file; o.textContent=m.name; sel.appendChild(o); }); const cb=document.getElementById('cmpBtn'); if(cb) cb.style.display=_imageModelCount>1?'':'none'; }catch{} }
+    // Animate-2D preset: configure image→video tuned for illustration/anime (prompt-only Wan i2v, no new model)
+    // — subtle motion + line/style preservation. The user loads a drawing as the init image, then Generates.
+    function animate2D(){
+      state.kind='i2v'; renderControls();
+      const p=document.getElementById('prompt');
+      const suffix='subtle idle animation, gentle breathing and slight hair and cloth sway, preserve line art and flat anime shading, minimal camera movement';
+      if(!p.value.toLowerCase().includes('preserve line art')) p.value=(p.value.trim()?p.value.trim()+', ':'')+suffix;
+      document.getElementById('genHint').textContent = state.initImage ? 'Animate-2D preset ready — Generate to animate your drawing' : 'Animate-2D preset set — load a drawing as the init image, then Generate';
+      p.focus();
+    }
     async function compareModels(){
       const prompt=document.getElementById('prompt').value.trim(); const hint=document.getElementById('genHint');
       if(!prompt){ hint.textContent='enter a prompt first'; return; }
