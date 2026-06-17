@@ -652,14 +652,16 @@
         : (VIDEO.has(it.kind) ? `<video controls src="${it.mediaUrl}"></video>` : `<img src="${it.mediaUrl}" alt=""/>`);
       const p = esc(it.prompt) || '<span class="hint">(no prompt)</span>';
       const nm = encodeURIComponent(it.name);
+      const isImg = it.kind==='image'||it.kind==='edit';
       const stems = (it.kind==='music'||it.kind==='tts') ? `<button class="xbtn" onclick="separateStems('${nm}')">stems</button>` : '';
+      const vlm = isImg ? `<button class="xbtn" onclick="describeItem('${nm}',event)" title="image→prompt (needs a vision model)">describe</button><button class="xbtn" data-verify="${nm}" onclick="verifyItem('${nm}','${encodeURIComponent(it.prompt)}',event)" title="QA: does it match its prompt? (needs a vision model)">verify</button>` : '';
       const badge = (it.favorite?'<span class="cbadge fav" title="favorite">★</span>':'') + (it.trash?'<span class="cbadge trash" title="trash">🗑</span>':'');
       const cls = 'card libcard'+(it.favorite?' isfav':'')+(it.trash?' istrash':'');
       return `<div class="${cls}" data-name="${nm}" tabindex="0" onclick="focusCard(this)">${badge}<div class="media">${m}</div><div class="body"><div class="p">${p}</div>
         <div class="row" style="justify-content:space-between;margin-top:6px"><span class="s done">${it.kind}</span><span>
         <button class="xbtn" onclick="rate('${nm}','fav',event)" title="favorite (F)">★</button>
         <button class="xbtn" onclick="rate('${nm}','trash',event)" title="trash (X)">🗑</button>
-        ${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
+        ${vlm}${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
         <a class="xbtn" href="${it.mediaUrl}" download style="text-decoration:none">save</a>
         <button class="xbtn" onclick="delItem('${nm}')">del</button></span></div></div></div>`;
     }
@@ -696,6 +698,26 @@
       if(k==='f'){ e.preventDefault(); rate(_focusName,'fav'); }
       else if(k==='x'){ e.preventDefault(); rate(_focusName,'trash'); }
       else if(k==='u'){ e.preventDefault(); rate(_focusName,'clear'); }
+    }
+    // gated VLM actions (need a vision-capable model loaded in the llm group)
+    async function describeItem(nm, ev){
+      if(ev) ev.stopPropagation();
+      try{
+        const r=await fetch('/api/describe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:decodeURIComponent(nm)})});
+        const j=await r.json();
+        if(!r.ok){ alert(j.error||'describe needs a vision model loaded'); return; }
+        document.getElementById('prompt').value=j.prompt; state.kind='image'; renderControls(); setView('create'); document.getElementById('prompt').focus();
+      }catch{ alert('describe failed'); }
+    }
+    async function verifyItem(nm, prompt, ev){
+      if(ev) ev.stopPropagation();
+      const btn = ev && ev.target; if(btn) btn.textContent='…';
+      try{
+        const r=await fetch('/api/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:decodeURIComponent(nm),prompt:decodeURIComponent(prompt)})});
+        const j=await r.json();
+        if(!r.ok){ if(btn){btn.textContent='verify';} alert(j.error||'verify needs a vision model loaded'); return; }
+        if(btn){ btn.textContent=(j.pass?'✓ pass':'✗ check'); btn.title=j.reason||''; btn.style.color=j.pass?'var(--gold)':'var(--danger)'; }
+      }catch{ if(btn){btn.textContent='verify';} alert('verify failed'); }
     }
     async function separateStems(name){
       const n=decodeURIComponent(name);

@@ -100,6 +100,17 @@ public sealed class GalleryService
         return full;
     }
 
+    // Read a gallery IMAGE as a data: URL (scoped through Resolve), for the multimodal LLM (Describe/Verify).
+    // Null for unknown names or non-image kinds (we don't ship video/audio frames to a VLM here).
+    public string? ImageDataUrl(string name)
+    {
+        var full = Resolve(name);
+        if (full is null) return null;
+        var mime = Mime(full);
+        if (!mime.StartsWith("image/")) return null;
+        try { return $"data:{mime};base64,{Convert.ToBase64String(File.ReadAllBytes(full))}"; } catch { return null; }
+    }
+
     public bool Delete(string name)
     {
         var full = Resolve(name);

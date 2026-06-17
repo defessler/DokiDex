@@ -295,6 +295,22 @@ public static class StudioHost
             return r.Ok ? Results.Json(new { prompt = r.Prompt }) : Results.Json(new { error = r.Error }, statusCode: 503);
         });
 
+        // ---- vision (gated on a vision-capable local model): reverse-prompt a gallery image, QA-verify a card ----
+        api.MapPost("/describe", async (DescribeRequest body, GalleryService gal, CancellationToken ct) =>
+        {
+            var url = gal.ImageDataUrl(body.Name ?? "");
+            if (url is null) return Results.Json(new { error = "unknown image" }, statusCode: 404);
+            var r = await Vision.DescribeAsync(url, ct);
+            return r.Ok ? Results.Json(new { prompt = r.Text }) : Results.Json(new { error = r.Error }, statusCode: 503);
+        });
+        api.MapPost("/verify", async (VerifyRequest body, GalleryService gal, CancellationToken ct) =>
+        {
+            var url = gal.ImageDataUrl(body.Name ?? "");
+            if (url is null) return Results.Json(new { error = "unknown image" }, statusCode: 404);
+            var (ok, verdict, err) = await Vision.VerifyAsync(url, body.Prompt ?? "", ct);
+            return ok ? Results.Json(new { pass = verdict!.Pass, reason = verdict.Reason }) : Results.Json(new { error = err }, statusCode: 503);
+        });
+
         // ---- CSV batch generation: header row -> per-row GenRequest -> queued jobs (respects the GPU gate) ----
         api.MapPost("/batch", (BatchRequest body, GenerationJobs jobs) =>
         {

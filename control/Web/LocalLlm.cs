@@ -14,18 +14,39 @@ public static class LocalLlm
 
     public sealed record ChatResult(bool Ok, string Text, string? Error);
 
-    public static async Task<ChatResult> ChatAsync(string system, string user, double temperature, int maxTokens, CancellationToken ct)
-    {
-        var body = new
+    public static Task<ChatResult> ChatAsync(string system, string user, double temperature, int maxTokens, CancellationToken ct)
+        => PostAsync(new
         {
-            messages = new[]
+            messages = new object[]
             {
                 new { role = "system", content = system },
                 new { role = "user", content = user },
             },
             temperature,
             max_tokens = maxTokens,
-        };
+        }, ct);
+
+    // Multimodal chat: a text instruction + one image (as a data: URL), in the OpenAI image_url content shape.
+    // GATED — it succeeds only when the loaded llama-swap model is vision-capable; otherwise it degrades through
+    // the same not-reachable/error path as text chat. Powers Describe (image->prompt) and output verification.
+    public static Task<ChatResult> ChatVisionAsync(string system, string userText, string imageDataUrl, double temperature, int maxTokens, CancellationToken ct)
+        => PostAsync(new
+        {
+            messages = new object[]
+            {
+                new { role = "system", content = system },
+                new { role = "user", content = new object[]
+                {
+                    new { type = "text", text = userText },
+                    new { type = "image_url", image_url = new { url = imageDataUrl } },
+                }},
+            },
+            temperature,
+            max_tokens = maxTokens,
+        }, ct);
+
+    private static async Task<ChatResult> PostAsync(object body, CancellationToken ct)
+    {
         try
         {
             using var resp = await Http.PostAsJsonAsync(ChatUrl, body, ct).ConfigureAwait(false);
