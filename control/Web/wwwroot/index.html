@@ -284,6 +284,12 @@
         <button class="ghost" onclick="exportDeck()" title="self-contained HTML story bible (logline/synopsis need a loaded LLM)">story bible</button>
       </div>
       <div class="mods" style="margin-top:-2px;align-items:center">
+        <span class="hint">saved:</span>
+        <select id="savedSel" class="kin" style="width:auto" onchange="applySaved(this.value)"><option value="">— saved searches —</option></select>
+        <button class="xbtn" onclick="saveSearch()">save current</button>
+        <button class="xbtn" onclick="delSaved()">delete</button>
+      </div>
+      <div class="mods" style="margin-top:-2px;align-items:center">
         <span class="hint">palette:</span><span id="paletteStrip" class="pstrip"></span>
         <input type="color" id="palAdd" style="width:30px;height:24px;padding:0;border:1px solid var(--border);background:none;cursor:pointer" title="add a color" onchange="addPaletteColor(this.value)">
         <button class="xbtn" onclick="paletteToPrompt()" title="append the palette to the composer prompt as color terms">→ prompt</button>
@@ -321,7 +327,7 @@
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
-      if (v==='library') { loadLibrary(); renderPalette(); }
+      if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
       if (v==='models') loadModels();
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
@@ -746,6 +752,27 @@
       if(k==='f'){ e.preventDefault(); rate(_focusName,'fav'); }
       else if(k==='x'){ e.preventDefault(); rate(_focusName,'trash'); }
       else if(k==='u'){ e.preventDefault(); rate(_focusName,'clear'); }
+    }
+    // ---- saved searches (named, re-applicable Library filters) ----
+    let _saved=[];
+    async function loadSaved(){
+      try{ _saved=await (await fetch('/api/searches')).json(); }catch{ _saved=[]; }
+      const sel=document.getElementById('savedSel'); if(!sel) return;
+      sel.innerHTML='<option value="">— saved searches —</option>'+_saved.map(s=>`<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+    }
+    function applySaved(name){
+      const s=_saved.find(x=>x.name===name); if(!s) return;
+      document.getElementById('libQuery').value=s.q||''; document.getElementById('libKind').value=s.kind||''; document.getElementById('libView').value=s.view||'active';
+      loadLibrary();
+    }
+    async function saveSearch(){
+      const name=prompt('Name this search:'); if(!name) return;
+      const body={ name, q:document.getElementById('libQuery').value, kind:document.getElementById('libKind').value, view:document.getElementById('libView').value };
+      try{ const r=await fetch('/api/searches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!r.ok){ alert('bad name'); return; } await loadSaved(); document.getElementById('savedSel').value=name; }catch{ alert('save failed'); }
+    }
+    async function delSaved(){
+      const name=document.getElementById('savedSel').value; if(!name){ alert('pick a saved search to delete'); return; }
+      try{ await fetch('/api/searches/'+encodeURIComponent(name),{method:'DELETE'}); await loadSaved(); }catch{}
     }
     // ---- deterministic color palette + recolor (model-free; browser does codec, C# does the LAB math) ----
     let _palette=[];

@@ -209,6 +209,10 @@ public static class StudioHost
             gal.Delete(name) ? Results.Ok() : Results.NotFound());
         // variation lineage: the forest of generations linked by their derived-from (Parent) sidecar field
         api.MapGet("/lineage", (GalleryService gal) => Results.Json(Lineage.BuildForest(gal.LineageItems())));
+        // saved searches: named, re-applicable Library filters (re-evaluate over the live gallery)
+        api.MapGet("/searches", () => Results.Json(SavedSearches.List()));
+        api.MapPost("/searches", (SavedSearch body) => SavedSearches.Save(body) ? Results.Ok() : Results.BadRequest(new { error = "bad name" }));
+        api.MapDelete("/searches/{name}", (string name) => SavedSearches.Delete(name) ? Results.Ok() : Results.NotFound());
         // one-click story-bible / pitch deck: selected (or recent) images + LLM logline/synopsis + @-ref cast,
         // laid out as one self-contained HTML file (LLM-gated prose degrades to image-only). Returns a download.
         api.MapPost("/pitchdeck", async (PitchDeckRequest body, GalleryService gal, CancellationToken ct) =>
