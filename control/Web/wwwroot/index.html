@@ -133,12 +133,12 @@
         </div>
       </details>
       <div id="maskbox" style="display:none;margin:4px 0 12px">
-        <div class="hint" style="margin-bottom:4px">Edit canvas — paint the area to change, then Generate:</div>
+        <div class="hint" style="margin-bottom:4px">Edit canvas — paint the area to change (or magic-wand a region), then Generate:</div>
         <div style="position:relative;display:inline-block;border:1px solid var(--border);border-radius:6px;overflow:hidden">
           <img id="maskimg" style="display:block;max-width:512px"/>
           <canvas id="maskcanvas" style="position:absolute;left:0;top:0;cursor:crosshair;opacity:0.5"></canvas>
         </div>
-        <div style="margin-top:4px"><button class="xbtn" onclick="clearMask()">clear mask</button></div>
+        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button></div>
       </div>
       <div class="mods">
         <input id="rwInstr" class="kin" style="flex:1;min-width:200px" placeholder="steer-rewrite (e.g. make it night, darker tone, add a red scarf)">
@@ -372,6 +372,25 @@
       if (img.src !== state.initImage) img.src = state.initImage; else if (img.complete) { cv.width=img.clientWidth; cv.height=img.clientHeight; }
     }
     function clearMask(){ const cv=document.getElementById('maskcanvas'); const x=cv.getContext('2d'); x.fillStyle='#000'; x.fillRect(0,0,cv.width,cv.height); _maskDrawn=false; }
+    // Magic wand (color-select): flood-fill a contiguous same-color region from the click into the mask. This is
+    // a deterministic local DSP tool — NOT semantic SAM (which needs the model); it gives the click->mask UX now.
+    let _wand=false;
+    function toggleWand(){ _wand=!_wand; document.getElementById('wandBtn').textContent='magic wand: '+(_wand?'on':'off'); }
+    function magicWandFill(px,py){
+      const img=document.getElementById('maskimg'), cv=document.getElementById('maskcanvas');
+      const w=cv.width,h=cv.height; if(!w||!h) return;
+      const off=document.createElement('canvas'); off.width=w; off.height=h;
+      const oc=off.getContext('2d'); oc.drawImage(img,0,0,w,h);
+      const src=oc.getImageData(0,0,w,h).data; const at4=(x,y)=>(y*w+x)*4;
+      const s=at4(px,py); const r0=src[s],g0=src[s+1],b0=src[s+2]; const tol=42*42*3;
+      const seen=new Uint8Array(w*h), stack=[px|0,py|0]; const mc=cv.getContext('2d'); mc.fillStyle='#fff';
+      while(stack.length){
+        const y=stack.pop(), x=stack.pop(); if(x<0||y<0||x>=w||y>=h) continue; const p=y*w+x; if(seen[p]) continue; seen[p]=1;
+        const i=at4(x,y), dr=src[i]-r0, dg=src[i+1]-g0, db=src[i+2]-b0; if(dr*dr+dg*dg+db*db>tol) continue;
+        mc.fillRect(x,y,1,1); stack.push(x+1,y,x-1,y,x,y+1,x,y-1);
+      }
+      _maskDrawn=true;
+    }
     async function generate(){
       const prompt = document.getElementById('prompt').value.trim();
       const hint = document.getElementById('genHint');
@@ -754,7 +773,7 @@
       const cv = document.getElementById('maskcanvas');
       const at = e => { const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
       const dot = (x,y) => { const c=cv.getContext('2d'); c.fillStyle='#fff'; c.beginPath(); c.arc(x,y,14,0,7); c.fill(); _maskDrawn=true; };
-      cv.addEventListener('mousedown', e => { _maskDrawing=true; const [x,y]=at(e); dot(x,y); });
+      cv.addEventListener('mousedown', e => { const [x,y]=at(e); if(_wand){ magicWandFill(Math.round(x),Math.round(y)); return; } _maskDrawing=true; dot(x,y); });
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
