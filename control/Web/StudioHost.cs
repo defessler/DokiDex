@@ -284,6 +284,12 @@ public static class StudioHost
             return Results.Json(new { submitted = ids.Count, ids });
         });
 
+        // ---- @-reference shelf: named reusable prompt snippets (@name expands via the recipe) ----
+        api.MapGet("/references", () => Results.Json(References.List()));
+        api.MapPost("/references", (ReferenceDto body) =>
+            References.Save(body.Name, body.Text) ? Results.Ok() : Results.BadRequest(new { error = "bad reference name" }));
+        api.MapDelete("/references/{name}", (string name) => References.Delete(name) ? Results.Ok() : Results.NotFound());
+
         // ---- saved recipes: named, reusable pipelines (CSV of steps) — the linear/persistent slice of node-flow ----
         api.MapGet("/recipes", () => Results.Json(RecipeStore.List()));
         api.MapGet("/recipes/{name}", (string name) =>

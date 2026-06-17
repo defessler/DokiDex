@@ -195,5 +195,14 @@ Assert ((Expand-Wildcards -Text 'a __nope__ x' -Seed 1 -WildcardDir $wcDir) -eq 
 Assert ((Expand-Wildcards -Text '__color__ vs __color__' -Seed 3 -WildcardDir $wcDir) -match '^(red|green|blue) vs (red|green|blue)$') "multiple tokens all expand"
 Remove-Item $wcDir -Recurse -Force -ErrorAction SilentlyContinue
 
+# --- Expand-References: @name -> references/<name>.txt snippet; unknown left as-is ---
+$refDir = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-ref-$([guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Force $refDir | Out-Null
+Set-Content (Join-Path $refDir 'hero.txt') 'a tall knight in silver armor'
+Assert ((Expand-References -Text 'paint @hero at dawn' -RefDir $refDir) -eq 'paint a tall knight in silver armor at dawn') "@ref -> expands to the saved snippet"
+Assert ((Expand-References -Text 'just @unknown here' -RefDir $refDir) -eq 'just @unknown here') "@ref unknown -> left as-is"
+Assert ((Expand-References -Text 'no refs at all' -RefDir $refDir) -eq 'no refs at all') "no @ -> unchanged"
+Remove-Item $refDir -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Host "`ndoki-gen: $script:pass passed, $script:fail failed" -ForegroundColor $(if ($script:fail) { 'Red' } else { 'Green' })
 exit $(if ($script:fail) { 1 } else { 0 })

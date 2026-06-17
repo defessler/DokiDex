@@ -47,6 +47,28 @@ function Expand-Wildcards {
     return $sb.ToString()
 }
 
+# Named @-references: replace each @name token with the saved snippet from references/<name>.txt — reusable
+# prompt building blocks (e.g. @hero -> "a tall knight in silver armor, scar over the left eye") for character/
+# style consistency. Expanded BEFORE wildcards (so a ref can itself contain __wildcards__). Single-pass;
+# unknown @names are left as-is. The web manages the files; the recipe expands them (single source of truth).
+function Expand-References {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [string]$RefDir)
+    if (-not $Text -or $Text -notmatch '@[A-Za-z0-9_-]+') { return $Text }
+    if (-not $RefDir) { $RefDir = Join-Path (Split-Path $PSScriptRoot) 'references' }
+    $sb = [System.Text.StringBuilder]::new()
+    $last = 0
+    foreach ($m in [regex]::Matches($Text, '@([A-Za-z0-9_-]+)')) {
+        [void]$sb.Append($Text.Substring($last, $m.Index - $last))
+        $file = Join-Path $RefDir "$($m.Groups[1].Value).txt"
+        $rep = $m.Value   # default: leave @name if the reference is unknown
+        if (Test-Path -LiteralPath $file) { $rep = (Get-Content -LiteralPath $file -Raw).Trim() }
+        [void]$sb.Append($rep)
+        $last = $m.Index + $m.Length
+    }
+    [void]$sb.Append($Text.Substring($last))
+    return $sb.ToString()
+}
+
 # kind (+ -Fast / -Upscale modifiers) -> the SwarmUI body fields for that recipe (model + sampler knobs),
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
@@ -267,6 +289,7 @@ function Invoke-Gen {
         }
         $controlNetsB64 = ($units | ConvertTo-Json -Depth 5 -Compress -AsArray)
     }
+    $Prompt = Expand-References -Text $Prompt               # @name -> a saved references/<name>.txt snippet (before wildcards, so a ref can contain __wildcards__)
     $Prompt = Expand-Wildcards -Text $Prompt -Seed $Seed   # __name__ -> a media-assets/wildcards line; resolved prompt is what generates + records
     $aspectArg = $(if ($Kind -in @('image', 'edit')) { $Aspect } else { '' })   # aspect reshapes image/edit only; video dims are model-fixed
     $referenceArg = ($Reference.IsPresent -and $Kind -in @('image', 'edit'))   # IP-Adapter image reference: image/edit only

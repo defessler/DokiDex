@@ -147,6 +147,14 @@
         <button class="ghost" onclick="rewritePrompt()">Rewrite</button>
         <span class="hint" id="rwHint"></span>
       </div>
+      <details id="refbox" style="margin:4px 0"><summary class="hint" style="cursor:pointer">@-references — reusable named prompt snippets</summary>
+        <div class="mods" style="margin-top:6px">
+          <input id="refName" class="kin" style="width:120px" placeholder="name (e.g. hero)">
+          <button class="xbtn" onclick="saveRef()">save prompt as @ref</button>
+          <span id="refHint" class="hint"></span>
+        </div>
+        <div id="refList" class="hint" style="margin-top:6px"></div>
+      </details>
       <div class="row">
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
         <button class="ghost" id="exploreBtn" onclick="explore()" title="fan this prompt into 8 fast variations">Explore ×8</button>
@@ -554,6 +562,21 @@
       try{ const r=await fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv})}); const j=await r.json(); hint.textContent=`queued ${j.submitted} job(s)`; pollJobs(); }
       catch(e){ hint.textContent='batch failed'; }
     }
+    async function loadRefs(){
+      try{
+        const refs=await (await fetch('/api/references')).json(); const el=document.getElementById('refList'); if(!el) return;
+        if(!refs.length){ el.textContent='no @refs yet — type a prompt + "save prompt as @ref"'; return; }
+        el.innerHTML='insert: ';
+        refs.forEach(r=>{ const ins=$(`<button class="xbtn" title="${esc(r.text)}">@${esc(r.name)}</button>`); ins.onclick=()=>insertRef(r.name); const del=$(`<button class="xbtn">✕</button>`); del.onclick=()=>delRef(r.name); el.appendChild(ins); el.appendChild(del); el.appendChild(document.createTextNode('  ')); });
+      }catch{}
+    }
+    async function saveRef(){
+      const name=document.getElementById('refName').value.trim(), text=document.getElementById('prompt').value.trim(), h=document.getElementById('refHint');
+      if(!name){ h.textContent='name it first'; return; } if(!text){ h.textContent='prompt is empty'; return; }
+      try{ const r=await fetch('/api/references',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,text})}); h.textContent=r.ok?('saved @'+name):'bad name'; loadRefs(); }catch{ h.textContent='save failed'; }
+    }
+    function insertRef(n){ const p=document.getElementById('prompt'); p.value=(p.value+' @'+n).trim(); p.focus(); }
+    async function delRef(n){ try{ await fetch('/api/references/'+encodeURIComponent(n),{method:'DELETE'}); }catch{} loadRefs(); }
     async function rewritePrompt(){
       const p=document.getElementById('prompt').value.trim();
       const instr=document.getElementById('rwInstr').value.trim();
@@ -860,7 +883,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>
