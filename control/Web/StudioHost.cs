@@ -266,6 +266,24 @@ public static class StudioHost
             return Results.Json(new { submitted = ids.Count, ids });
         });
 
+        // ---- Demucs stem separation (standalone sidecar; splits a gallery audio item into stems) ----
+        api.MapPost("/stems", async (StemRequest body, GalleryService gal, CancellationToken ct) =>
+        {
+            var src = gal.Resolve(body.Name ?? "");   // scoped to the gallery folder (no arbitrary paths)
+            if (src is null) return Results.NotFound();
+            var r = await Demucs.SeparateAsync(src, body.Model, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            var track = Path.GetFileNameWithoutExtension(src);
+            var urls = new List<string>();
+            foreach (var stem in r.Stems)   // copy each stem into the gallery root so it serves + appears in the Library
+            {
+                var name = $"{track}-{Path.GetFileNameWithoutExtension(stem)}.wav";
+                var dest = Path.Combine(DokiService.GenDir, name);
+                try { File.Copy(stem, dest, true); GalleryService.WriteSidecar(dest, "stem", "stem", $"{track} · {Path.GetFileNameWithoutExtension(stem)}"); urls.Add($"/api/gallery/media/{Uri.EscapeDataString(name)}"); } catch { }
+            }
+            return Results.Json(new { stems = urls });
+        });
+
         // ---- node-lite flow: a DAG of gen steps -> topological order -> queued in dependency order ----
         api.MapPost("/graph/run", (GraphSpec body, GenerationJobs jobs) =>
         {

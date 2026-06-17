@@ -511,14 +511,21 @@
       } catch(e){}
     }
     function libCard(it){
-      const m = it.kind==='music' ? `<audio controls src="${it.mediaUrl}" style="width:90%"></audio>`
+      const audio = it.kind==='music'||it.kind==='tts'||it.kind==='stem';
+      const m = audio ? `<audio controls src="${it.mediaUrl}" style="width:90%"></audio>`
         : (VIDEO.has(it.kind) ? `<video controls src="${it.mediaUrl}"></video>` : `<img src="${it.mediaUrl}" alt=""/>`);
       const p = esc(it.prompt) || '<span class="hint">(no prompt)</span>';
+      const stems = (it.kind==='music'||it.kind==='tts') ? `<button class="xbtn" onclick="separateStems('${encodeURIComponent(it.name)}')">stems</button>` : '';
       return `<div class="card"><div class="media">${m}</div><div class="body"><div class="p">${p}</div>
         <div class="row" style="justify-content:space-between;margin-top:6px"><span class="s done">${it.kind}</span><span>
-        <button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
+        ${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
         <a class="xbtn" href="${it.mediaUrl}" download style="text-decoration:none">save</a>
         <button class="xbtn" onclick="delItem('${encodeURIComponent(it.name)}')">del</button></span></div></div></div>`;
+    }
+    async function separateStems(name){
+      const n=decodeURIComponent(name);
+      try{ const r=await fetch('/api/stems',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})}); const j=await r.json(); if(!r.ok){ alert(j.error||'stem separation failed'); return; } }catch{ alert('stem separation failed'); return; }
+      loadLibrary();
     }
     async function loadLibrary(){
       try {

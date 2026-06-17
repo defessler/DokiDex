@@ -14,6 +14,7 @@ param(
     [switch]$Media,
     [switch]$Tts,
     [switch]$Stt,
+    [switch]$Demucs,    # optional audio-tools sidecar: stem separation (vocals/drums/bass/other) via Demucs
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
                         # so don't install the .NET SDK to rebuild it — only -Media needs the SDK (SwarmUI).
     [ValidateSet("lean", "full")][string]$Models = "lean"
@@ -161,6 +162,25 @@ if ($Tts) {
         if (Test-Path $fp) { (Get-Content $fp) -replace 'self\.watermarker\.apply_watermark\(wav, sample_rate=self\.sr\)', 'wav  # watermark stripped (DokiDex: uncensored)' | Set-Content $fp }
     }
     Ok "TTS ready -> :8004 (OpenAI /v1/audio/speech + voice cloning). First '.\doki.ps1 up' downloads the voice model."
+}
+
+# ---- Demucs: standalone audio stem separation (vocals/drums/bass/other) — optional, model-free DSP ----
+if ($Demucs) {
+    Info "Demucs (audio stem separation: htdemucs / htdemucs_6s)"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
+    $dRoot = Join-Path $root "audio-tools\demucs"
+    $dpy = Join-Path $dRoot ".venv\Scripts\python.exe"
+    $dok = Join-Path $dRoot ".venv\.deps-ok"
+    if (-not (Test-Path $dok)) {
+        Info "creating venv + installing demucs (+ cu128 torch) ..."
+        New-Item -ItemType Directory -Force $dRoot | Out-Null
+        if (-not (Test-Path $dpy)) { python -m venv (Join-Path $dRoot ".venv") }
+        & $dpy -m pip install --upgrade pip | Out-Null
+        Pip $dpy install torch --index-url https://download.pytorch.org/whl/cu128
+        Pip $dpy install demucs
+        New-Item -ItemType File -Force $dok | Out-Null
+    } else { Ok "Demucs venv present" }
+    Ok "Demucs ready -> audio-tools/demucs (the studio 'stems' action on any audio card runs it)."
 }
 
 # ---- STT stack: fully-local speech-to-text (NVIDIA Parakeet via onnx-asr) — optional ----
