@@ -188,11 +188,17 @@ public static class StudioHost
         });
 
         // ---- library / gallery (persistent over the app-owned output folder + JSON sidecars) ----
-        api.MapGet("/gallery", (GalleryService gal, string? q, string? kind) => Results.Json(gal.List(q, kind)));
+        api.MapGet("/gallery", (GalleryService gal, string? q, string? kind, string? view) => Results.Json(gal.List(q, kind, view)));
         api.MapGet("/gallery/media/{name}", (string name, GalleryService gal) =>
         {
             var full = gal.Resolve(name);
             return full is null ? Results.NotFound() : Results.File(full, GalleryService.Mime(full));
+        });
+        // keyboard-triage curation: flip favorite/trash on a card (F/X/U keys in the Library grid)
+        api.MapPost("/gallery/{name}/rate", (string name, RateRequest body, GalleryService gal) =>
+        {
+            var s = gal.Rate(name, body.Favorite, body.Trash);
+            return s is null ? Results.NotFound() : Results.Json(new { favorite = s.Favorite, trash = s.Trash });
         });
         api.MapDelete("/gallery/{name}", (string name, GalleryService gal) =>
             gal.Delete(name) ? Results.Ok() : Results.NotFound());

@@ -4,6 +4,9 @@ using DokiDex.Control.Services;
 
 namespace DokiDex.Web;
 
+// A keyboard-triage decision posted from the Library grid: flip favorite and/or trash (null = leave as-is).
+public sealed record RateRequest(bool? Favorite, bool? Trash);
+
 // The persistent library: the app-owned generation output folder (DokiService.GenDir) is the source of
 // truth (survives restarts), so the gallery scans it rather than the in-memory job list. Each artifact may
 // have a `<file>.json` sidecar carrying the prompt/kind (written on completion). All file access is scoped
@@ -14,7 +17,7 @@ public sealed class GalleryService
 
     private static string Root => DokiService.GenDir;
 
-    public IEnumerable<object> List(string? query = null, string? kindFilter = null)
+    public IEnumerable<object> List(string? query = null, string? kindFilter = null, string? view = null)
     {
         var root = Root;
         if (!Directory.Exists(root)) return Array.Empty<object>();
@@ -27,13 +30,19 @@ public sealed class GalleryService
             var meta = ReadSidecar(f);
             var kind = meta?.Kind ?? KindFromExt(ext);
             var prompt = meta?.Prompt ?? "";
+            var fav = meta?.Favorite ?? false;
+            var trash = meta?.Trash ?? false;
             if (!Match(prompt, kind, query, kindFilter)) continue;   // saved-search / typed filter
+            if (!PassesView(fav, trash, view)) continue;             // keyboard-triage curation view
             var when = File.GetLastWriteTime(f);
             items.Add((when, new
             {
                 name,
                 kind,
                 prompt,
+                favorite = fav,
+                trash,
+                parent = meta?.Parent,
                 mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}",
                 date = when.ToString("o"),
             }));
@@ -50,6 +59,33 @@ public sealed class GalleryService
         if (!string.IsNullOrWhiteSpace(query) && (prompt ?? "").IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) < 0)
             return false;
         return true;
+    }
+
+    // Pure curation view, for keyboard triage (number/letter keys flip favorite/trash, the chips filter):
+    //   null/""/"all" -> everything   "active" -> not trashed (the default working set)
+    //   "fav" -> favorites only       "trash" -> trashed only       "untriaged" -> neither flag set
+    // Total -> unit-tested. Trash always loses to an explicit "fav"/"trash"/"untriaged" ask.
+    public static bool PassesView(bool favorite, bool trash, string? view) => (view ?? "").Trim().ToLowerInvariant() switch
+    {
+        "fav" or "favorites" or "favorite" => favorite && !trash,
+        "trash" or "trashed"               => trash,
+        "untriaged" or "untagged"          => !favorite && !trash,
+        "active" or "keep"                 => !trash,
+        _                                  => true,   // all / unknown
+    };
+
+    // Read a sidecar by gallery name (scoped through Resolve), or null. Public for triage + lineage.
+    public Sidecar? Read(string name) { var f = Resolve(name); return f is null ? null : ReadSidecar(f); }
+
+    // Apply a triage decision: flip favorite/trash on an existing artifact, preserving every other sidecar
+    // field. Null leaves a flag unchanged. Returns the merged sidecar, or null if the artifact is unknown.
+    public Sidecar? Rate(string name, bool? favorite, bool? trash)
+    {
+        var f = Resolve(name);
+        if (f is null) return null;
+        var cur = ReadSidecar(f) ?? new Sidecar(name, KindFromExt(Path.GetExtension(f).ToLowerInvariant()), "", File.GetLastWriteTime(f).ToString("o"));
+        var next = cur with { Favorite = favorite ?? cur.Favorite, Trash = trash ?? cur.Trash };
+        try { File.WriteAllText(f + ".json", JsonSerializer.Serialize(next)); return next; } catch { return null; }
     }
 
     // Resolve a gallery file name to a full path, ONLY if it sits directly in Root (no traversal, no subdirs).
@@ -98,5 +134,9 @@ public sealed class GalleryService
         _ => "application/octet-stream",
     };
 
-    public sealed record Sidecar(string Id, string Kind, string Prompt, string CreatedAt);
+    // Favorite/Trash = the keyboard-triage curation flags; Parent = the source artifact name this was derived
+    // from (refine/effect/vary/explore), forming the variation-lineage forest. All default so every existing
+    // 4-arg WriteSidecar call (and any sidecar written before these fields existed) still deserializes.
+    public sealed record Sidecar(string Id, string Kind, string Prompt, string CreatedAt,
+                                 bool Favorite = false, bool Trash = false, string? Parent = null);
 }
