@@ -7,6 +7,9 @@ namespace DokiDex.Web;
 // A save request for a named @-reference (a reusable prompt snippet).
 public sealed record ReferenceDto(string? Name, string? Text);
 
+// A named @-reference with its snippet text (the "cast/Elements" view, e.g. for the pitch-deck export).
+public sealed record ReferenceEntry(string Name, string Text);
+
 // The @-reference shelf: named, reusable prompt snippets under <home>/references/<name>.txt. `@name` in any
 // prompt expands to the snippet (doki-gen's Expand-References, single source of truth) — reusable character/
 // style building blocks for consistency. The web manages the files; the recipe expands them. File-based +
@@ -23,6 +26,13 @@ public static class References
             .OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    // Typed projection (name + snippet) — the named character/style "Elements" of the project.
+    public static IReadOnlyList<ReferenceEntry> Entries()
+        => !Directory.Exists(Dir) ? Array.Empty<ReferenceEntry>()
+         : Directory.EnumerateFiles(Dir, "*.txt")
+            .Select(f => new ReferenceEntry(Path.GetFileNameWithoutExtension(f), SafeRead(f)))
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
     public static bool Save(string? name, string? text)
     {

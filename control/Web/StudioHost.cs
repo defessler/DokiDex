@@ -204,6 +204,27 @@ public static class StudioHost
             gal.Delete(name) ? Results.Ok() : Results.NotFound());
         // variation lineage: the forest of generations linked by their derived-from (Parent) sidecar field
         api.MapGet("/lineage", (GalleryService gal) => Results.Json(Lineage.BuildForest(gal.LineageItems())));
+        // one-click story-bible / pitch deck: selected (or recent) images + LLM logline/synopsis + @-ref cast,
+        // laid out as one self-contained HTML file (LLM-gated prose degrades to image-only). Returns a download.
+        api.MapPost("/pitchdeck", async (PitchDeckRequest body, GalleryService gal, CancellationToken ct) =>
+        {
+            var names = body.Names is { Count: > 0 }
+                ? body.Names
+                : gal.LineageItems().Where(i => i.Kind is "image" or "edit").Take(12).Select(i => i.Name).ToList();
+            var scenes = new List<DeckScene>();
+            foreach (var n in names.Take(16))
+            {
+                var url = gal.ImageDataUrl(n);
+                if (url is null) continue;
+                var meta = gal.Read(n);
+                scenes.Add(new DeckScene(meta?.Prompt ?? "", url, meta?.Kind ?? "image"));
+            }
+            if (scenes.Count == 0) return Results.Json(new { error = "no images in the library yet" }, statusCode: 400);
+            var cast = References.Entries().Select(r => new DeckCast(r.Name, r.Text)).ToList();
+            var deck = await PitchDeck.ComposeAsync(body.Title, scenes, cast, ct);
+            var html = System.Text.Encoding.UTF8.GetBytes(PitchDeck.BuildHtml(deck));
+            return Results.File(html, "text/html; charset=utf-8", "pitch-deck.html");
+        });
 
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));

@@ -260,6 +260,7 @@
         <select id="libView" class="kin" style="width:auto" onchange="loadLibrary()" title="curation view">
           <option value="active">active</option><option value="all">all</option><option value="fav">★ favorites</option><option value="untriaged">untriaged</option><option value="trash">🗑 trash</option>
         </select>
+        <button class="ghost" onclick="exportDeck()" title="self-contained HTML story bible (logline/synopsis need a loaded LLM)">story bible</button>
       </div>
       <p class="hint" style="margin:-2px 0 6px">Triage: click a card to focus, then <b>F</b> favorite · <b>X</b> trash · <b>U</b> clear · <b>←/→</b> move.</p>
       <div class="grid" id="library"><p class="hint">Loading…</p></div>
@@ -698,6 +699,17 @@
       if(k==='f'){ e.preventDefault(); rate(_focusName,'fav'); }
       else if(k==='x'){ e.preventDefault(); rate(_focusName,'trash'); }
       else if(k==='u'){ e.preventDefault(); rate(_focusName,'clear'); }
+    }
+    // one-click story-bible export: POST shown images -> self-contained HTML -> download
+    async function exportDeck(){
+      const title = prompt('Project title for the story bible:', 'My Project'); if(title===null) return;
+      const names = _libItems.filter(it=>it.kind==='image'||it.kind==='edit').map(it=>it.name);
+      try{
+        const r=await fetch('/api/pitchdeck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,names})});
+        if(!r.ok){ const j=await r.json().catch(()=>({})); alert(j.error||'export failed'); return; }
+        const blob=await r.blob(); const u=URL.createObjectURL(blob);
+        const a=document.createElement('a'); a.href=u; a.download='pitch-deck.html'; a.click(); URL.revokeObjectURL(u);
+      }catch{ alert('export failed'); }
     }
     // gated VLM actions (need a vision-capable model loaded in the llm group)
     async function describeItem(nm, ev){
