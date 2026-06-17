@@ -246,6 +246,12 @@
       <details style="margin:4px 0"><summary class="hint" style="cursor:pointer">Pronunciation dictionary</summary>
         <textarea id="ttsLex" placeholder="one per line:  Caelum=KYE-lum&#10;Ymir=EE-meer" style="margin-top:6px;min-height:60px;font-family:monospace;font-size:12px"></textarea>
       </details>
+      <details style="margin:4px 0"><summary class="hint" style="cursor:pointer">Multi-speaker dialogue</summary>
+        <p class="hint" style="margin:6px 0 4px">One line per turn: <code>HERO: Hello.</code> — unlabeled lines continue the speaker; tags like <code>[excited]</code>/<code>[whispers]</code> set delivery. Each speaker gets its own voice; concatenated into one clip.</p>
+        <textarea id="dlgScript" placeholder="HERO: [excited] We made it!&#10;VILLAIN: [whispers] not for long…" style="min-height:80px" oninput="scanSpeakers()"></textarea>
+        <div id="dlgCast" class="mods" style="margin-top:6px"></div>
+        <div class="row" style="margin-top:6px"><button class="primary" onclick="speakDialogue()">Render dialogue</button><span class="hint" id="dlgHint"></span></div>
+      </details>
       <div id="ttsOut" style="margin-top:10px"></div>
     </section>
     <section id="view-status" style="display:none">
@@ -903,13 +909,40 @@
     }
     // ---- voice (local TTS) ----
     let _voicesLoaded=false;
+    let _voiceNames=[];
     async function loadVoices(){
       if(_voicesLoaded) return; _voicesLoaded=true;
       try{
         const vs = await (await fetch('/api/voices')).json();
+        _voiceNames = vs||[];
         const sel=document.getElementById('ttsVoice');
         vs.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+        scanSpeakers();   // populate any dialogue voice pickers now that names are known
       }catch{}
+    }
+    // multi-speaker dialogue: derive speaker list from the script -> a voice picker each -> /api/dialogue
+    function scanSpeakers(){
+      const el=document.getElementById('dlgScript'); if(!el) return;
+      const names=[...new Set((el.value.match(/^\s*([A-Za-z][\w '\-]{0,29}):/gm)||[]).map(s=>s.replace(/:\s*$/,'').trim()))];
+      const wrap=document.getElementById('dlgCast'); if(!wrap) return; wrap.innerHTML='';
+      if(!names.length){ wrap.innerHTML='<span class="hint">add lines like "NAME: …"</span>'; return; }
+      const opts='<option value="">default</option>'+_voiceNames.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+      names.forEach(n=>wrap.appendChild($(`<label>${esc(n)} <select class="kin dlgv" data-speaker="${esc(n)}" style="width:auto">${opts}</select></label>`)));
+    }
+    async function speakDialogue(){
+      const script=document.getElementById('dlgScript').value.trim();
+      const hint=document.getElementById('dlgHint'), out=document.getElementById('ttsOut');
+      if(!script){ hint.textContent='enter a script'; return; }
+      hint.textContent='synthesizing…';
+      const cast=[...document.querySelectorAll('.dlgv')].map(s=>({speaker:s.dataset.speaker,voice:s.value}));
+      const lexicon=document.getElementById('ttsLex').value.split('\n').map(l=>{const i=l.indexOf('=');return i>0?{from:l.slice(0,i).trim(),to:l.slice(i+1).trim()}:null;}).filter(Boolean);
+      try{
+        const r=await fetch('/api/dialogue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script,cast,lexicon})});
+        const j=await r.json();
+        if(!r.ok){ hint.textContent=j.error||('error '+r.status); return; }
+        hint.textContent=`done — ${j.lines} lines, saved to Library`;
+        out.innerHTML=`<audio controls autoplay src="${j.mediaUrl}" style="width:100%"></audio>`;
+      }catch{ hint.textContent='request failed'; }
     }
     async function speak(){
       const text=document.getElementById('ttsText').value.trim();

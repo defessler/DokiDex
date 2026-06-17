@@ -441,6 +441,19 @@ public static class StudioHost
             var name = Path.GetFileName(r.ArtifactPath!);
             return Results.Json(new { mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
         });
+        // multi-speaker dialogue: a "HERO: hi" script -> per-line synth routed to each speaker's voice,
+        // concatenated into one Library clip. Speaker->voice map + optional pronunciation lexicon.
+        api.MapPost("/dialogue", async (DialogueRequest body, CancellationToken ct) =>
+        {
+            var lines = Dialogue.Parse(body.Script);
+            if (lines.Count == 0) return Results.Json(new { error = "no dialogue lines — use \"NAME: line\"" }, statusCode: 400);
+            var cast = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in body.Cast ?? new()) if (!string.IsNullOrWhiteSpace(c.Speaker)) cast[c.Speaker!.Trim()] = (c.Voice ?? "").Trim();
+            var r = await Tts.SpeakDialogueAsync(lines, cast, body.Lexicon, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            var name = Path.GetFileName(r.ArtifactPath!);
+            return Results.Json(new { mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}", lines = lines.Count });
+        });
     }
 
     // Parse a CSV (header row + per-row params) and submit one gen per row through the queue; returns job ids.

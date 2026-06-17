@@ -67,40 +67,68 @@ public static class Tts
         return names.ToList();
     }
 
-    public static async Task<SpeakResult> SpeakAsync(SpeakRequest req, CancellationToken ct)
+    // Network-only synth: text -> wav bytes (no save, no lexicon — caller applies it). Shared by SpeakAsync and
+    // multi-speaker dialogue. Degrades gracefully when :8004 is down.
+    public static async Task<(bool Ok, byte[]? Audio, string? Error)> SynthBytesAsync(string text, string? voice, double exaggeration, double cfgWeight, CancellationToken ct)
     {
-        var text = (req.Text ?? "").Trim();
-        if (text.Length == 0) return new SpeakResult(false, null, "empty text");
-        text = ApplyLexicon(text, req.Lexicon);   // pronunciation dictionary (deterministic pre-synthesis fix)
-
-        // OpenAI-compatible speech body (+ Chatterbox's exaggeration / cfg_weight expressivity dials).
+        text = (text ?? "").Trim();
+        if (text.Length == 0) return (false, null, "empty text");
         var body = new
         {
             model = "chatterbox",
             input = text,
-            voice = string.IsNullOrWhiteSpace(req.Voice) ? "default" : req.Voice!.Trim(),
+            voice = string.IsNullOrWhiteSpace(voice) ? "default" : voice!.Trim(),
             response_format = "wav",
-            exaggeration = req.Exaggeration,
-            cfg_weight = req.CfgWeight,
+            exaggeration = exaggeration,
+            cfg_weight = cfgWeight,
         };
-
-        byte[] audio;
         try
         {
             using var resp = await Http.PostAsJsonAsync($"{Base}/v1/audio/speech", body, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
-                return new SpeakResult(false, null, $"TTS returned {(int)resp.StatusCode} — check the voice name / model (start agent mode)");
-            audio = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+                return (false, null, $"TTS returned {(int)resp.StatusCode} — check the voice name / model (start agent mode)");
+            return (true, await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false), null);
         }
-        catch (OperationCanceledException) { return new SpeakResult(false, null, "cancelled"); }
-        catch (Exception ex) { return new SpeakResult(false, null, $"TTS not reachable at :8004 — start agent mode first ({ex.Message})"); }
+        catch (OperationCanceledException) { return (false, null, "cancelled"); }
+        catch (Exception ex) { return (false, null, $"TTS not reachable at :8004 — start agent mode first ({ex.Message})"); }
+    }
 
+    public static async Task<SpeakResult> SpeakAsync(SpeakRequest req, CancellationToken ct)
+    {
+        var text = ApplyLexicon((req.Text ?? "").Trim(), req.Lexicon);   // pronunciation dictionary (deterministic pre-synthesis fix)
+        var (ok, audio, err) = await SynthBytesAsync(text, req.Voice, req.Exaggeration, req.CfgWeight, ct).ConfigureAwait(false);
+        if (!ok || audio is null) return new SpeakResult(false, null, err);
+        return await Save(audio, text, ct).ConfigureAwait(false);
+    }
+
+    // Multi-speaker dialogue: synth each parsed line with its speaker's voice + the tag's delivery, concatenate
+    // (no ffmpeg — WavTools), save ONE clip to the Library. Lexicon applied per line. Fails fast if :8004 is down.
+    public static async Task<SpeakResult> SpeakDialogueAsync(IReadOnlyList<DialogueLine> lines, IReadOnlyDictionary<string, string> cast, IEnumerable<LexRule>? lexicon, CancellationToken ct)
+    {
+        if (lines is null || lines.Count == 0) return new SpeakResult(false, null, "no dialogue lines");
+        var clips = new List<byte[]>();
+        foreach (var ln in lines)
+        {
+            var text = ApplyLexicon(ln.Text, lexicon);
+            var voice = cast.TryGetValue(ln.Speaker, out var v) && !string.IsNullOrWhiteSpace(v) ? v : "default";
+            var (ok, audio, err) = await SynthBytesAsync(text, voice, ln.Exaggeration, ln.CfgWeight, ct).ConfigureAwait(false);
+            if (!ok) return new SpeakResult(false, null, err);
+            if (audio is not null) clips.Add(audio);
+        }
+        var merged = WavTools.Concat(clips);
+        if (merged is null) return new SpeakResult(false, null, "no audio produced");
+        var preview = string.Join("  ", lines.Take(3).Select(l => $"{l.Speaker}: {l.Text}"));
+        return await Save(merged, preview, ct, prefix: "dialogue").ConfigureAwait(false);
+    }
+
+    private static async Task<SpeakResult> Save(byte[] audio, string label, CancellationToken ct, string prefix = "speech")
+    {
         try
         {
-            var outPath = Path.Combine(DokiService.GenDir, $"speech-{Guid.NewGuid():N}.wav");
+            var outPath = Path.Combine(DokiService.GenDir, $"{prefix}-{Guid.NewGuid():N}.wav");
             Directory.CreateDirectory(DokiService.GenDir);
             await File.WriteAllBytesAsync(outPath, audio, ct).ConfigureAwait(false);
-            GalleryService.WriteSidecar(outPath, "tts", "speech", text);   // lands in the Library as audio
+            GalleryService.WriteSidecar(outPath, "tts", "speech", label);   // lands in the Library as audio
             return new SpeakResult(true, outPath, "done");
         }
         catch (Exception ex) { return new SpeakResult(false, null, $"could not save the audio: {ex.Message}"); }
