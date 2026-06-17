@@ -226,6 +226,41 @@ public static class StudioHost
             return Results.File(html, "text/html; charset=utf-8", "pitch-deck.html");
         });
 
+        // ---- deterministic, model-free color tools (browser ships raw RGBA; C# does the LAB math) ----
+        api.MapPost("/palette", async (HttpRequest req) =>
+        {
+            int k = int.TryParse(req.Query["k"], out var kk) ? kk : 6;
+            using var ms = new MemoryStream(); await req.Body.CopyToAsync(ms);
+            var colors = ColorTools.DominantColors(ms.ToArray(), k).Select(ColorTools.ToHex).ToList();
+            return Results.Json(new { colors });
+        });
+        api.MapPost("/recolor", async (HttpRequest req) =>
+        {
+            var palette = ColorTools.ParsePalette(req.Query["palette"]);
+            using var ms = new MemoryStream(); await req.Body.CopyToAsync(ms);
+            try { return Results.Bytes(ColorTools.RemapToPalette(ms.ToArray(), palette), "application/octet-stream"); }
+            catch (ArgumentException) { return Results.BadRequest(new { error = "bad pixel buffer" }); }
+        });
+        // import a browser-produced PNG (a recolor/canvas result) into the Library; name is server-generated
+        // (NewGenOutPath) so there's no client path => no traversal. Optional prompt/parent feed search + lineage.
+        api.MapPost("/import", async (HttpRequest req, DokiService doki) =>
+        {
+            using var ms = new MemoryStream(); await req.Body.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            if (bytes.Length == 0) return Results.BadRequest(new { error = "empty image" });
+            var outPath = doki.NewGenOutPath("image");
+            try
+            {
+                await File.WriteAllBytesAsync(outPath, bytes);
+                var prompt = req.Query["prompt"].ToString();
+                var parent = req.Query["parent"].ToString();
+                GalleryService.WriteSidecar(outPath, "import", "image", prompt, string.IsNullOrEmpty(parent) ? null : parent);
+                var name = Path.GetFileName(outPath);
+                return Results.Json(new { name, mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
+            }
+            catch { return Results.Json(new { error = "could not save" }, statusCode: 500); }
+        });
+
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));
         api.MapGet("/loras", () => Results.Json(Loras.List()));   // for the LoRA mixer (image-family)

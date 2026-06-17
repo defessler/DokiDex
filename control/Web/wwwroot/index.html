@@ -47,6 +47,8 @@
     .lrow { display:flex; align-items:center; gap:8px; padding:3px 0; }
     .lrow img { width:34px; height:34px; object-fit:cover; border-radius:5px; background:var(--bg); flex:none; }
     .lrow .lp { font-size:11px; color:var(--dim); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .pstrip { display:inline-flex; gap:3px; vertical-align:middle; flex-wrap:wrap; }
+    .pchip { width:18px; height:18px; border-radius:4px; border:1px solid var(--border); cursor:pointer; display:inline-block; }
     .card .media { aspect-ratio:1; background:var(--bg); display:flex; align-items:center; justify-content:center; }
     .card .media img, .card .media video { width:100%; height:100%; object-fit:contain; }
     .card .body { padding:10px 12px; }
@@ -262,6 +264,12 @@
         </select>
         <button class="ghost" onclick="exportDeck()" title="self-contained HTML story bible (logline/synopsis need a loaded LLM)">story bible</button>
       </div>
+      <div class="mods" style="margin-top:-2px;align-items:center">
+        <span class="hint">palette:</span><span id="paletteStrip" class="pstrip"></span>
+        <input type="color" id="palAdd" style="width:30px;height:24px;padding:0;border:1px solid var(--border);background:none;cursor:pointer" title="add a color" onchange="addPaletteColor(this.value)">
+        <button class="xbtn" onclick="paletteToPrompt()" title="append the palette to the composer prompt as color terms">→ prompt</button>
+        <button class="xbtn" onclick="clearPalette()">clear</button>
+      </div>
       <p class="hint" style="margin:-2px 0 6px">Triage: click a card to focus, then <b>F</b> favorite · <b>X</b> trash · <b>U</b> clear · <b>←/→</b> move.</p>
       <div class="grid" id="library"><p class="hint">Loading…</p></div>
       <details style="margin-top:10px" ontoggle="if(this.open)loadLineage()"><summary class="hint" style="cursor:pointer">Variation lineage (what was derived from what)</summary>
@@ -294,7 +302,7 @@
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
-      if (v==='library') loadLibrary();
+      if (v==='library') { loadLibrary(); renderPalette(); }
       if (v==='models') loadModels();
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
@@ -656,13 +664,14 @@
       const isImg = it.kind==='image'||it.kind==='edit';
       const stems = (it.kind==='music'||it.kind==='tts') ? `<button class="xbtn" onclick="separateStems('${nm}')">stems</button>` : '';
       const vlm = isImg ? `<button class="xbtn" onclick="describeItem('${nm}',event)" title="image→prompt (needs a vision model)">describe</button><button class="xbtn" data-verify="${nm}" onclick="verifyItem('${nm}','${encodeURIComponent(it.prompt)}',event)" title="QA: does it match its prompt? (needs a vision model)">verify</button>` : '';
+      const color = isImg ? `<button class="xbtn" onclick="extractPalette('${nm}',event)" title="add this image's colors to the palette">palette</button><button class="xbtn" onclick="recolorCard('${nm}',event)" title="recolor to the current palette (deterministic, no model)">recolor</button>` : '';
       const badge = (it.favorite?'<span class="cbadge fav" title="favorite">★</span>':'') + (it.trash?'<span class="cbadge trash" title="trash">🗑</span>':'');
       const cls = 'card libcard'+(it.favorite?' isfav':'')+(it.trash?' istrash':'');
       return `<div class="${cls}" data-name="${nm}" tabindex="0" onclick="focusCard(this)">${badge}<div class="media">${m}</div><div class="body"><div class="p">${p}</div>
         <div class="row" style="justify-content:space-between;margin-top:6px"><span class="s done">${it.kind}</span><span>
         <button class="xbtn" onclick="rate('${nm}','fav',event)" title="favorite (F)">★</button>
         <button class="xbtn" onclick="rate('${nm}','trash',event)" title="trash (X)">🗑</button>
-        ${vlm}${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
+        ${vlm}${color}${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
         <a class="xbtn" href="${it.mediaUrl}" download style="text-decoration:none">save</a>
         <button class="xbtn" onclick="delItem('${nm}')">del</button></span></div></div></div>`;
     }
@@ -699,6 +708,45 @@
       if(k==='f'){ e.preventDefault(); rate(_focusName,'fav'); }
       else if(k==='x'){ e.preventDefault(); rate(_focusName,'trash'); }
       else if(k==='u'){ e.preventDefault(); rate(_focusName,'clear'); }
+    }
+    // ---- deterministic color palette + recolor (model-free; browser does codec, C# does the LAB math) ----
+    let _palette=[];
+    function renderPalette(){
+      const el=document.getElementById('paletteStrip'); if(!el) return;
+      el.innerHTML = _palette.length ? _palette.map((h,i)=>`<span class="pchip" style="background:${h}" title="${h} — click to remove" onclick="removePaletteColor(${i})"></span>`).join('') : '<span class="hint">(empty)</span>';
+    }
+    function addPaletteColor(h){ if(h && !_palette.includes(h)){ _palette.push(h); renderPalette(); } }
+    function removePaletteColor(i){ _palette.splice(i,1); renderPalette(); }
+    function clearPalette(){ _palette=[]; renderPalette(); }
+    const NAMED=[['black',0,0,0],['white',255,255,255],['gray',128,128,128],['red',220,20,20],['orange',255,140,0],['yellow',240,220,40],['green',40,170,60],['teal',0,150,150],['cyan',60,200,220],['blue',40,80,220],['navy',20,30,90],['purple',130,50,180],['magenta',210,40,160],['pink',245,150,180],['brown',130,80,40],['beige',225,210,170]];
+    function hexName(hex){ const c=hex.replace('#',''); const r=parseInt(c.substr(0,2),16),g=parseInt(c.substr(2,2),16),b=parseInt(c.substr(4,2),16); let best='color',bd=1e9; for(const a of NAMED){ const d=(r-a[1])**2+(g-a[2])**2+(b-a[3])**2; if(d<bd){bd=d;best=a[0];} } return best; }
+    function paletteToPrompt(){ if(!_palette.length){ alert('palette is empty — add colors first'); return; } const names=[...new Set(_palette.map(hexName))]; const t='color palette: '+names.join(', '); const p=document.getElementById('prompt'); p.value=(p.value.trim()?p.value.trim()+', ':'')+t; setView('create'); p.focus(); }
+    function _imgCanvas(name){ return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>{ const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight; c.getContext('2d').drawImage(img,0,0); res(c); }; img.onerror=rej; img.src='/api/gallery/media/'+encodeURIComponent(name); }); }
+    async function extractPalette(nm, ev){
+      if(ev) ev.stopPropagation();
+      try{
+        const c=await _imgCanvas(decodeURIComponent(nm));
+        const r=Math.min(64/c.width,64/c.height,1); const sc=document.createElement('canvas'); sc.width=Math.max(1,Math.round(c.width*r)); sc.height=Math.max(1,Math.round(c.height*r));
+        const sx=sc.getContext('2d'); sx.drawImage(c,0,0,sc.width,sc.height);
+        const d=sx.getImageData(0,0,sc.width,sc.height).data;
+        const resp=await fetch('/api/palette?k=6',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:d});
+        const j=await resp.json(); (j.colors||[]).forEach(addPaletteColor); renderPalette();
+      }catch{ alert('palette extraction failed'); }
+    }
+    async function recolorCard(nm, ev){
+      if(ev) ev.stopPropagation();
+      if(!_palette.length){ alert('add colors to the palette first (a card’s "palette" button, or the color picker)'); return; }
+      const name=decodeURIComponent(nm);
+      try{
+        const c=await _imgCanvas(name); const x=c.getContext('2d'); const d=x.getImageData(0,0,c.width,c.height);
+        const resp=await fetch('/api/recolor?palette='+encodeURIComponent(_palette.join(',')),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:d.data});
+        if(!resp.ok){ alert('recolor failed'); return; }
+        d.data.set(new Uint8ClampedArray(await resp.arrayBuffer())); x.putImageData(d,0,0);
+        const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+        const imp=await fetch('/api/import?parent='+encodeURIComponent(name)+'&prompt='+encodeURIComponent('recolor — '+_palette.join(' ')),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:blob});
+        if(!imp.ok){ alert('could not save the recolor'); return; }
+        loadLibrary();
+      }catch{ alert('recolor failed'); }
     }
     // one-click story-bible export: POST shown images -> self-contained HTML -> download
     async function exportDeck(){
