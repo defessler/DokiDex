@@ -154,7 +154,7 @@
           <img id="maskimg" style="display:block;max-width:512px"/>
           <canvas id="maskcanvas" style="position:absolute;left:0;top:0;cursor:crosshair;opacity:0.5"></canvas>
         </div>
-        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <button class="xbtn" onclick="removeBackground()" title="keep the masked subject, drop the rest → transparent PNG (Library)">remove bg</button> <span id="samHint" class="hint"></span></div>
+        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <button class="xbtn" onclick="invertMask()" title="swap the masked / unmasked regions">invert</button> <label class="hint" title="brush size (or scroll on the canvas)">brush <input id="brushSize" type="range" min="2" max="80" value="14" style="width:80px;vertical-align:middle" oninput="setBrush(this.value)"> <span id="brushVal">14</span></label> <button class="xbtn" onclick="removeBackground()" title="keep the masked subject, drop the rest → transparent PNG (Library)">remove bg</button> <span id="samHint" class="hint"></span></div>
         <div style="margin-top:6px" class="row">
           <span class="hint">Outpaint:</span>
           <button class="xbtn" onclick="outpaint('left')" title="extend the canvas leftward and fill it">◀</button>
@@ -503,7 +503,9 @@
     function clearMask(){ const cv=document.getElementById('maskcanvas'); const x=cv.getContext('2d'); x.fillStyle='#000'; x.fillRect(0,0,cv.width,cv.height); _maskDrawn=false; }
     // Magic wand (color-select): flood-fill a contiguous same-color region from the click into the mask. This is
     // a deterministic local DSP tool — NOT semantic SAM (which needs the model); it gives the click->mask UX now.
-    let _wand=false, _sam=false;
+    let _wand=false, _sam=false, _brush=14;
+    function invertMask(){ const cv=document.getElementById('maskcanvas'); const x=cv.getContext('2d'); if(!cv.width) return; const d=x.getImageData(0,0,cv.width,cv.height); for(let i=0;i<d.data.length;i+=4){ d.data[i]=255-d.data[i]; d.data[i+1]=255-d.data[i+1]; d.data[i+2]=255-d.data[i+2]; } x.putImageData(d,0,0); _maskDrawn=true; }
+    function setBrush(v){ _brush=Math.max(2,Math.min(80,+v||14)); const el=document.getElementById('brushVal'); if(el) el.textContent=_brush; }
     function toggleWand(){ _wand=!_wand; if(_wand)_sam=false; syncMaskModes(); }
     function toggleSam(){ _sam=!_sam; if(_sam)_wand=false; syncMaskModes(); }
     function syncMaskModes(){ document.getElementById('wandBtn').textContent='magic wand: '+(_wand?'on':'off'); document.getElementById('samBtn').textContent='SAM click: '+(_sam?'on':'off'); }
@@ -1276,10 +1278,11 @@
     (function(){
       const cv = document.getElementById('maskcanvas');
       const at = e => { const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
-      const dot = (x,y) => { const c=cv.getContext('2d'); c.fillStyle='#fff'; c.beginPath(); c.arc(x,y,14,0,7); c.fill(); _maskDrawn=true; };
+      const dot = (x,y) => { const c=cv.getContext('2d'); c.fillStyle='#fff'; c.beginPath(); c.arc(x,y,_brush,0,7); c.fill(); _maskDrawn=true; };
       cv.addEventListener('mousedown', e => { const [x,y]=at(e); if(_sam){ const im=document.getElementById('maskimg'); samClick(Math.round(x*(im.naturalWidth/cv.width||1)), Math.round(y*(im.naturalHeight/cv.height||1))); return; } if(_wand){ magicWandFill(Math.round(x),Math.round(y)); return; } _maskDrawing=true; dot(x,y); });
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
+      cv.addEventListener('wheel', e => { e.preventDefault(); setBrush(_brush + (e.deltaY<0?2:-2)); const s=document.getElementById('brushSize'); if(s) s.value=_brush; }, {passive:false});   // scroll = brush size
     })();
     renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); loadImageModels(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
