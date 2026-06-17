@@ -155,7 +155,7 @@ public static class StudioHost
                 Upscaler: body.Upscaler, Segment: body.Segment,
                 ControlNets: controlUnits,
                 EndImage: endPath, Reference: body.Reference, RefWeight: body.RefWeight,
-                Interpolate: body.Interpolate, InterpolateMult: body.InterpolateMult);
+                Interpolate: body.Interpolate, InterpolateMult: body.InterpolateMult, Workflow: body.Workflow);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));

@@ -231,6 +231,14 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Workflow_passes_through_when_set()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Workflow: "SUPIR", OutPath: "o"));
+        var i = a.IndexOf("-Workflow"); Assert.True(i >= 0); Assert.Equal("SUPIR", a[i + 1]);
+        Assert.DoesNotContain("-Workflow", GenCli.BuildArgs(new GenRequest("x", "image", OutPath: "o")));
+    }
+
+    [Fact]
     public void Inline_preview_is_image_kinds_only()
     {
         Assert.True(GenRequest.IsInlineImageKind("image"));

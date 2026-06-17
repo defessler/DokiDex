@@ -141,6 +141,12 @@ Assert ($bIp.videoframeinterpolationmethod -eq 'RIFE' -and $bIp.videoframeinterp
 $bNoIp = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's'
 Assert (-not $bNoIp.ContainsKey('videoframeinterpolationmethod'))    "no -Interpolate -> no interpolation params (opt-in)"
 
+# --- custom ComfyUI workflow runner: -Workflow <name> -> comfyuicustomworkflow (the foley hook, generalized) ---
+$bWf = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Workflow 'SUPIR'
+Assert ($bWf.comfyuicustomworkflow -eq 'SUPIR')                      "-Workflow -> comfyuicustomworkflow (runs any installed workflow: SUPIR/InstantID/own)"
+$bNoWf = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's'
+Assert (-not $bNoWf.ContainsKey('comfyuicustomworkflow'))           "no -Workflow -> no custom workflow (opt-in)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"

@@ -159,7 +159,7 @@ function Build-GenBody {
         [int]$Duration = 0, [int]$Bpm = 0, [string]$Negative,
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
-        [string]$Interpolate, [int]$InterpolateMult = 2
+        [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -210,6 +210,10 @@ function Build-GenBody {
     # videoframeinterpolationmethod / videoframeinterpolationmultiplier. Method = RIFE/FILM/GIMM; gated on the
     # interpolation node being installed (an InstallableFeature) — ignored otherwise.
     if ($Interpolate) { $body.videoframeinterpolationmethod = $Interpolate; $body.videoframeinterpolationmultiplier = $InterpolateMult }
+    # Custom ComfyUI workflow (the same comfyuicustomworkflow hook foley uses): run ANY installed SwarmUI custom
+    # workflow by name (SUPIR upscale, InstantID face-ref, or a user's own) with the standard inputs (prompt /
+    # init image) mapped to it. Gated on the workflow being installed in SwarmUI; unknown name -> SwarmUI errors.
+    if ($Workflow) { $body.comfyuicustomworkflow = $Workflow }
     return $body
 }
 
@@ -227,7 +231,7 @@ function Invoke-Gen {
         [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Segment,
         [string]$ControlNets,
         [string]$EndImage, [switch]$Reference, [double]$RefWeight = 0.6,
-        [string]$Interpolate, [int]$InterpolateMult = 2,
+        [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow,
         [string]$InitImage, [string]$MaskImage, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
@@ -279,7 +283,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -294,7 +298,7 @@ function Invoke-Gen {
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }
