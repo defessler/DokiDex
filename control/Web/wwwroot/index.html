@@ -68,6 +68,7 @@
       <button id="nav-director" onclick="setView('director')">Director</button>
       <button id="nav-cast" onclick="setView('cast')">Cast</button>
       <button id="nav-voice" onclick="setView('voice')">Voice</button>
+      <button id="nav-flow" onclick="setView('flow')">Flow</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
@@ -185,6 +186,16 @@
       </div>
       <textarea id="castOut" readonly placeholder="compiled prompt appears here" style="margin-top:10px;display:none;font-family:monospace;font-size:12px"></textarea>
     </section>
+    <section id="view-flow" style="display:none">
+      <h2>Flow — node-lite pipeline (DAG)</h2>
+      <p class="hint">Chain gen steps with dependencies; they run in topological order (parents before children) through the queue.</p>
+      <div id="flowNodes"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" onclick="addFlowNode()">+ step</button>
+        <button class="primary" onclick="runFlow()">Run flow</button>
+        <span class="hint" id="flowHint"></span>
+      </div>
+    </section>
     <section id="view-voice" style="display:none">
       <h2>Voice — local text-to-speech</h2>
       <p class="hint">Uncensored local TTS with voice cloning (Chatterbox :8004, agent mode). Output lands in the Library.</p>
@@ -228,13 +239,42 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','director','cast','voice','status','library','models']) {
+      for (const x of ['create','director','cast','voice','flow','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
       if (v==='library') loadLibrary();
       if (v==='models') loadModels();
       if (v==='voice') loadVoices();
+      if (v==='flow') renderFlow();
+    }
+    // ---- node-lite flow (DAG of gen steps) ----
+    let _flowSeq=0, flowNodes=[];
+    function addFlowNode(){ flowNodes.push({id:'n'+(++_flowSeq), prompt:'', kind:'image', deps:[]}); renderFlow(); }
+    function renderFlow(){
+      const wrap=document.getElementById('flowNodes'); if(!wrap) return;
+      if(!flowNodes.length){ wrap.innerHTML='<p class="hint">No steps yet — add one.</p>'; return; }
+      wrap.innerHTML='';
+      flowNodes.forEach((n,i)=>{
+        const card=$(`<div class="scard" style="margin:6px 0"></div>`);
+        card.appendChild($(`<div class="row"><b>${n.id}</b></div>`));
+        const pin=document.createElement('input'); pin.className='kin'; pin.style.width='100%'; pin.style.marginTop='4px'; pin.placeholder='prompt'; pin.value=n.prompt; pin.oninput=e=>n.prompt=e.target.value; card.appendChild(pin);
+        const row=$(`<div class="mods" style="margin-top:4px"></div>`);
+        const ks=document.createElement('select'); ks.className='kin'; ks.style.width='auto'; ['image','video','music','edit','i2v','foley'].forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k;if(k===n.kind)o.selected=true;ks.appendChild(o);}); ks.onchange=e=>n.kind=e.target.value;
+        const kl=document.createElement('label'); kl.textContent='kind '; kl.appendChild(ks); row.appendChild(kl);
+        const others=flowNodes.filter(m=>m.id!==n.id);
+        if(others.length){ const dl=document.createElement('label'); dl.textContent='after: '; others.forEach(m=>{ const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=n.deps.includes(m.id); cb.onchange=e=>{ if(e.target.checked) n.deps.push(m.id); else n.deps=n.deps.filter(d=>d!==m.id); }; const sp=document.createElement('span'); sp.style.marginRight='6px'; sp.appendChild(cb); sp.appendChild(document.createTextNode(' '+m.id)); dl.appendChild(sp); }); row.appendChild(dl); }
+        const del=$(`<button class="xbtn">✕</button>`); del.onclick=()=>{ flowNodes.splice(i,1); flowNodes.forEach(m=>m.deps=m.deps.filter(d=>d!==n.id)); renderFlow(); }; row.appendChild(del);
+        card.appendChild(row); wrap.appendChild(card);
+      });
+    }
+    async function runFlow(){
+      const h=document.getElementById('flowHint');
+      const nodes=flowNodes.filter(n=>n.prompt.trim()).map(n=>({id:n.id,prompt:n.prompt,kind:n.kind}));
+      if(!nodes.length){ h.textContent='add a step with a prompt'; return; }
+      const edges=[]; flowNodes.forEach(n=>n.deps.forEach(d=>edges.push({from:d,to:n.id})));
+      if(!await ensureMedia()) return;
+      try{ const r=await fetch('/api/graph/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nodes,edges})}); const j=await r.json(); h.textContent=r.ok?`queued ${j.submitted} steps in order`:(j.error||'error'); if(r.ok){ setView('create'); pollJobs(); } }catch{ h.textContent='run failed'; }
     }
     function renderControls(){
       const k = document.getElementById('kinds'); k.innerHTML='';

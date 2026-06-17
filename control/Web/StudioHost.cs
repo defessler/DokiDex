@@ -266,6 +266,25 @@ public static class StudioHost
             return Results.Json(new { submitted = ids.Count, ids });
         });
 
+        // ---- node-lite flow: a DAG of gen steps -> topological order -> queued in dependency order ----
+        api.MapPost("/graph/run", (GraphSpec body, GenerationJobs jobs) =>
+        {
+            var nodes = body.Nodes ?? new();
+            var order = GraphRunner.ExecutionOrder(nodes, body.Edges ?? new());
+            if (order is null) return Results.BadRequest(new { error = "the flow has a cycle" });
+            var byId = nodes.Where(n => !string.IsNullOrWhiteSpace(n.Prompt)).ToDictionary(n => n.Id);
+            var ids = new List<string>();
+            foreach (var id in order)
+            {
+                if (!byId.TryGetValue(id, out var n)) continue;
+                var kind = (n.Kind ?? "image").Trim().ToLowerInvariant();
+                if (Array.IndexOf(GenRequest.Kinds, kind) < 0) kind = "image";
+                ids.Add(jobs.Submit(new GenRequest(n.Prompt!.Trim(), kind, Fast: n.Fast, Seed: n.Seed,
+                    Aspect: n.Aspect, Lora: n.Lora, Negative: n.Negative)).Id);
+            }
+            return Results.Json(new { submitted = ids.Count, ids });
+        });
+
         // ---- text-to-speech (Chatterbox :8004); voices = file-based registry, output lands in the Library ----
         api.MapGet("/voices", () => Results.Json(Tts.Voices()));
         api.MapPost("/speak", async (SpeakRequest body, CancellationToken ct) =>
