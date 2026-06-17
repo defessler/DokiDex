@@ -778,7 +778,7 @@
       const stems = (it.kind==='music'||it.kind==='tts') ? `<button class="xbtn" onclick="separateStems('${nm}')">stems</button>` : '';
       const vlm = isImg ? `<button class="xbtn" onclick="describeItem('${nm}',event)" title="image→prompt (needs a vision model)">describe</button><button class="xbtn" data-verify="${nm}" onclick="verifyItem('${nm}','${encodeURIComponent(it.prompt)}',event)" title="QA: does it match its prompt? (needs a vision model)">verify</button>` : '';
       const color = isImg ? `<button class="xbtn" onclick="extractPalette('${nm}',event)" title="add this image's colors to the palette">palette</button><button class="xbtn" onclick="recolorCard('${nm}',event)" title="recolor to the current palette (deterministic, no model)">recolor</button>` : '';
-      const vid = VIDEO.has(it.kind) ? `<button class="xbtn" onclick="extractFrame('${nm}',true,event)" title="extract the last frame → animate it (i2v) / FLF2V keyframe">last frame</button>` : '';
+      const vid = VIDEO.has(it.kind) ? `<button class="xbtn" onclick="extractFrame('${nm}',true,event)" title="extract the last frame → animate it (i2v) / FLF2V keyframe">last frame</button><button class="xbtn" onclick="extendClip('${nm}',event)" title="one-click: animate the last frame and join it on (extend the clip)">extend</button>` : '';
       const badge = (it.favorite?'<span class="cbadge fav" title="favorite">★</span>':'') + (it.trash?'<span class="cbadge trash" title="trash">🗑</span>':'');
       const cls = 'card libcard'+(it.favorite?' isfav':'')+(it.trash?' istrash':'');
       return `<div class="${cls}" data-name="${nm}" tabindex="0" onclick="focusCard(this)">${badge}<div class="media">${m}</div><div class="body"><div class="p">${p}</div>
@@ -887,6 +887,39 @@
     async function extractFrame(nm, last, ev){
       if(ev) ev.stopPropagation();
       try{ const r=await fetch('/api/extract-frame',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:decodeURIComponent(nm),last})}); const j=await r.json(); if(!r.ok){ alert(j.error||'extract failed'); return; } loadLibrary(); }catch{ alert('extract failed'); }
+    }
+    // poll one job id to completion (for client-side chaining); resolves the final job dto or null on timeout/fail
+    async function waitForJob(id, maxSec){
+      for(let n=0;n<maxSec;n++){
+        try{ const j=await (await fetch('/api/jobs/'+id)).json(); if(j.status==='done') return j; if(j.status==='failed') return null; }catch{}
+        await new Promise(r=>setTimeout(r,2000));
+      }
+      return null;
+    }
+    // One-click clip-extend: extract the last frame → animate it (i2v) → join it onto the original. Chains the
+    // shipped extract-frame / i2v gen / join-clips primitives; needs ffmpeg + the media GPU.
+    async function extendClip(nm, ev){
+      if(ev) ev.stopPropagation();
+      const name=decodeURIComponent(nm);
+      if(!await ensureMedia()) return;
+      try{
+        // 1. last frame -> a gallery image
+        let r=await fetch('/api/extract-frame',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,last:true})});
+        let j=await r.json(); if(!r.ok){ alert(j.error||'could not extract the last frame'); return; }
+        // 2. load it as a data URL and animate it (i2v)
+        const dataUrl=await new Promise(async res=>{ try{ const b=await (await fetch(j.mediaUrl)).blob(); const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(b); }catch{ res(null); } });
+        if(!dataUrl){ alert('could not load the extracted frame'); return; }
+        const steer=document.getElementById('prompt').value.trim()||'continue the motion naturally, seamless continuation';
+        r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:steer,kind:'i2v',initImage:dataUrl})});
+        j=await r.json(); if(!r.ok){ alert(j.error||'could not start the continuation'); return; }
+        pollJobs();
+        // 3. wait for the continuation, then join original + it
+        const done=await waitForJob(j.id,180);
+        if(!done||!done.file){ alert('continuation did not finish — you can join the clips manually'); loadLibrary(); return; }
+        r=await fetch('/api/join-clips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({names:[name,done.file]})});
+        const jj=await r.json(); if(!r.ok){ alert(jj.error||'extended clip made, but join failed'); }
+        loadLibrary();
+      }catch{ alert('extend failed'); }
     }
     async function joinClips(){
       const names=_libItems.filter(it=>VIDEO.has(it.kind)).map(it=>it.name).reverse();   // oldest→newest = chronological

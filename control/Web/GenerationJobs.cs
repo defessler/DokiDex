@@ -40,6 +40,8 @@ public sealed class GenJob
         id = Id, prompt = Prompt, kind = Kind, status = Status, progress = Progress, message = Message, model = Model,
         // scoped media URL by job id only (never a client-supplied path) -> no traversal
         mediaUrl = Status == "done" && HasArtifact ? $"/api/media/{Id}" : null,
+        // gallery filename of the artifact (for client-side chaining like auto clip-extend); null until done
+        file = Status == "done" && HasArtifact ? Path.GetFileName(ArtifactPath) : null,
         // only the running job carries a preview (keeps the /api/jobs payload small)
         preview = Status == "running" ? Preview : null,
     };
