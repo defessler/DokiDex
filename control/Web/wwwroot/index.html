@@ -154,7 +154,7 @@
           <img id="maskimg" style="display:block;max-width:512px"/>
           <canvas id="maskcanvas" style="position:absolute;left:0;top:0;cursor:crosshair;opacity:0.5"></canvas>
         </div>
-        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <span id="samHint" class="hint"></span></div>
+        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <button class="xbtn" onclick="removeBackground()" title="keep the masked subject, drop the rest → transparent PNG (Library)">remove bg</button> <span id="samHint" class="hint"></span></div>
       </div>
       <div class="mods">
         <input id="rwInstr" class="kin" style="flex:1;min-width:200px" placeholder="steer-rewrite (e.g. make it night, darker tone, add a red scarf)">
@@ -506,6 +506,26 @@
         const cv=document.getElementById('maskcanvas'); const ctx=cv.getContext('2d'); const im=new Image();
         im.onload=()=>{ ctx.drawImage(im,0,0,cv.width,cv.height); _maskDrawn=true; h.textContent='object selected'; }; im.src=j.mask;
       }catch{ h.textContent='SAM request failed'; }
+    }
+    // Background removal: keep the masked subject (white), drop the rest -> transparent PNG into the Library.
+    // Reuses whatever put pixels in the mask (SAM click or magic-wand); alpha = the mask's value at full res.
+    async function removeBackground(){
+      const h=document.getElementById('samHint');
+      if(!state.initImage || !_maskDrawn){ h.textContent='paint or SAM-click the SUBJECT to keep first'; return; }
+      h.textContent='cutting out…';
+      try{
+        const img=new Image(); await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=state.initImage;});
+        const w=img.naturalWidth, hh=img.naturalHeight;
+        const c=document.createElement('canvas'); c.width=w; c.height=hh; const x=c.getContext('2d'); x.drawImage(img,0,0);
+        const ms=document.createElement('canvas'); ms.width=w; ms.height=hh; ms.getContext('2d').drawImage(document.getElementById('maskcanvas'),0,0,w,hh);
+        const md=ms.getContext('2d').getImageData(0,0,w,hh).data;
+        const id=x.getImageData(0,0,w,hh); const d=id.data;
+        for(let i=0;i<d.length;i+=4){ d[i+3]=md[i]; }   // alpha = mask (white=keep subject, black=drop bg)
+        x.putImageData(id,0,0);
+        const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+        const r=await fetch('/api/import?prompt='+encodeURIComponent('background removed'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:blob});
+        h.textContent = r.ok ? 'cutout saved to Library (transparent PNG)' : 'could not save';
+      }catch{ h.textContent='cutout failed'; }
     }
     function magicWandFill(px,py){
       const img=document.getElementById('maskimg'), cv=document.getElementById('maskcanvas');
