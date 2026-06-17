@@ -42,7 +42,8 @@ public sealed record GenRequest(
     string? Interpolate = null,        // video frame interpolation method (RIFE/FILM/GIMM); video/i2v only
     int InterpolateMult = 2,           // interpolation multiplier
     string? Workflow = null,           // run an installed SwarmUI custom ComfyUI workflow by name (SUPIR/InstantID/own)
-    string? Tile = null)               // seamless-tileable output (true/x/y); image/edit only
+    string? Tile = null,               // seamless-tileable output (true/x/y); image/edit only
+    string? Model = null)              // checkpoint override (manual picker / Auto router); null = recipe default
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
@@ -122,6 +123,7 @@ public static class GenCli
         }
         if (!string.IsNullOrWhiteSpace(r.Workflow)) { a.Add("-Workflow"); a.Add(r.Workflow!); }
         if (!string.IsNullOrWhiteSpace(r.Tile) && GenRequest.UpscaleApplies(r.Kind)) { a.Add("-Tile"); a.Add(r.Tile!); }
+        if (!string.IsNullOrWhiteSpace(r.Model)) { a.Add("-Model"); a.Add(r.Model!); }
         if (!string.IsNullOrWhiteSpace(r.OutPath)) { a.Add("-Out"); a.Add(r.OutPath); }
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }

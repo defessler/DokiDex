@@ -107,11 +107,15 @@ public static class StudioHost
         });
 
         // ---- generation (tested CLI recipe path -BodyOnly + single-flight job queue + live WS bridge) ----
-        api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs) =>
+        api.MapPost("/generate", (GenSubmit body, GenerationJobs jobs, ModelManager mm) =>
         {
             if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
             var kind = (body.Kind ?? "image").Trim().ToLowerInvariant();
             if (Array.IndexOf(GenRequest.Kinds, kind) < 0) return Results.BadRequest(new { error = "unknown kind" });
+            // checkpoint override: "auto" routes (prompt-aware pick among installed image bases); else pass through.
+            var model = body.Model;
+            if (string.Equals(model, "auto", StringComparison.OrdinalIgnoreCase))
+                model = ModelRouter.Pick(body.Prompt, mm.InstalledImageModels())?.File;
             // Init/mask images arrive from the browser as data: URLs; the recipe wants file paths, so decode each
             // to a temp file (edit/i2v/img2img + inpaint). Non-data values pass through (a server-side path).
             static string? SaveDataUrl(string? v, string tag)
@@ -155,7 +159,8 @@ public static class StudioHost
                 Upscaler: body.Upscaler, Segment: body.Segment,
                 ControlNets: controlUnits,
                 EndImage: endPath, Reference: body.Reference, RefWeight: body.RefWeight,
-                Interpolate: body.Interpolate, InterpolateMult: body.InterpolateMult, Workflow: body.Workflow, Tile: body.Tile);
+                Interpolate: body.Interpolate, InterpolateMult: body.InterpolateMult, Workflow: body.Workflow, Tile: body.Tile,
+                Model: model);
             return Results.Json(jobs.Submit(req).ToDto());
         });
         api.MapGet("/jobs", (GenerationJobs jobs) => Results.Json(jobs.Recent().Select(j => j.ToDto())));
@@ -263,6 +268,7 @@ public static class StudioHost
 
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));
+        api.MapGet("/image-models", (ModelManager mm) => Results.Json(mm.InstalledImageModels()));   // manual picker + Auto router
         api.MapGet("/loras", () => Results.Json(Loras.List()));   // for the LoRA mixer (image-family)
         api.MapGet("/controlnet-models", () => Results.Json(Loras.ControlNets()));   // for the ControlNet model picker
         api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));

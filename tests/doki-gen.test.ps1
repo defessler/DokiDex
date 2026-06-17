@@ -152,6 +152,10 @@ Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-Ge
 Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Tile 'x').seamlesstileable -eq 'X-Only') "-Tile x -> seamlesstileable=X-Only"
 Assert (-not (Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's').ContainsKey('seamlesstileable')) "no -Tile -> no seamlesstileable (opt-in)"
 
+# --- model override: -Model replaces the recipe's default checkpoint; default kept otherwise ---
+Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'Chroma1-HD.safetensors').model -eq 'Chroma1-HD.safetensors') "-Model overrides body.model"
+Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's').model -eq (Get-GenRecipe -Kind image).model) "no -Model -> recipe default model kept"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"

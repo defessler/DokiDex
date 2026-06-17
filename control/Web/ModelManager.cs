@@ -63,6 +63,13 @@ public sealed class ModelManager
         };
     });
 
+    // Installed image checkpoints as routable models (File = the SwarmUI model name = basename w/ extension,
+    // matching the recipe's `model` convention). Feeds the manual picker + the Auto router.
+    public IReadOnlyList<RoutableModel> InstalledImageModels() => Entries()
+        .Where(e => e.Capability == "image" && File.Exists(PathFor(e)))
+        .Select(e => new RoutableModel(e.Id, Path.GetFileName(e.File), e.Name, e.Default))
+        .ToList();
+
     public string Install(string id)
     {
         var e = Entries().FirstOrDefault(x => x.Id == id);

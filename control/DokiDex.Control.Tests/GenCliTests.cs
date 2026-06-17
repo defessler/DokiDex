@@ -83,6 +83,14 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Model_override_is_emitted_when_set_and_omitted_otherwise()
+    {
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Model: "Chroma1-HD.safetensors", OutPath: "o"));
+        var i = a.IndexOf("-Model"); Assert.True(i >= 0); Assert.Equal("Chroma1-HD.safetensors", a[i + 1]);
+        Assert.DoesNotContain("-Model", GenCli.BuildArgs(new GenRequest("x", "image", OutPath: "o")));
+    }
+
+    [Fact]
     public void ControlNet_units_serialize_to_one_json_arg_on_image_edit()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "image",
