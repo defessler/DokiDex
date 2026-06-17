@@ -213,6 +213,25 @@ public static class StudioHost
         // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
         api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));
 
+        // ---- SAM point segmentation (semantic click->mask; sidecar, gated on setup.ps1 -Sam) ----
+        api.MapPost("/segment-click", async (SegmentClickRequest body, CancellationToken ct) =>
+        {
+            if (string.IsNullOrEmpty(body.Image) || !body.Image.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { error = "image (data URL) required" });
+            string imgPath;
+            try
+            {
+                var comma = body.Image.IndexOf(',');
+                imgPath = Path.Combine(Path.GetTempPath(), $"dokidex-sam-{Guid.NewGuid():N}.png");
+                File.WriteAllBytes(imgPath, Convert.FromBase64String(body.Image[(comma + 1)..]));
+            }
+            catch { return Results.BadRequest(new { error = "bad image" }); }
+            var r = await Sam.SegmentAsync(imgPath, body.X, body.Y, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            var b64 = Convert.ToBase64String(await File.ReadAllBytesAsync(r.MaskPath!, ct));
+            return Results.Json(new { mask = $"data:image/png;base64,{b64}" });
+        });
+
         // ---- 3D blockout: a software depth rasterizer (primitives -> perspective+occluded depth map), no GPU ----
         api.MapPost("/blockout", (BlockoutScene body) =>
         {

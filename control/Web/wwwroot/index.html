@@ -139,7 +139,7 @@
           <img id="maskimg" style="display:block;max-width:512px"/>
           <canvas id="maskcanvas" style="position:absolute;left:0;top:0;cursor:crosshair;opacity:0.5"></canvas>
         </div>
-        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button></div>
+        <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <span id="samHint" class="hint"></span></div>
       </div>
       <div class="mods">
         <input id="rwInstr" class="kin" style="flex:1;min-width:200px" placeholder="steer-rewrite (e.g. make it night, darker tone, add a red scarf)">
@@ -422,8 +422,22 @@
     function clearMask(){ const cv=document.getElementById('maskcanvas'); const x=cv.getContext('2d'); x.fillStyle='#000'; x.fillRect(0,0,cv.width,cv.height); _maskDrawn=false; }
     // Magic wand (color-select): flood-fill a contiguous same-color region from the click into the mask. This is
     // a deterministic local DSP tool — NOT semantic SAM (which needs the model); it gives the click->mask UX now.
-    let _wand=false;
-    function toggleWand(){ _wand=!_wand; document.getElementById('wandBtn').textContent='magic wand: '+(_wand?'on':'off'); }
+    let _wand=false, _sam=false;
+    function toggleWand(){ _wand=!_wand; if(_wand)_sam=false; syncMaskModes(); }
+    function toggleSam(){ _sam=!_sam; if(_sam)_wand=false; syncMaskModes(); }
+    function syncMaskModes(){ document.getElementById('wandBtn').textContent='magic wand: '+(_wand?'on':'off'); document.getElementById('samBtn').textContent='SAM click: '+(_sam?'on':'off'); }
+    // SAM semantic click: send the init image + the click point to the model; paint the returned mask. Falls
+    // back with a hint if SAM isn't installed (the magic-wand still works model-free).
+    async function samClick(px,py){
+      const h=document.getElementById('samHint'); h.textContent='segmenting…';
+      try{
+        const r=await fetch('/api/segment-click',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:state.initImage,x:px,y:py})});
+        const j=await r.json();
+        if(!r.ok){ h.textContent=j.error||'SAM failed'; return; }
+        const cv=document.getElementById('maskcanvas'); const ctx=cv.getContext('2d'); const im=new Image();
+        im.onload=()=>{ ctx.drawImage(im,0,0,cv.width,cv.height); _maskDrawn=true; h.textContent='object selected'; }; im.src=j.mask;
+      }catch{ h.textContent='SAM request failed'; }
+    }
     function magicWandFill(px,py){
       const img=document.getElementById('maskimg'), cv=document.getElementById('maskcanvas');
       const w=cv.width,h=cv.height; if(!w||!h) return;
@@ -821,7 +835,7 @@
       const cv = document.getElementById('maskcanvas');
       const at = e => { const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
       const dot = (x,y) => { const c=cv.getContext('2d'); c.fillStyle='#fff'; c.beginPath(); c.arc(x,y,14,0,7); c.fill(); _maskDrawn=true; };
-      cv.addEventListener('mousedown', e => { const [x,y]=at(e); if(_wand){ magicWandFill(Math.round(x),Math.round(y)); return; } _maskDrawing=true; dot(x,y); });
+      cv.addEventListener('mousedown', e => { const [x,y]=at(e); if(_sam){ const im=document.getElementById('maskimg'); samClick(Math.round(x*(im.naturalWidth/cv.width||1)), Math.round(y*(im.naturalHeight/cv.height||1))); return; } if(_wand){ magicWandFill(Math.round(x),Math.round(y)); return; } _maskDrawing=true; dot(x,y); });
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();

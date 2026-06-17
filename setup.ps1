@@ -15,6 +15,7 @@ param(
     [switch]$Tts,
     [switch]$Stt,
     [switch]$Demucs,    # optional audio-tools sidecar: stem separation (vocals/drums/bass/other) via Demucs
+    [switch]$Sam,       # optional sidecar: Segment-Anything point segmentation (semantic click->mask in the edit canvas)
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
                         # so don't install the .NET SDK to rebuild it — only -Media needs the SDK (SwarmUI).
     [ValidateSet("lean", "full")][string]$Models = "lean"
@@ -181,6 +182,30 @@ if ($Demucs) {
         New-Item -ItemType File -Force $dok | Out-Null
     } else { Ok "Demucs venv present" }
     Ok "Demucs ready -> audio-tools/demucs (the studio 'stems' action on any audio card runs it)."
+}
+
+# ---- SAM: Segment-Anything point segmentation (semantic click->mask in the edit canvas) — optional ----
+if ($Sam) {
+    Info "SAM (Segment-Anything: semantic click-to-mask)"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
+    $samRoot = Join-Path $root "audio-tools\sam"
+    $spy = Join-Path $samRoot ".venv\Scripts\python.exe"
+    $sok = Join-Path $samRoot ".venv\.deps-ok"
+    if (-not (Test-Path $sok)) {
+        Info "creating venv + installing segment-anything (+ cu128 torch) ..."
+        New-Item -ItemType Directory -Force $samRoot | Out-Null
+        if (-not (Test-Path $spy)) { python -m venv (Join-Path $samRoot ".venv") }
+        & $spy -m pip install --upgrade pip | Out-Null
+        Pip $spy install torch --index-url https://download.pytorch.org/whl/cu128
+        Pip $spy install "git+https://github.com/facebookresearch/segment-anything.git" pillow numpy
+        New-Item -ItemType File -Force $sok | Out-Null
+    } else { Ok "SAM venv present" }
+    $ckpt = Join-Path $samRoot "sam_vit_b.pth"
+    if (-not (Test-Path $ckpt)) {
+        Info "downloading SAM vit_b checkpoint (~375MB) ..."
+        Invoke-WebRequest "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth" -OutFile $ckpt
+    } else { Ok "SAM checkpoint present" }
+    Ok "SAM ready -> audio-tools/sam (the edit canvas 'SAM' click mode uses it; magic-wand works without it)."
 }
 
 # ---- STT stack: fully-local speech-to-text (NVIDIA Parakeet via onnx-asr) — optional ----
