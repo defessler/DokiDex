@@ -69,6 +69,7 @@
       <button id="nav-cast" onclick="setView('cast')">Cast</button>
       <button id="nav-voice" onclick="setView('voice')">Voice</button>
       <button id="nav-flow" onclick="setView('flow')">Flow</button>
+      <button id="nav-scene" onclick="setView('scene')">Scene</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
@@ -187,6 +188,19 @@
       </div>
       <textarea id="castOut" readonly placeholder="compiled prompt appears here" style="margin-top:10px;display:none;font-family:monospace;font-size:12px"></textarea>
     </section>
+    <section id="view-scene" style="display:none">
+      <h2>Scene — 3D blockout → depth (ControlNet)</h2>
+      <p class="hint">Place boxes in 3D, render a perspective depth map (occlusion + foreshortening, computed server-side), then use it as a Depth-ControlNet input on Create.</p>
+      <div id="sceneBoxes"></div>
+      <div class="mods">
+        <button class="ghost" onclick="addSceneBox()">+ box</button>
+        <label>Camera dist <input id="camDist" type="number" value="5" step="0.5" class="kin" style="width:60px"></label>
+        <label>FOV <input id="camFov" type="range" min="0.4" max="2" step="0.05" value="1" style="width:80px"></label>
+        <button class="primary" onclick="renderDepth()">Render depth</button>
+      </div>
+      <div style="margin-top:10px"><canvas id="depthCanvas" width="320" height="320" style="border:1px solid var(--border);border-radius:6px;background:#000;max-width:320px"></canvas></div>
+      <div class="row" style="margin-top:6px"><button class="ghost" id="useDepthBtn" onclick="useDepthAsControl()" style="display:none">Use as ControlNet depth input →</button><span class="hint" id="sceneHint"></span></div>
+    </section>
     <section id="view-flow" style="display:none">
       <h2>Flow — node-lite pipeline (DAG)</h2>
       <p class="hint">Chain gen steps with dependencies; they run in topological order (parents before children) through the queue.</p>
@@ -240,7 +254,7 @@
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','director','cast','voice','flow','status','library','models']) {
+      for (const x of ['create','director','cast','voice','flow','scene','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
@@ -248,6 +262,40 @@
       if (v==='models') loadModels();
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
+      if (v==='scene') renderSceneBoxes();
+    }
+    // ---- 3D blockout -> depth map (server-side software rasterizer) ----
+    let sceneBoxes=[{x:0,y:0,z:0,size:1}];
+    function addSceneBox(){ sceneBoxes.push({x:0,y:0,z:0,size:1}); renderSceneBoxes(); }
+    function renderSceneBoxes(){
+      const wrap=document.getElementById('sceneBoxes'); if(!wrap) return; wrap.innerHTML='';
+      sceneBoxes.forEach((b,i)=>{
+        const row=$(`<div class="mods" style="align-items:center"></div>`);
+        row.appendChild($(`<span class="hint">box ${i+1}</span>`));
+        [['x','x'],['y','y'],['z','z (depth)'],['size','size']].forEach(([k,lbl])=>{
+          const l=document.createElement('label'); l.textContent=' '+lbl+' ';
+          const inp=document.createElement('input'); inp.type='number'; inp.step='0.5'; inp.value=b[k]; inp.className='kin'; inp.style.width='56px';
+          inp.oninput=e=>b[k]=+e.target.value||0; l.appendChild(inp); row.appendChild(l);
+        });
+        if(sceneBoxes.length>1){ const del=$(`<button class="xbtn">✕</button>`); del.onclick=()=>{ sceneBoxes.splice(i,1); renderSceneBoxes(); }; row.appendChild(del); }
+        wrap.appendChild(row);
+      });
+    }
+    async function renderDepth(){
+      const h=document.getElementById('sceneHint'); h.textContent='rendering…';
+      const body={ width:320, height:320, cameraDist:+document.getElementById('camDist').value||5, fov:+document.getElementById('camFov').value||1, prims:sceneBoxes.map(b=>({x:b.x,y:b.y,z:b.z,size:b.size})) };
+      try{
+        const j=await (await fetch('/api/blockout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+        const bytes=atob(j.depth); const cv=document.getElementById('depthCanvas'); cv.width=j.width; cv.height=j.height;
+        const ctx=cv.getContext('2d'); const img=ctx.createImageData(j.width,j.height);
+        for(let i=0;i<bytes.length;i++){ const v=bytes.charCodeAt(i); img.data[i*4]=v; img.data[i*4+1]=v; img.data[i*4+2]=v; img.data[i*4+3]=255; }
+        ctx.putImageData(img,0,0); document.getElementById('useDepthBtn').style.display=''; h.textContent='depth rendered — use it as a ControlNet depth input';
+      }catch{ h.textContent='render failed'; }
+    }
+    function useDepthAsControl(){
+      const cv=document.getElementById('depthCanvas');
+      if(cnUnits[0]){ cnUnits[0].image=cv.toDataURL('image/png'); cnUnits[0].pre='none'; renderCnUnits(); }
+      setView('create'); document.getElementById('genHint').textContent='depth map set as ControlNet unit 1 — pick a depth model + Generate';
     }
     // ---- node-lite flow (DAG of gen steps) ----
     let _flowSeq=0, flowNodes=[];

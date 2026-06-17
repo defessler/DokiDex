@@ -213,6 +213,13 @@ public static class StudioHost
         // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
         api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));
 
+        // ---- 3D blockout: a software depth rasterizer (primitives -> perspective+occluded depth map), no GPU ----
+        api.MapPost("/blockout", (BlockoutScene body) =>
+        {
+            var depth = Blockout.RenderDepth(body);
+            return Results.Json(new { width = Math.Clamp(body.Width, 1, 1024), height = Math.Clamp(body.Height, 1, 1024), depth = Convert.ToBase64String(depth) });
+        });
+
         // ---- exploration mode: diverge one prompt into N seed-varied gens (reuses the gen queue) ----
         api.MapPost("/explore", (ExploreRequest body, GenerationJobs jobs) =>
         {
