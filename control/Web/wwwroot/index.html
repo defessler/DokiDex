@@ -283,6 +283,7 @@
           <option value="active">active</option><option value="all">all</option><option value="fav">★ favorites</option><option value="untriaged">untriaged</option><option value="trash">🗑 trash</option>
         </select>
         <button class="ghost" onclick="exportDeck()" title="self-contained HTML story bible (logline/synopsis need a loaded LLM)">story bible</button>
+        <button class="ghost" onclick="joinClips()" title="concatenate the shown video clips (oldest→newest) into one — needs ffmpeg">join clips</button>
       </div>
       <div class="mods" style="margin-top:-2px;align-items:center">
         <span class="hint">saved:</span>
@@ -740,13 +741,14 @@
       const stems = (it.kind==='music'||it.kind==='tts') ? `<button class="xbtn" onclick="separateStems('${nm}')">stems</button>` : '';
       const vlm = isImg ? `<button class="xbtn" onclick="describeItem('${nm}',event)" title="image→prompt (needs a vision model)">describe</button><button class="xbtn" data-verify="${nm}" onclick="verifyItem('${nm}','${encodeURIComponent(it.prompt)}',event)" title="QA: does it match its prompt? (needs a vision model)">verify</button>` : '';
       const color = isImg ? `<button class="xbtn" onclick="extractPalette('${nm}',event)" title="add this image's colors to the palette">palette</button><button class="xbtn" onclick="recolorCard('${nm}',event)" title="recolor to the current palette (deterministic, no model)">recolor</button>` : '';
+      const vid = VIDEO.has(it.kind) ? `<button class="xbtn" onclick="extractFrame('${nm}',true,event)" title="extract the last frame → animate it (i2v) / FLF2V keyframe">last frame</button>` : '';
       const badge = (it.favorite?'<span class="cbadge fav" title="favorite">★</span>':'') + (it.trash?'<span class="cbadge trash" title="trash">🗑</span>':'');
       const cls = 'card libcard'+(it.favorite?' isfav':'')+(it.trash?' istrash':'');
       return `<div class="${cls}" data-name="${nm}" tabindex="0" onclick="focusCard(this)">${badge}<div class="media">${m}</div><div class="body"><div class="p">${p}</div>
         <div class="row" style="justify-content:space-between;margin-top:6px"><span class="s done">${it.kind}</span><span>
         <button class="xbtn" onclick="rate('${nm}','fav',event)" title="favorite (F)">★</button>
         <button class="xbtn" onclick="rate('${nm}','trash',event)" title="trash (X)">🗑</button>
-        ${vlm}${color}${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
+        ${vlm}${color}${vid}${stems}<button class="xbtn" onclick="remixItem('${encodeURIComponent(it.prompt)}','${it.kind}')">remix</button>
         <a class="xbtn" href="${it.mediaUrl}" download style="text-decoration:none">save</a>
         <button class="xbtn" onclick="delItem('${nm}')">del</button></span></div></div></div>`;
     }
@@ -843,6 +845,17 @@
         if(!imp.ok){ alert('could not save the recolor'); return; }
         loadLibrary();
       }catch{ alert('recolor failed'); }
+    }
+    // ffmpeg video tools: extract a keyframe from a clip, join shown clips (clip-extend / storyboard primitives)
+    async function extractFrame(nm, last, ev){
+      if(ev) ev.stopPropagation();
+      try{ const r=await fetch('/api/extract-frame',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:decodeURIComponent(nm),last})}); const j=await r.json(); if(!r.ok){ alert(j.error||'extract failed'); return; } loadLibrary(); }catch{ alert('extract failed'); }
+    }
+    async function joinClips(){
+      const names=_libItems.filter(it=>VIDEO.has(it.kind)).map(it=>it.name).reverse();   // oldest→newest = chronological
+      if(names.length<2){ alert('show at least two video clips to join (filter the Library to the clips you want, in order)'); return; }
+      if(!confirm(`Join ${names.length} shown clips (oldest→newest, video stream only)?`)) return;
+      try{ const r=await fetch('/api/join-clips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({names})}); const j=await r.json(); if(!r.ok){ alert(j.error||'join failed'); return; } loadLibrary(); }catch{ alert('join failed'); }
     }
     // one-click story-bible export: POST shown images -> self-contained HTML -> download
     async function exportDeck(){

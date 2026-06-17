@@ -377,6 +377,30 @@ public static class StudioHost
             return ok ? Results.Json(new { pass = verdict!.Pass, reason = verdict.Reason }) : Results.Json(new { error = err }, statusCode: 503);
         });
 
+        // ---- gated ffmpeg video tools: extract a keyframe, join clips (clip-extend / storyboard primitives) ----
+        api.MapPost("/extract-frame", async (FrameRequest body, GalleryService gal, DokiService doki, CancellationToken ct) =>
+        {
+            var src = gal.Resolve(body.Name ?? "");
+            if (src is null) return Results.NotFound();
+            var outPath = doki.NewGenOutPath("image");
+            var r = await Ffmpeg.RunAsync(Ffmpeg.ExtractFrameArgs(src, outPath, body.Last), ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            GalleryService.WriteSidecar(outPath, "frame", "image", $"{(body.Last ? "last" : "first")} frame of {Path.GetFileName(src)}", Path.GetFileName(src));
+            var name = Path.GetFileName(outPath);
+            return Results.Json(new { name, mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
+        });
+        api.MapPost("/join-clips", async (JoinRequest body, GalleryService gal, DokiService doki, CancellationToken ct) =>
+        {
+            var inputs = (body.Names ?? new()).Select(n => gal.Resolve(n)).Where(p => p is not null).Select(p => p!).ToList();
+            if (inputs.Count < 2) return Results.BadRequest(new { error = "select at least two clips to join" });
+            var outPath = doki.NewGenOutPath("video");
+            var r = await Ffmpeg.RunAsync(Ffmpeg.ConcatArgs(inputs, outPath), ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            GalleryService.WriteSidecar(outPath, "join", "video", $"joined {inputs.Count} clips");
+            var name = Path.GetFileName(outPath);
+            return Results.Json(new { name, mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
+        });
+
         // ---- Parallel multi-model compare: one prompt -> one fast job per installed image base (grid) ----
         api.MapPost("/compare", (CompareRequest body, GenerationJobs jobs, ModelManager mm) =>
         {
