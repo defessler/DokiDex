@@ -155,6 +155,16 @@
           <canvas id="maskcanvas" style="position:absolute;left:0;top:0;cursor:crosshair;opacity:0.5"></canvas>
         </div>
         <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <button class="xbtn" onclick="removeBackground()" title="keep the masked subject, drop the rest → transparent PNG (Library)">remove bg</button> <span id="samHint" class="hint"></span></div>
+        <div style="margin-top:6px" class="row">
+          <span class="hint">Outpaint:</span>
+          <button class="xbtn" onclick="outpaint('left')" title="extend the canvas leftward and fill it">◀</button>
+          <button class="xbtn" onclick="outpaint('up')">▲</button>
+          <button class="xbtn" onclick="outpaint('down')">▼</button>
+          <button class="xbtn" onclick="outpaint('right')">▶</button>
+          <button class="xbtn" onclick="outpaint('all')" title="extend all four sides">expand ✣</button>
+          <label class="hint">by <select id="outpaintPct" class="kin" style="width:auto"><option value="0.25">25%</option><option value="0.5">50%</option></select></label>
+          <span id="outpaintHint" class="hint"></span>
+        </div>
       </div>
       <div class="mods">
         <input id="rwInstr" class="kin" style="flex:1;min-width:200px" placeholder="steer-rewrite (e.g. make it night, darker tone, add a red scarf)">
@@ -528,6 +538,33 @@
         const r=await fetch('/api/import?prompt='+encodeURIComponent('background removed'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:blob});
         h.textContent = r.ok ? 'cutout saved to Library (transparent PNG)' : 'could not save';
       }catch{ h.textContent='cutout failed'; }
+    }
+    // Outpaint: extend the canvas in a direction and generate the new border via the shipped EDIT path —
+    // compose a larger init (edge-stretched base + the sharp original on top) + a white-border mask, submit as
+    // an inpaint of just the new area. No new backend.
+    async function outpaint(dir){
+      const hint=document.getElementById('outpaintHint');
+      if(!state.initImage){ hint.textContent='load an image first'; return; }
+      if(!await ensureMedia()) return;
+      hint.textContent='outpainting…';
+      try{
+        const img=new Image(); await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=state.initImage;});
+        const w=img.naturalWidth, h=img.naturalHeight, pct=+document.getElementById('outpaintPct').value||0.25;
+        const px=Math.round(w*pct), py=Math.round(h*pct);
+        let l=0,r=0,t=0,b=0;
+        if(dir==='left')l=px; else if(dir==='right')r=px; else if(dir==='up')t=py; else if(dir==='down')b=py; else {l=r=px;t=b=py;}
+        const nw=w+l+r, nh=h+t+b;
+        const c=document.createElement('canvas'); c.width=nw; c.height=nh; const x=c.getContext('2d');
+        x.drawImage(img,0,0,w,h,0,0,nw,nh);   // stretched edge-ish base in the new area (better seed than flat gray)
+        x.drawImage(img,l,t,w,h);             // sharp original on top
+        const mc=document.createElement('canvas'); mc.width=nw; mc.height=nh; const mx=mc.getContext('2d');
+        mx.fillStyle='#fff'; mx.fillRect(0,0,nw,nh); mx.fillStyle='#000'; mx.fillRect(l,t,w,h);   // white = generate the new border
+        const prompt=document.getElementById('prompt').value.trim()||'extend the scene naturally, seamless continuation';
+        const body={prompt,kind:'edit',initImage:c.toDataURL('image/png'),maskImage:mc.toDataURL('image/png'),strength:0.85};
+        const r2=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const j=await r2.json(); if(!r2.ok){ hint.textContent=j.error||'outpaint failed'; return; }
+        hint.textContent='outpaint queued — see Results'; pollJobs();
+      }catch{ hint.textContent='outpaint failed'; }
     }
     function magicWandFill(px,py){
       const img=document.getElementById('maskimg'), cv=document.getElementById('maskcanvas');
