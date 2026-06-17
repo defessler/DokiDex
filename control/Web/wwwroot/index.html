@@ -152,6 +152,8 @@
         <p class="hint" style="margin:6px 0">Header row + one gen per row. Columns: <code>prompt</code> (required), kind, seed, count, aspect, lora, strength, fast, refine, face, realism, upscale, raw.</p>
         <textarea id="csvText" placeholder="prompt,kind,seed&#10;a fox in the rain,image,7&#10;a neon city skyline,image,8" style="min-height:80px;font-family:monospace;font-size:12px"></textarea>
         <div class="row" style="margin-top:6px"><button class="ghost" onclick="runBatch()">Queue batch</button><span class="hint" id="csvHint"></span></div>
+        <div class="row" style="margin-top:8px"><input id="recipeName" class="kin" style="width:160px" placeholder="recipe name"><button class="xbtn" onclick="saveRecipe()">save as recipe</button><span class="hint" id="recipeHint"></span></div>
+        <div id="recipeList" class="hint" style="margin-top:6px"></div>
       </details>
       <h2>Results</h2>
       <div class="grid" id="results"><p class="hint">Nothing generated yet.</p></div>
@@ -389,6 +391,26 @@
       try{ const r=await fetch('/api/explore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const j=await r.json(); hint.textContent=`exploring ${j.submitted||0} variations`; pollJobs(); }
       catch(e){ hint.textContent='explore failed'; }
     }
+    async function saveRecipe(){
+      const name=document.getElementById('recipeName').value.trim(), csv=document.getElementById('csvText').value, h=document.getElementById('recipeHint');
+      if(!name){ h.textContent='name it first'; return; }
+      try{ const r=await fetch('/api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,csv})}); h.textContent=r.ok?'saved':'bad name'; loadRecipes(); }catch{ h.textContent='save failed'; }
+    }
+    async function loadRecipes(){
+      try{
+        const names=await (await fetch('/api/recipes')).json(); const el=document.getElementById('recipeList'); if(!el) return;
+        if(!names.length){ el.textContent=''; return; }
+        el.innerHTML='saved: '; names.forEach(n=>{
+          const run=$(`<button class="xbtn">▶ ${esc(n)}</button>`); run.onclick=()=>runRecipe(n);
+          const ld=$(`<button class="xbtn">edit</button>`); ld.onclick=()=>loadRecipe(n);
+          const del=$(`<button class="xbtn">✕</button>`); del.onclick=()=>delRecipe(n);
+          el.appendChild(run); el.appendChild(ld); el.appendChild(del); el.appendChild(document.createTextNode('  '));
+        });
+      }catch{}
+    }
+    async function runRecipe(n){ if(!await ensureMedia()) return; try{ const j=await (await fetch('/api/recipes/'+encodeURIComponent(n)+'/run',{method:'POST'})).json(); document.getElementById('recipeHint').textContent=`queued ${j.submitted||0}`; }catch{} pollJobs(); }
+    async function loadRecipe(n){ try{ const j=await (await fetch('/api/recipes/'+encodeURIComponent(n))).json(); document.getElementById('csvText').value=j.csv||''; document.getElementById('recipeName').value=n; }catch{} }
+    async function delRecipe(n){ try{ await fetch('/api/recipes/'+encodeURIComponent(n),{method:'DELETE'}); }catch{} loadRecipes(); }
     async function runBatch(){
       const csv=document.getElementById('csvText').value.trim();
       const hint=document.getElementById('csvHint');
@@ -687,7 +709,7 @@
       cv.addEventListener('mousemove', e => { if(_maskDrawing){ const [x,y]=at(e); dot(x,y); } });
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
     })();
-    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>

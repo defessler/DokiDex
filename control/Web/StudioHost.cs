@@ -247,21 +247,22 @@ public static class StudioHost
         // ---- CSV batch generation: header row -> per-row GenRequest -> queued jobs (respects the GPU gate) ----
         api.MapPost("/batch", (BatchRequest body, GenerationJobs jobs) =>
         {
-            var ids = new List<string>();
-            foreach (var row in Csv.ParseWithHeader(body.Csv))
-            {
-                row.TryGetValue("prompt", out var prompt);
-                if (string.IsNullOrWhiteSpace(prompt)) continue;
-                var kind = (Cell(row, "kind") ?? "image").Trim().ToLowerInvariant();
-                if (Array.IndexOf(GenRequest.Kinds, kind) < 0) kind = "image";
-                var req = new GenRequest(prompt.Trim(), kind,
-                    Fast: BoolCell(row, "fast"), Upscale: BoolCell(row, "upscale"), Refine: BoolCell(row, "refine"),
-                    Face: BoolCell(row, "face"), Realism: BoolCell(row, "realism"), Raw: BoolCell(row, "raw"),
-                    Seed: IntCell(row, "seed", -1), Count: Math.Clamp(IntCell(row, "count", 1), 1, 9),
-                    Strength: DblCell(row, "strength", -1), Aspect: Cell(row, "aspect"), Lora: Cell(row, "lora"),
-                    Negative: Cell(row, "negative"));
-                ids.Add(jobs.Submit(req).Id);
-            }
+            var ids = RunBatchCsv(body.Csv, jobs);
+            return Results.Json(new { submitted = ids.Count, ids });
+        });
+
+        // ---- saved recipes: named, reusable pipelines (CSV of steps) — the linear/persistent slice of node-flow ----
+        api.MapGet("/recipes", () => Results.Json(RecipeStore.List()));
+        api.MapGet("/recipes/{name}", (string name) =>
+            RecipeStore.Load(name) is { } csv ? Results.Json(new { name, csv }) : Results.NotFound());
+        api.MapPost("/recipes", (RecipeDto body) =>
+            RecipeStore.Save(body.Name, body.Csv) ? Results.Ok() : Results.BadRequest(new { error = "bad recipe name" }));
+        api.MapDelete("/recipes/{name}", (string name) => RecipeStore.Delete(name) ? Results.Ok() : Results.NotFound());
+        api.MapPost("/recipes/{name}/run", (string name, GenerationJobs jobs) =>
+        {
+            var csv = RecipeStore.Load(name);
+            if (csv is null) return Results.NotFound();
+            var ids = RunBatchCsv(csv, jobs);
             return Results.Json(new { submitted = ids.Count, ids });
         });
 
@@ -274,6 +275,28 @@ public static class StudioHost
             var name = Path.GetFileName(r.ArtifactPath!);
             return Results.Json(new { mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
         });
+    }
+
+    // Parse a CSV (header row + per-row params) and submit one gen per row through the queue; returns job ids.
+    // Shared by /api/batch (one-shot) and /api/recipes/{name}/run (saved pipeline).
+    private static List<string> RunBatchCsv(string? csv, GenerationJobs jobs)
+    {
+        var ids = new List<string>();
+        foreach (var row in Csv.ParseWithHeader(csv))
+        {
+            row.TryGetValue("prompt", out var prompt);
+            if (string.IsNullOrWhiteSpace(prompt)) continue;
+            var kind = (Cell(row, "kind") ?? "image").Trim().ToLowerInvariant();
+            if (Array.IndexOf(GenRequest.Kinds, kind) < 0) kind = "image";
+            var req = new GenRequest(prompt.Trim(), kind,
+                Fast: BoolCell(row, "fast"), Upscale: BoolCell(row, "upscale"), Refine: BoolCell(row, "refine"),
+                Face: BoolCell(row, "face"), Realism: BoolCell(row, "realism"), Raw: BoolCell(row, "raw"),
+                Seed: IntCell(row, "seed", -1), Count: Math.Clamp(IntCell(row, "count", 1), 1, 9),
+                Strength: DblCell(row, "strength", -1), Aspect: Cell(row, "aspect"), Lora: Cell(row, "lora"),
+                Negative: Cell(row, "negative"));
+            ids.Add(jobs.Submit(req).Id);
+        }
+        return ids;
     }
 
     // CSV cell helpers for the batch endpoint (tolerant: missing/blank -> the default).
