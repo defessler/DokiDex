@@ -108,10 +108,27 @@ public sealed class GalleryService
         catch { return false; }
     }
 
-    public static void WriteSidecar(string artifactPath, string id, string kind, string prompt)
+    public static void WriteSidecar(string artifactPath, string id, string kind, string prompt, string? parent = null)
     {
-        try { File.WriteAllText(artifactPath + ".json", JsonSerializer.Serialize(new Sidecar(id, kind, prompt, DateTime.Now.ToString("o")))); }
+        try { File.WriteAllText(artifactPath + ".json", JsonSerializer.Serialize(new Sidecar(id, kind, prompt, DateTime.Now.ToString("o"), Parent: parent))); }
         catch { }
+    }
+
+    // Typed projection of the library for the variation-lineage forest (name + its parent link + label/kind).
+    // Sorted newest-first for a stable, sensible tree order; no view/query filtering (lineage shows everything).
+    public IReadOnlyList<LinItem> LineageItems()
+    {
+        var root = Root;
+        var outp = new List<(DateTime when, LinItem it)>();
+        if (!Directory.Exists(root)) return Array.Empty<LinItem>();
+        foreach (var f in Directory.EnumerateFiles(root))
+        {
+            var ext = Path.GetExtension(f).ToLowerInvariant();
+            if (Array.IndexOf(MediaExt, ext) < 0) continue;
+            var meta = ReadSidecar(f);
+            outp.Add((File.GetLastWriteTime(f), new LinItem(Path.GetFileName(f), meta?.Parent, meta?.Prompt ?? "", meta?.Kind ?? KindFromExt(ext))));
+        }
+        return outp.OrderByDescending(x => x.when).Select(x => x.it).ToList();
     }
 
     private static Sidecar? ReadSidecar(string artifactPath)

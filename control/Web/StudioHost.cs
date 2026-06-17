@@ -168,7 +168,7 @@ public static class StudioHost
             var j = jobs.Get(id);
             if (j is null || !j.HasArtifact) return Results.NotFound();
             var req = Refine.Build(j.Prompt, j.ArtifactPath!, body.Action);
-            return req is null ? Results.BadRequest(new { error = "unknown action" }) : Results.Json(jobs.Submit(req).ToDto());
+            return req is null ? Results.BadRequest(new { error = "unknown action" }) : Results.Json(jobs.Submit(req, Path.GetFileName(j.ArtifactPath)).ToDto());
         });
         // one-click effect presets: list + apply a stylistic transform to a finished card (img2img)
         api.MapGet("/effects", () => Results.Json(EffectPresets.All()));
@@ -178,7 +178,7 @@ public static class StudioHost
             if (j is null || !j.HasArtifact) return Results.NotFound();
             var preset = EffectPresets.Find(body.Action);   // RefineRequest.Action carries the preset id
             return preset is null ? Results.BadRequest(new { error = "unknown effect" })
-                : Results.Json(jobs.Submit(EffectPresets.Build(preset, j.ArtifactPath!)).ToDto());
+                : Results.Json(jobs.Submit(EffectPresets.Build(preset, j.ArtifactPath!), Path.GetFileName(j.ArtifactPath)).ToDto());
         });
         api.MapGet("/media/{id}", (string id, GenerationJobs jobs) =>
         {
@@ -202,6 +202,8 @@ public static class StudioHost
         });
         api.MapDelete("/gallery/{name}", (string name, GalleryService gal) =>
             gal.Delete(name) ? Results.Ok() : Results.NotFound());
+        // variation lineage: the forest of generations linked by their derived-from (Parent) sidecar field
+        api.MapGet("/lineage", (GalleryService gal) => Results.Json(Lineage.BuildForest(gal.LineageItems())));
 
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----
         api.MapGet("/models", (ModelManager mm) => Results.Json(mm.List()));

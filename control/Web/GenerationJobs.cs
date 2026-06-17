@@ -25,6 +25,7 @@ public sealed class GenJob
     public required string Id { get; init; }
     public required string Prompt { get; init; }
     public required string Kind { get; init; }
+    public string? Parent { get; init; }              // source artifact name this was derived from (lineage)
     public string Status { get; set; } = "queued";   // queued | running | done | failed
     public double Progress { get; set; }              // 0..1, fed by the GenerateText2ImageWS bridge
     public string? Preview { get; set; }              // in-flight preview (data: URL) while running
@@ -57,9 +58,9 @@ public sealed class GenerationJobs
 
     public GenerationJobs(DokiService doki, IHubContext<StudioHub> hub) { _doki = doki; _hub = hub; }
 
-    public GenJob Submit(GenRequest req)
+    public GenJob Submit(GenRequest req, string? parent = null)
     {
-        var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind };
+        var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind, Parent = parent };
         _jobs[job.Id] = job;
         var cts = new CancellationTokenSource();
         _cts[job.Id] = cts;
@@ -101,7 +102,7 @@ public sealed class GenerationJobs
                 if (outcome.Ok)
                 {
                     job.ArtifactPath = outcome.ArtifactPath; job.Progress = 1; job.Preview = null; job.Status = "done"; job.Message = "done";
-                    GalleryService.WriteSidecar(outcome.ArtifactPath!, job.Id, job.Kind, job.Prompt);   // persist for the Library
+                    GalleryService.WriteSidecar(outcome.ArtifactPath!, job.Id, job.Kind, job.Prompt, job.Parent);   // persist for the Library
                 }
                 else { job.Status = "failed"; job.Message = StripAnsi(outcome.Message); }
             }

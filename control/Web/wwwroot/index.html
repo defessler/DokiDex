@@ -43,6 +43,10 @@
     .libcard.focused { border-color:var(--cyan); box-shadow:0 0 0 2px var(--cyan); }
     .cbadge { position:absolute; top:6px; z-index:2; font-size:13px; line-height:1; padding:2px 5px; border-radius:6px; background:rgba(0,0,0,.55); }
     .cbadge.fav { left:6px; color:var(--gold); } .cbadge.trash { right:6px; }
+    .lkids { margin-left:18px; border-left:1px solid var(--border); padding-left:10px; }
+    .lrow { display:flex; align-items:center; gap:8px; padding:3px 0; }
+    .lrow img { width:34px; height:34px; object-fit:cover; border-radius:5px; background:var(--bg); flex:none; }
+    .lrow .lp { font-size:11px; color:var(--dim); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
     .card .media { aspect-ratio:1; background:var(--bg); display:flex; align-items:center; justify-content:center; }
     .card .media img, .card .media video { width:100%; height:100%; object-fit:contain; }
     .card .body { padding:10px 12px; }
@@ -259,6 +263,9 @@
       </div>
       <p class="hint" style="margin:-2px 0 6px">Triage: click a card to focus, then <b>F</b> favorite · <b>X</b> trash · <b>U</b> clear · <b>←/→</b> move.</p>
       <div class="grid" id="library"><p class="hint">Loading…</p></div>
+      <details style="margin-top:10px" ontoggle="if(this.open)loadLineage()"><summary class="hint" style="cursor:pointer">Variation lineage (what was derived from what)</summary>
+        <div id="lineage" style="margin-top:6px"><p class="hint">open to load…</p></div>
+      </details>
       <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Train a LoRA from the shown images</summary>
         <div class="mods" style="margin-top:6px">
           <label>Name <input id="trName" class="kin" style="width:140px" placeholder="my-style"></label>
@@ -710,6 +717,19 @@
         const keep = g.querySelector(`.libcard[data-name="${(_focusName||'').replace(/"/g,'\\"')}"]`);
         if (keep) focusCard(keep); else _focusName=null;
       } catch(e){ document.getElementById('library').innerHTML='<p class="err">could not load the library</p>'; }
+    }
+    // ---- variation lineage forest (parent -> children), rendered as an indented tree ----
+    function linNode(n){
+      const thumb = `/api/gallery/media/${encodeURIComponent(n.name)}`;
+      const kids = (n.children&&n.children.length) ? `<div class="lkids">${n.children.map(linNode).join('')}</div>` : '';
+      return `<div class="lnode"><div class="lrow" title="${esc(n.prompt)}"><img src="${thumb}" alt="" loading="lazy"/><span class="s done">${n.kind}</span><span class="lp">${esc(n.prompt)||'(no prompt)'}</span></div>${kids}</div>`;
+    }
+    async function loadLineage(){
+      const el=document.getElementById('lineage'); if(!el) return;
+      try{
+        const forest=await (await fetch('/api/lineage')).json();
+        el.innerHTML = forest.length ? forest.map(linNode).join('') : '<p class="hint">No generations yet. Derived cards (vary/face/hi-res/fx) nest under their source.</p>';
+      }catch{ el.innerHTML='<p class="err">could not load lineage</p>'; }
     }
     async function trainLora(){
       const h=document.getElementById('trHint');
