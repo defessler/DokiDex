@@ -1,5 +1,40 @@
 # Decision log
 
+## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present
+
+Three adversarial **deep-research** passes (~335 agents, ~8.1M tokens, 46 claims confirmed / 8 refuted vs
+primary sources) mapped the AI-generation + chat landscape onto the 32GB SwarmUI + llama.cpp stack. Docs:
+`docs/superpowers/specs/2026-06-18-ai-platform-models-workflows-research.md` (model/workflow map) and
+`2026-06-18-chat-assistant-surface-design.md` (the chat design).
+
+**Headline finding: the one real product gap is a conversational chat surface** — Open WebUI / LM Studio /
+SillyTavern are all frontends over an OpenAI-compatible `/v1`, which DokiDex's llama-swap `:8080` already is,
+so it's a frontend build, not an inference project.
+
+**Shipped (branch `feat/web-studio`→`feat/chat-surface`): Chat P0** — a native persona-first chat view in the
+DokiGen Studio SPA over `POST /api/chat`, built via an ultracode build+adversarial-review workflow, TDD. New:
+`control/Web/{ChatPrompt,Persona,ChatStore,Chat}.cs` + `LocalLlm.ChatTurnsAsync` + `/api/chat` `/api/personas`
+`/api/chats` endpoints + the SPA Chat view (persona Character Cards, on-disk threads, a symmetric GPU-arbitration
+guard mirroring the media eviction-confirm, non-streaming). Pure `ChatPrompt.Build` + `Chat.SelectHistory` +
+the store round-trips unit-tested; **suite 354→376 green, Debug+Release clean.** Streaming / lorebook / voice /
+vision / tool-calling are later phases per the design doc.
+
+**Verified-already-shipped (the research's "incumbent" labels were about the field, not DokiDex's real state):**
+- **ACE-Step 1.5** is already the music engine — `setup.ps1:530-532` downloads `acestep_v1.5_xl_base_bf16` **and**
+  `acestep_v1.5_turbo`; the recipe runs turbo (adopted 2026-06-14). No swap to do.
+- **Qwen-Image-Edit-2511** is already the `edit` kind (`setup.ps1:523`). In-image text editing is just prompting.
+
+**Recorded as gated follow-ups (NOT shipped blind, per the verify-before-ship discipline):**
+- **Music quality tier** — the already-downloaded `acestep_v1.5_xl_base` is unused (recipe only loads turbo).
+  Wiring it as a quality option needs an **on-GPU `steps`/`cfg` tuning pass** (research gives steps≈50 for base;
+  cfg is unsourced) before it ships — exactly the blind-tuned-param edit the repo refuses elsewhere.
+- **TTS-Audio-Suite** (15-engine ComfyUI node + RVC voice-conversion, incl. IndexTTS-2 duration/emotion + Higgs
+  v3) — high-leverage, but a **ComfyUI-node path vs the current standalone Chatterbox `:8004` server**: an
+  architecture decision, not a blind wire-in.
+- **Model adds** (32GB-feasible, gated on optional install): FLUX.2 Klein (art-style), Wan 2.2 A14B GGUF
+  (SwarmUI's recommended quality video), PuLID-Flux (face identity), InfiniteTalk (lip-sync), Illustrious-XL /
+  Animagine XL 4.0 (anime), Nunchaku NVFP4 (speed). Z-Image **confirmed** the right photoreal + real-time base.
+
 ## 2026-06-16 — Control panel becomes an all-in-one **installer + manager** (repo-independent)
 
 The downloaded exe is now the product, built from the repo by CI but **independent of any cloned repo at
