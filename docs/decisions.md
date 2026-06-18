@@ -324,7 +324,7 @@ gap filled:** a gated `vision` block (Qwen3-VL-8B-Instruct + mmproj, `setup.ps1 
 the already-built Describe/Verify surfaces with zero studio code change (uncensored fallback:
 abliterated Qwen2.5-VL on the same path). FIM + heavy + rewriter incumbents confirmed best-for-
 hardware (rewriter's tuned instruction is the load-bearing part; Qwen3-4B-2507 is an optional
-marginal swap, not taken). Full analysis: `.claude/plans/streamed-kindling-noodle.md`.
+marginal swap, not taken). Full analysis: `docs/superpowers/specs/2026-06-17-deepseek-eval-llm-tiers.md`.
 
 ### Image refresh (2026-06-13): Chroma added as a 2nd uncensored image style
 
