@@ -61,3 +61,46 @@ models:
       --cache-type-v q8_0
       --cache-reuse 256
       --jinja
+
+  # Model V — VISION (gated). Lights up the studio's Describe (image->prompt) and Verify
+  # (output-adherence) surfaces; the in-app code already posts OpenAI image_url to :8080 and
+  # asks for model "vision" (LlmTiers.Vision). Qwen3-VL-8B-Instruct + its mmproj, full GPU (~7GB).
+  # Installed by setup.ps1 -Vision. Use the INSTRUCT (not Thinking) variant — chain-of-thought
+  # pollutes the single-line Describe and the PASS/FAIL Verify parser.
+  # Uncensored fallback: drop an abliterated Qwen2.5-VL GGUF + its mmproj into models\ and point
+  # the -m/--mmproj below at them (same "vision" name, same :8080 path).
+  # NOTE: confirm this llama.cpp build has Qwen3-VL CLIP support by loading one real image; if it
+  # errors with a tensor/clip mismatch, bump llama.cpp (itself an eval-gated change in this repo).
+  "vision":
+    cmd: |
+      __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+      -m __DOKI_ROOT__\models\Qwen3-VL-8B-Instruct-Q4_K_M.gguf
+      --mmproj __DOKI_ROOT__\models\Qwen3-VL-8B-mmproj-F16.gguf
+      --port ${PORT}
+      -ngl 99
+      -c 16384
+      --flash-attn on
+      --jinja
+
+  # ---- Bake-off candidates (COMMENTED OUT; the field moved since the last refresh — see docs/decisions.md).
+  # Download with `setup.ps1 -LlmCandidates`, uncomment one, then gate it through serving\test-toolcall.ps1 +
+  # evals\run-suite.ps1 BEFORE making it a tier model (>=91% golden AND zero tool-call flakes). Run text-only
+  # with /no_think — the Qwen3.6 models are multimodal + thinking-by-default; mmproj omitted on purpose.
+  #
+  # "coder-candidate":            # Qwen3.6-27B dense (lead — dense tool-calls historically steadier)
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\Qwen3.6-27B-UD-Q4_K_XL.gguf
+  #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cache-reuse 256 --jinja
+  #
+  # "coder-candidate-a3b":        # Qwen3.6-35B-A3B (keeps the 3B-active speed; "mixed tool-call" reports — measure)
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+  #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cache-reuse 256 --jinja
+  #
+  # "heavy-candidate":            # Qwen3-Coder-Next-80B-A3B (FULL 80B, NOT the rejected REAP-48B prune) vs gpt-oss-120b
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\Qwen3-Coder-Next-80B-A3B-Q4_K_XL.gguf
+  #     --port ${PORT} -ngl 99 --n-cpu-moe 18 -c 131072 -b 2048 -ub 2048 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cache-reuse 256 --jinja

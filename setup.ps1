@@ -17,6 +17,8 @@ param(
     [switch]$Demucs,    # optional audio-tools sidecar: stem separation (vocals/drums/bass/other) via Demucs
     [switch]$Sam,       # optional sidecar: Segment-Anything point segmentation (semantic click->mask in the edit canvas)
     [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
+    [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
+    [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
                         # so don't install the .NET SDK to rebuild it — only -Media needs the SDK (SwarmUI).
     [ValidateSet("lean", "full")][string]$Models = "lean"
@@ -130,6 +132,40 @@ else {
     curl.exe -L --fail --retry 3 -o "$embedGguf.part" "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
     if ($LASTEXITCODE -eq 0) { Move-Item -Force "$embedGguf.part" $embedGguf; Ok "embed model downloaded" }
     else { Remove-Item "$embedGguf.part" -Force -ErrorAction SilentlyContinue; Warn "embed model download failed — code_search stays off until it's present" }
+}
+
+# Self-contained GGUF fetcher (Get-Model is defined later, in the media section; this works anywhere).
+function Fetch-Gguf($url, $dest) {
+    if (Test-Path $dest) { Ok "have $(Split-Path $dest -Leaf)"; return }
+    New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+    Info "downloading $(Split-Path $dest -Leaf) ..."
+    curl.exe -L --fail --retry 3 -o "$dest.part" $url
+    if ($LASTEXITCODE -eq 0) { Move-Item -Force "$dest.part" $dest; Ok "downloaded $(Split-Path $dest -Leaf)" }
+    else { Remove-Item "$dest.part" -Force -ErrorAction SilentlyContinue; Warn "download failed: $url" }
+}
+
+# ---- Vision model (optional): lights up the studio's Describe (image->prompt) + Verify (output-QA) ----
+# Served by llama-swap as the "vision" model on :8080 (the in-app code already targets it). Use INSTRUCT, not
+# Thinking. If Qwen3-VL CLIP fails to load on this llama.cpp build, drop an abliterated Qwen2.5-VL GGUF+mmproj
+# into models\ with the same filenames (uncensored fallback) and/or bump llama.cpp.
+if ($Vision) {
+    Info "Vision model (Qwen3-VL-8B-Instruct + mmproj, ~7GB)"
+    $mdir = Join-Path $root "models"
+    Fetch-Gguf "https://huggingface.co/unsloth/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3-VL-8B-Instruct-Q4_K_M.gguf" (Join-Path $mdir "Qwen3-VL-8B-Instruct-Q4_K_M.gguf")
+    Fetch-Gguf "https://huggingface.co/unsloth/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-F16.gguf"                 (Join-Path $mdir "Qwen3-VL-8B-mmproj-F16.gguf")
+    Info "Vision ready: confirm by loading one image (Describe in the Library); if it errors with a clip/tensor mismatch, bump llama.cpp."
+}
+
+# ---- LLM bake-off candidates (optional, large): the coder/heavy challengers to eval vs the incumbents ----
+# After download, uncomment the matching block in serving\llama-swap.yaml, then gate via serving\test-toolcall.ps1
+# + evals\run-suite.ps1 (>=91% golden AND zero tool-call flakes) BEFORE making it a tier model. Run text-only.
+if ($LlmCandidates) {
+    Info "LLM bake-off candidates (Qwen3.6-27B / Qwen3.6-35B-A3B / Qwen3-Coder-Next-80B — ~60GB total)"
+    $mdir = Join-Path $root "models"
+    Fetch-Gguf "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-UD-Q4_K_XL.gguf"                       (Join-Path $mdir "Qwen3.6-27B-UD-Q4_K_XL.gguf")
+    Fetch-Gguf "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"               (Join-Path $mdir "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf")
+    Fetch-Gguf "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF/resolve/main/Qwen3-Coder-Next-80B-A3B-Q4_K_XL.gguf"        (Join-Path $mdir "Qwen3-Coder-Next-80B-A3B-Q4_K_XL.gguf")
+    Info "Candidates downloaded. Uncomment the matching llama-swap.yaml block, then run the eval gate before adopting."
 }
 
 # ---- TTS stack: uncensored speech + zero-shot voice cloning (Chatterbox) — optional, works with or without -Media ----

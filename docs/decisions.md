@@ -294,6 +294,38 @@ non-pruned Next is 80B (RAM-offload / coder-big tier, not a coder-fast replaceme
 best 30B-class fit, now confirmed against the field. The refresh *process* is proven and
 repeatable; re-run it when a genuinely new ~30B agentic-coder GGUF appears.
 
+### LLM re-verification + speed/quality tiers + vision fill (2026-06-17)
+
+DeepSeek evaluation (two adversarial research passes, hardware pinned: RTX 5090 32GB +
+64GB DDR5 + i9-14900KS). **Verdict: do not adopt DeepSeek.** The decode-speed law under
+`n-cpu-moe` offload (tok/s ∝ 1/active-params — the same law that makes gpt-oss-120b's 5.1B
+active viable) kills it: V4-Flash (13B active) ≈ 3–5 tok/s on an *unmerged* experimental
+llama.cpp fork; the 671B/V4-Pro flagships are <2 tok/s / datacenter-only (RAM+VRAM caps at
+~96GB < the 130GB+ smallest quant — hours per answer even with time relaxed); the fitting
+distills regress tool-calls (the disqualifier class) or are degraded/2024-era; censorship is
+baked into the weights. Re-evaluate only if V4-Flash merges upstream **and** measures ≥8 tok/s
+on a single 32GB+DDR5 box with clean tool-calls.
+
+**Correction to the 2026-06-13 refresh:** the note that "Qwen3.6-35B-A3B doesn't exist
+(invented)" is now **stale** — Qwen3.6-35B-A3B shipped 2026-04-16 (Apache-2.0, public GGUFs),
+as did Qwen3.6-27B (dense) and Qwen3-Coder-Next-80B-A3B (the FULL model — only its damaged
+REAP-48B prune was ever tested here). The repo's own re-judge trigger ("a genuinely new ~30B
+agentic-coder GGUF") has fired, and the pinned llama.cpp b9616 (2026-06-15) already supports
+the qwen35moe / GLM-MoE / Qwen3-VL archs, so they're servable with no upgrade. These are
+**bake-off candidates, not adoptions** — wired commented in `serving/llama-swap.yaml` +
+downloadable via `setup.ps1 -LlmCandidates`; gate via `serving/test-toolcall.ps1` +
+`evals/run-suite.ps1` (≥91% golden AND zero tool-call flakes) before any swap.
+
+**Shipped this round (the user's "choose how fast" requirement):** a per-request **speed/quality
+tier selector** on the latency-tolerant LLM workflows (Director, pitch-deck, multi-character
+phrasing) — `LlmTiers.Resolve` maps Fast→`coder-fast` / Quality→`coder-big`, `LocalLlm` sends the
+OpenAI `model` field so llama-swap loads it; rewriter (:8013) + FIM (:8012) stay untiered. **Vision
+gap filled:** a gated `vision` block (Qwen3-VL-8B-Instruct + mmproj, `setup.ps1 -Vision`) lights up
+the already-built Describe/Verify surfaces with zero studio code change (uncensored fallback:
+abliterated Qwen2.5-VL on the same path). FIM + heavy + rewriter incumbents confirmed best-for-
+hardware (rewriter's tuned instruction is the load-bearing part; Qwen3-4B-2507 is an optional
+marginal swap, not taken). Full analysis: `.claude/plans/streamed-kindling-noodle.md`.
+
 ### Image refresh (2026-06-13): Chroma added as a 2nd uncensored image style
 
 Added **Chroma** (silveroxides Chroma1-HD-fp8, FLUX-derived, "Censored? No") alongside
