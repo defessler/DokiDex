@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -22,6 +24,13 @@ public static class LocalLlm
             new { role = "system", content = system },
             new { role = "user", content = user },
         }, temperature, maxTokens, model), ct);
+
+    // Multi-turn chat over a prebuilt OpenAI message[] (system bundle + history + user turn, assembled by the
+    // pure ChatPrompt.Build). A thin wrapper over the SAME array-based Body the one-shot ChatAsync uses, so the
+    // "not reachable, start agent mode" degradation lives in the one PostAsync. The one-shot ChatAsync/
+    // ChatVisionAsync stay untouched (Director/Rewriter/Vision/multichar keep working).
+    public static Task<ChatResult> ChatTurnsAsync(IReadOnlyList<object> messages, double temperature, int maxTokens, CancellationToken ct, string? model = null)
+        => PostAsync(Body(messages.ToArray(), temperature, maxTokens, model), ct);
 
     // Multimodal chat: a text instruction + one image (as a data: URL), in the OpenAI image_url content shape.
     // GATED — it succeeds only when the loaded llama-swap model is vision-capable; otherwise it degrades through

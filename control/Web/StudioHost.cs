@@ -289,6 +289,32 @@ public static class StudioHost
                 : Results.Json(new { error = r.Message, shots = r.Shots }, statusCode: 503);
         });
 
+        // ---- persona chat (P0, non-streaming): persistent multi-turn chat over a persona card on the local ----
+        // instruct model (:8080, agent/coexist mode). The server persists history in ChatStore, so the SPA need
+        // not resend the transcript. Mirrors the Director 503 "start agent mode first" contract verbatim: when
+        // the LLM is down the request returns 503 + the canonical message (same as Director at the shotlist endpoint).
+        api.MapPost("/chat", async (ChatRequest body, CancellationToken ct) =>
+        {
+            var r = await Chat.SendAsync(body, LlmTiers.Resolve(body.Tier), ct);
+            return r.Ok
+                ? Results.Json(new { conversation = r.ConversationId, text = r.Text })
+                : Results.Json(new { error = r.Message }, statusCode: 503);   // canonical "start agent mode first"
+        });
+
+        // ---- persona character cards (the GPTs analog, local + uncensored) — clone of /api/references ----
+        api.MapGet("/personas", () => Results.Json(Persona.List()));
+        api.MapGet("/personas/{name}", (string name) =>
+            Persona.Load(name) is { } card ? Results.Json(card) : Results.NotFound());
+        api.MapPost("/personas", (PersonaCard body) =>
+            Persona.Save(body) ? Results.Ok() : Results.BadRequest(new { error = "bad persona name" }));
+        api.MapDelete("/personas/{name}", (string name) => Persona.Delete(name) ? Results.Ok() : Results.NotFound());
+
+        // ---- persisted conversations (server-generated id => no client path => no traversal) — clone of /api/searches ----
+        api.MapGet("/chats", () => Results.Json(ChatStore.List()));
+        api.MapGet("/chats/{id}", (string id) =>
+            ChatStore.Load(id) is { } conv ? Results.Json(conv) : Results.NotFound());
+        api.MapDelete("/chats/{id}", (string id) => ChatStore.Delete(id) ? Results.Ok() : Results.NotFound());
+
         // ---- multi-character composer (base scene + isolated per-character regions -> one raw SwarmUI prompt) ----
         // Pure compile (no GPU); the SPA generates the result via /api/generate with raw=true so the <object:..>
         // regional tags reach SwarmUI unrewritten.

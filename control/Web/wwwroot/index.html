@@ -70,6 +70,12 @@
     .mode{background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--dim);padding:10px 16px;cursor:pointer;min-width:120px;text-align:left}
     .mode.active{border-left:2px solid var(--cyan);color:var(--text);background:var(--surface)}
     .mode small{display:block;color:var(--dim);font-size:10px;margin-top:2px}
+    /* chat view */
+    #chatLog{display:flex;flex-direction:column;gap:10px;max-height:52vh;overflow-y:auto;padding:6px 2px;margin:10px 0}
+    .bub{max-width:80%;padding:9px 13px;border-radius:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+    .bub.user{align-self:flex-end;background:var(--surface3);border:1px solid var(--border)}
+    .bub.assistant{align-self:flex-start;background:var(--surface2);border:1px solid var(--border)}
+    .bub.assistant.err{border-color:var(--gold);color:var(--gold)}
   </style>
 </head>
 <body>
@@ -78,6 +84,7 @@
     <nav>
       <button id="nav-create" class="on" onclick="setView('create')">Create</button>
       <button id="nav-director" onclick="setView('director')">Director</button>
+      <button id="nav-chat" onclick="setView('chat')">Chat</button>
       <button id="nav-cast" onclick="setView('cast')">Cast</button>
       <button id="nav-voice" onclick="setView('voice')">Voice</button>
       <button id="nav-flow" onclick="setView('flow')">Flow</button>
@@ -218,6 +225,35 @@
       </div>
       <div class="grid" id="shots"></div>
     </section>
+    <section id="view-chat" style="display:none">
+      <h2>Chat</h2>
+      <p class="hint">Persona-first local assistant (uncensored, agent mode). Multi-turn, persisted on disk · Ctrl+Enter to send.</p>
+      <div id="chatGuard"></div>
+      <div class="mods" style="align-items:center">
+        <label>Persona <select id="chatPersona" class="kin" style="width:auto"><option value="">default</option></select></label>
+        <label>Conversation <select id="chatThread" class="kin" style="width:auto" onchange="openThread(this.value)"><option value="">— new —</option></select></label>
+        <button class="ghost" onclick="newChat()">+ New chat</button>
+      </div>
+      <details style="margin:4px 0 8px">
+        <summary class="hint" style="cursor:pointer">+ new persona</summary>
+        <div class="row" style="align-items:flex-start;gap:8px;margin-top:6px">
+          <input id="newPersonaName" class="kin" style="width:200px" placeholder="name">
+          <textarea id="newPersonaSystem" class="kin" style="flex:1;min-height:60px" placeholder="system / behavior (uncensored)"></textarea>
+          <button class="ghost" onclick="savePersona()">Save</button>
+          <span class="hint" id="newPersonaHint"></span>
+        </div>
+      </details>
+      <div id="chatLog"></div>
+      <div class="row" style="align-items:flex-start;margin-top:8px">
+        <textarea id="chatInput" placeholder="Message…  (Ctrl+Enter to send)" style="flex:1;min-height:72px"></textarea>
+      </div>
+      <div class="mods" style="align-items:center;margin-top:6px">
+        <label title="fast = the interactive coder model; quality = the heavy model (slower, stronger), swapped in on demand">Speed <select id="chatTier" class="kin" style="width:auto"><option value="fast">fast</option><option value="quality">quality · slower</option></select></label>
+        <button class="primary" onclick="sendChat()">Send</button>
+        <button class="ghost" onclick="newChat()">New</button>
+        <span class="hint" id="chatHint"></span>
+      </div>
+    </section>
     <section id="view-cast" style="display:none">
       <h2>Cast — multi-character composer</h2>
       <p class="hint">Base scene holds the count tags + style. Each character gets an isolated prompt + a coarse position, compiled to SwarmUI regions to stop attribute bleed.</p>
@@ -335,10 +371,10 @@
     const KINDS = ['image','video','music','edit','i2v','foley'];
     const MODS = [['fast','Fast'],['refine','Refine'],['face','Face'],['realism','Realism'],['upscale','Upscale']];
     const VIDEO = new Set(['video','i2v','foley']);
-    let state = { view:'create', kind:'image', mods:{}, mediaActive:false, initImage:null };
+    let state = { view:'create', kind:'image', mods:{}, mediaActive:false, llmActive:false, initImage:null };
 
     function setView(v){ state.view=v;
-      for (const x of ['create','director','cast','voice','flow','scene','status','library','models']) {
+      for (const x of ['create','director','chat','cast','voice','flow','scene','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
@@ -347,6 +383,7 @@
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
+      if (v==='chat') { loadPersonas(); loadThreads(); renderChatGuard(); document.getElementById('chatInput').focus(); }
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];
@@ -1183,6 +1220,86 @@
       b.querySelector('button').onclick = async()=>{ await fetch('/api/mode/media',{method:'POST'}); };
       el.appendChild(b);
     }
+    // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
+    let _chatMsgs=[], _chatConv=null;
+    function appendBubble(role,text){ const log=document.getElementById('chatLog');
+      const b=$(`<div class="bub ${role}"></div>`); b.textContent=text||''; log.appendChild(b); log.scrollTop=log.scrollHeight; return b; }
+    function renderThread(conv){
+      _chatConv=conv?conv.id:null; _chatMsgs=(conv&&conv.messages)?conv.messages.map(m=>({role:m.role,content:m.content})):[];
+      const log=document.getElementById('chatLog'); log.innerHTML='';
+      _chatMsgs.forEach(m=>appendBubble(m.role==='assistant'?'assistant':'user', m.content));
+      document.getElementById('chatHint').textContent='';
+    }
+    async function loadPersonas(){
+      const sel=document.getElementById('chatPersona'); const cur=sel.value;
+      try{ const list=await (await fetch('/api/personas')).json();
+        sel.innerHTML='<option value="">default</option>';
+        (list||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.name; o.textContent=c.name; sel.appendChild(o); });
+        sel.value=cur;
+      }catch{}
+    }
+    async function savePersona(){
+      const name=document.getElementById('newPersonaName').value.trim();
+      const system=document.getElementById('newPersonaSystem').value.trim();
+      const h=document.getElementById('newPersonaHint');
+      if(!name){ h.textContent='name it first'; return; }
+      try{
+        // PersonaCard body (case-insensitive bind); P0 collects name + system only — the rest stay null/empty.
+        const r=await fetch('/api/personas',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({name, system, persona:'', greeting:'', examples:''})});
+        if(!r.ok){ h.textContent='bad persona name'; return; }
+        const sel=document.getElementById('chatPersona'); sel.value=name;   // preserved across loadPersonas()
+        await loadPersonas();
+        h.textContent='saved '+esc(name); document.getElementById('newPersonaName').value=''; document.getElementById('newPersonaSystem').value='';
+      }catch{ h.textContent='save failed'; }
+    }
+    async function loadThreads(){
+      const sel=document.getElementById('chatThread');
+      try{ const list=await (await fetch('/api/chats')).json();
+        sel.innerHTML='<option value="">— new —</option>';
+        (list||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=(c.persona?esc(c.persona)+' · ':'')+c.id; sel.appendChild(o); });
+        sel.value=_chatConv||'';
+      }catch{}
+    }
+    async function openThread(id){
+      if(!id){ newChat(); return; }
+      try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
+    }
+    function newChat(){ _chatMsgs=[]; _chatConv=null; document.getElementById('chatLog').innerHTML='';
+      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; }
+    function renderChatGuard(){
+      const el=document.getElementById('chatGuard'); if(!el) return;
+      if(state.llmActive){ el.innerHTML=''; return; }
+      el.innerHTML='';
+      const b=$(`<div class="banner"><span>The GPU is in MEDIA mode — chat needs AGENT.</span><button class="ghost">Switch to AGENT</button></div>`);
+      b.querySelector('button').onclick=async()=>{ await fetch('/api/mode/agent',{method:'POST'}); };
+      el.appendChild(b);
+    }
+    function waitForLlm(maxSec){ return new Promise(res=>{ let n=0; const t=setInterval(()=>{ if(state.llmActive){clearInterval(t);res(true);} else if(++n>=maxSec){clearInterval(t);res(false);} },1000); }); }
+    async function ensureLlm(){
+      if(state.llmActive) return true;
+      if(!confirm("The GPU is in MEDIA mode. Switch to AGENT now (this stops SwarmUI / image+video) and chat?")) return false;
+      try{ await fetch('/api/mode/agent',{method:'POST'}); }catch{}
+      const ok=await waitForLlm(90);
+      renderChatGuard();   // clear the stale MEDIA banner immediately, don't wait for the next pollStatus tick
+      return ok;
+    }
+    async function sendChat(){
+      const inp=document.getElementById('chatInput'), hint=document.getElementById('chatHint');
+      const text=inp.value.trim(); if(!text) return;
+      if(!await ensureLlm()){ hint.textContent='chat needs AGENT mode'; return; }
+      appendBubble('user',text); _chatMsgs.push({role:'user',content:text}); inp.value=''; hint.textContent='thinking…';
+      try{
+        const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
+            message:text, tier:document.getElementById('chatTier').value})});
+        const j=await r.json();
+        if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
+        const fresh = !_chatConv;
+        _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
+        if(fresh) loadThreads();
+      }catch{ hint.textContent='request failed'; }
+    }
     function svcCard(s){
       const cls = !s.installed?'off':(s.running&&s.healthy?'ok':(s.running?'warn':'off'));
       const st = !s.installed?'not installed':(s.running?(s.healthy?'healthy':'starting…'):'stopped');
@@ -1193,9 +1310,10 @@
       try {
         const r = await fetch('/api/status');
         const pill = document.getElementById('gpuPill');
-        if(r.status===503){ state.mediaActive=false; renderGuard(); pill.textContent=''; document.getElementById('statusBody').innerHTML='<p class="hint">DokiDex home not found.</p>'; return; }
+        if(r.status===503){ state.mediaActive=false; renderGuard(); state.llmActive=false; renderChatGuard(); pill.textContent=''; document.getElementById('statusBody').innerHTML='<p class="hint">DokiDex home not found.</p>'; return; }
         const doc = await r.json(); const gpu=doc.gpu||{}; const active=gpu.activeGroup||'none';
         state.mediaActive = active==='media'; renderGuard();
+        state.llmActive = active==='llm'; renderChatGuard();
         pill.innerHTML = `GPU <b>${active.toUpperCase()}</b> · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
         // status view
         const modes=document.getElementById('modes'); modes.innerHTML='';
@@ -1211,6 +1329,7 @@
       } catch(e){}
     }
     document.getElementById('prompt').addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); generate(); } });
+    document.getElementById('chatInput').addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); sendChat(); } });
     document.addEventListener('keydown', libKey);   // Library keyboard triage (F/X/U + arrows)
     // ---- keyboard-first map (one consolidated set across views) ----
     function toggleKeyHelp(){
