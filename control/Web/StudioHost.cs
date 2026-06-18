@@ -230,7 +230,7 @@ public static class StudioHost
             }
             if (scenes.Count == 0) return Results.Json(new { error = "no images in the library yet" }, statusCode: 400);
             var cast = References.Entries().Select(r => new DeckCast(r.Name, r.Text)).ToList();
-            var deck = await PitchDeck.ComposeAsync(body.Title, scenes, cast, ct);
+            var deck = await PitchDeck.ComposeAsync(body.Title, scenes, cast, ct, LlmTiers.Resolve(body.Tier));
             var html = System.Text.Encoding.UTF8.GetBytes(PitchDeck.BuildHtml(deck));
             return Results.File(html, "text/html; charset=utf-8", "pitch-deck.html");
         });
@@ -283,7 +283,7 @@ public static class StudioHost
         // in media mode (the shotlist survives the GPU switch). Returns a clean message when the LLM is down.
         api.MapPost("/director/shotlist", async (DirectorRequest body, CancellationToken ct) =>
         {
-            var r = await Director.StoryboardAsync(body.Idea ?? "", body.Shots, ct);
+            var r = await Director.StoryboardAsync(body.Idea ?? "", body.Shots, ct, LlmTiers.Resolve(body.Tier));
             return r.Ok
                 ? Results.Json(new { shots = r.Shots })
                 : Results.Json(new { error = r.Message, shots = r.Shots }, statusCode: 503);
@@ -292,7 +292,23 @@ public static class StudioHost
         // ---- multi-character composer (base scene + isolated per-character regions -> one raw SwarmUI prompt) ----
         // Pure compile (no GPU); the SPA generates the result via /api/generate with raw=true so the <object:..>
         // regional tags reach SwarmUI unrewritten.
-        api.MapPost("/compose/multichar", (MultiCharSpec body) => Results.Json(new { prompt = MultiCharacter.Compile(body) }));
+        api.MapPost("/compose/multichar", async (MultiCharSpec body, CancellationToken ct) =>
+        {
+            var spec = body;
+            var model = LlmTiers.Resolve(body.Tier);
+            var rel = (body.Relationship ?? "").Trim();
+            // Optional: route the relationship through the LLM at the chosen tier into a vivid interaction phrase.
+            // No tier => literal text (the pure default); LLM down => falls back to literal too.
+            if (model is not null && rel.Length > 0)
+            {
+                const string sys = "Rewrite the user's character interaction into ONE vivid, concrete scene-action phrase "
+                    + "for an image prompt (who does what to whom — posture, contact, expression). Output ONLY the phrase "
+                    + "— no preamble, no quotes, keep the names.";
+                var chat = await LocalLlm.ChatAsync(sys, rel, 0.7, 120, ct, model).ConfigureAwait(false);
+                if (chat.Ok && !string.IsNullOrWhiteSpace(chat.Text)) spec = body with { Relationship = Rewriter.CleanRewrite(chat.Text) };
+            }
+            return Results.Json(new { prompt = MultiCharacter.Compile(spec) });
+        });
 
         // ---- camera compiler (structured cinematography -> a prompt phrase for video/i2v; pure, no GPU) ----
         api.MapPost("/compose/camera", (CameraSpec body) => Results.Json(new { phrase = Camera.Phrase(body) }));

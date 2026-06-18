@@ -21,7 +21,7 @@ public static class Vision
         const string sys = "You caption images for an image-generation studio. Look at the image and write ONE vivid "
             + "generation prompt that would recreate it — subject, style, composition, lighting, palette. "
             + "Output ONLY the prompt: no preamble, no commentary, no quotes, no code fence.";
-        var chat = await LocalLlm.ChatVisionAsync(sys, "Describe this image as a generation prompt.", imageDataUrl, 0.4, 400, ct).ConfigureAwait(false);
+        var chat = await LocalLlm.ChatVisionAsync(sys, "Describe this image as a generation prompt.", imageDataUrl, 0.4, 400, ct, LlmTiers.Vision).ConfigureAwait(false);
         if (!chat.Ok) return chat;
         var cleaned = Rewriter.CleanRewrite(chat.Text);
         return cleaned.Length == 0
@@ -34,7 +34,7 @@ public static class Vision
         const string sys = "You verify whether a generated image matches its prompt for a QA pass. Reply with a single "
             + "line beginning 'PASS:' if the key subjects and requested attributes are present, or 'FAIL:' if "
             + "something important is missing or wrong, followed by a terse reason. Nothing else.";
-        var chat = await LocalLlm.ChatVisionAsync(sys, $"Prompt: {prompt}\nDoes the image match the prompt?", imageDataUrl, 0.2, 200, ct).ConfigureAwait(false);
+        var chat = await LocalLlm.ChatVisionAsync(sys, $"Prompt: {prompt}\nDoes the image match the prompt?", imageDataUrl, 0.2, 200, ct, LlmTiers.Vision).ConfigureAwait(false);
         return chat.Ok ? (true, ParseVerdict(chat.Text), null) : (false, null, chat.Error);
     }
 

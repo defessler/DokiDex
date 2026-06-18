@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace DokiDex.Web;
 
-public sealed record PitchDeckRequest(string? Title, List<string>? Names);
+public sealed record PitchDeckRequest(string? Title, List<string>? Names, string? Tier = null);
 public sealed record DeckScene(string Prompt, string ImageSrc, string Kind);
 public sealed record DeckCast(string Name, string Profile);
 public sealed record Deck(string Title, string Logline, string Synopsis, List<DeckScene> Scenes, List<DeckCast> Cast);
@@ -39,7 +39,7 @@ public static class PitchDeck
         return (log, syn);
     }
 
-    public static async Task<Deck> ComposeAsync(string? title, IReadOnlyList<DeckScene> scenes, IReadOnlyList<DeckCast> cast, CancellationToken ct)
+    public static async Task<Deck> ComposeAsync(string? title, IReadOnlyList<DeckScene> scenes, IReadOnlyList<DeckCast> cast, CancellationToken ct, string? model = null)
     {
         var t = string.IsNullOrWhiteSpace(title) ? "Untitled Project" : title.Trim();
         string logline = "", synopsis = "";
@@ -49,7 +49,7 @@ public static class PitchDeck
                 + "one-sentence LOGLINE and a one-paragraph SYNOPSIS. Reply EXACTLY as two lines:\n"
                 + "LOGLINE: <one sentence>\nSYNOPSIS: <one paragraph>";
             var user = "Scene prompts:\n" + string.Join("\n", scenes.Select((s, i) => $"{i + 1}. {s.Prompt}"));
-            var chat = await LocalLlm.ChatAsync(sys, user, 0.7, 500, ct).ConfigureAwait(false);
+            var chat = await LocalLlm.ChatAsync(sys, user, 0.7, 500, ct, model).ConfigureAwait(false);
             if (chat.Ok) (logline, synopsis) = ParseProse(chat.Text);
         }
         return new Deck(t, logline, synopsis, scenes.ToList(), cast.ToList());

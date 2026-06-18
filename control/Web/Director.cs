@@ -6,8 +6,8 @@ namespace DokiDex.Web;
 // One shot in a storyboard: an ordered title + a ready-to-generate image prompt.
 public sealed record Shot(int Index, string Title, string Prompt);
 
-// A browser request to storyboard an idea into N shots.
-public sealed record DirectorRequest(string? Idea, int Shots = 6);
+// A browser request to storyboard an idea into N shots. Tier = the speed/quality model (LlmTiers).
+public sealed record DirectorRequest(string? Idea, int Shots = 6, string? Tier = null);
 
 // The script-to-shotlist director. Turns a one-line idea or a script into an ordered list of shot prompts by
 // asking the local instruct model (llama-swap, OpenAI-compatible /v1/chat/completions on :8080 — up in agent/
@@ -21,7 +21,7 @@ public static class Director
 {
     public sealed record Result(bool Ok, IReadOnlyList<Shot> Shots, string? Message);
 
-    public static async Task<Result> StoryboardAsync(string idea, int shots, CancellationToken ct)
+    public static async Task<Result> StoryboardAsync(string idea, int shots, CancellationToken ct, string? model = null)
     {
         idea = (idea ?? "").Trim();
         if (idea.Length == 0) return new Result(false, Array.Empty<Shot>(), "empty idea");
@@ -32,7 +32,7 @@ public static class Director
                 + $"exactly {shots} objects, each {{\"title\": <a few words>, \"prompt\": <a detailed, standalone "
                 + "image-generation prompt describing the shot: subject, setting, framing, lighting, mood>}}.";
 
-        var chat = await LocalLlm.ChatAsync(sys, idea, temperature: 0.7, maxTokens: 2048, ct).ConfigureAwait(false);
+        var chat = await LocalLlm.ChatAsync(sys, idea, temperature: 0.7, maxTokens: 2048, ct, model).ConfigureAwait(false);
         if (!chat.Ok) return new Result(false, Array.Empty<Shot>(), chat.Error);
 
         var parsed = ParseShotlist(chat.Text);

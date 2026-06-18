@@ -7,8 +7,9 @@ namespace DokiDex.Web;
 // 0..24, row-major; -1 = unplaced -> no region box).
 public sealed record CharacterSpec(string Prompt, int Cell = -1);
 
-// A multi-character scene to compose.
-public sealed record MultiCharSpec(string? Base, List<CharacterSpec>? Characters, string? Relationship);
+// A multi-character scene to compose. Tier (optional) routes the relationship phrase through the LLM at the
+// chosen speed/quality model (LlmTiers); null keeps the literal relationship text (the pure default).
+public sealed record MultiCharSpec(string? Base, List<CharacterSpec>? Characters, string? Relationship, string? Tier = null);
 
 // The Multi-Character Directorial Composer's pure core: compile a base scene prompt + up to 6 isolated
 // per-character prompts (each pinned to a coarse 5x5 grid cell) into ONE SwarmUI prompt string that uses

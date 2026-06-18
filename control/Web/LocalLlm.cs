@@ -14,36 +14,42 @@ public static class LocalLlm
 
     public sealed record ChatResult(bool Ok, string Text, string? Error);
 
-    public static Task<ChatResult> ChatAsync(string system, string user, double temperature, int maxTokens, CancellationToken ct)
-        => PostAsync(new
+    // `model` (optional) selects which llama-swap model serves the request — the speed/quality TIER (see
+    // LlmTiers). Null omits the field entirely, preserving the pre-tier behavior (llama-swap's loaded default).
+    public static Task<ChatResult> ChatAsync(string system, string user, double temperature, int maxTokens, CancellationToken ct, string? model = null)
+        => PostAsync(Body(new object[]
         {
-            messages = new object[]
-            {
-                new { role = "system", content = system },
-                new { role = "user", content = user },
-            },
-            temperature,
-            max_tokens = maxTokens,
-        }, ct);
+            new { role = "system", content = system },
+            new { role = "user", content = user },
+        }, temperature, maxTokens, model), ct);
 
     // Multimodal chat: a text instruction + one image (as a data: URL), in the OpenAI image_url content shape.
     // GATED — it succeeds only when the loaded llama-swap model is vision-capable; otherwise it degrades through
     // the same not-reachable/error path as text chat. Powers Describe (image->prompt) and output verification.
-    public static Task<ChatResult> ChatVisionAsync(string system, string userText, string imageDataUrl, double temperature, int maxTokens, CancellationToken ct)
-        => PostAsync(new
+    // Pass `model` = LlmTiers.Vision so llama-swap loads the dedicated vision block.
+    public static Task<ChatResult> ChatVisionAsync(string system, string userText, string imageDataUrl, double temperature, int maxTokens, CancellationToken ct, string? model = null)
+        => PostAsync(Body(new object[]
         {
-            messages = new object[]
+            new { role = "system", content = system },
+            new { role = "user", content = new object[]
             {
-                new { role = "system", content = system },
-                new { role = "user", content = new object[]
-                {
-                    new { type = "text", text = userText },
-                    new { type = "image_url", image_url = new { url = imageDataUrl } },
-                }},
-            },
-            temperature,
-            max_tokens = maxTokens,
-        }, ct);
+                new { type = "text", text = userText },
+                new { type = "image_url", image_url = new { url = imageDataUrl } },
+            }},
+        }, temperature, maxTokens, model), ct);
+
+    // Build the request body, including the OpenAI "model" field only when a tier model is named.
+    private static Dictionary<string, object?> Body(object[] messages, double temperature, int maxTokens, string? model)
+    {
+        var b = new Dictionary<string, object?>
+        {
+            ["messages"] = messages,
+            ["temperature"] = temperature,
+            ["max_tokens"] = maxTokens,
+        };
+        if (!string.IsNullOrWhiteSpace(model)) b["model"] = model;
+        return b;
+    }
 
     private static async Task<ChatResult> PostAsync(object body, CancellationToken ct)
     {

@@ -212,6 +212,7 @@
       <textarea id="dirIdea" placeholder="A lone astronaut explores a derelict space station and discovers it isn't empty…"></textarea>
       <div class="mods">
         <label>Shots <input id="dirShots" type="number" value="6" min="1" max="20" class="kin" style="width:54px"></label>
+        <label title="fast = the interactive coder model; quality = the heavy model (slower, stronger), swapped in on demand">Speed <select id="dirTier" class="kin" style="width:auto"><option value="fast">fast</option><option value="quality">quality · slower</option></select></label>
         <button class="primary" id="dirBtn" onclick="storyboard()">Storyboard</button>
         <span class="hint" id="dirHint"></span>
       </div>
@@ -225,6 +226,7 @@
       <div class="mods">
         <button class="ghost" onclick="addCastChar()">+ character</button>
         <input id="castRel" class="kin" style="width:280px" placeholder="relationship (optional): A hugs B">
+        <label title="literal = use the relationship text as-is; enhance routes it through the LLM at the chosen speed for a vivid interaction phrase">phrasing <select id="castTier" class="kin" style="width:auto"><option value="">literal</option><option value="fast">enhance · fast</option><option value="quality">enhance · quality</option></select></label>
       </div>
       <div class="row" style="margin-top:8px">
         <button class="primary" onclick="composeCast()">Compose &amp; preview</button>
@@ -293,6 +295,7 @@
           <option value="active">active</option><option value="all">all</option><option value="fav">★ favorites</option><option value="untriaged">untriaged</option><option value="trash">🗑 trash</option>
         </select>
         <button class="ghost" onclick="exportDeck()" title="self-contained HTML story bible (logline/synopsis need a loaded LLM)">story bible</button>
+        <select id="deckTier" class="kin" style="width:auto" title="LLM speed for the logline/synopsis"><option value="fast">fast</option><option value="quality">quality · slower</option></select>
         <button class="ghost" onclick="joinClips()" title="concatenate the shown video clips (oldest→newest) into one — needs ffmpeg">join clips</button>
       </div>
       <div class="mods" style="margin-top:-2px;align-items:center">
@@ -934,7 +937,8 @@
       const title = prompt('Project title for the story bible:', 'My Project'); if(title===null) return;
       const names = _libItems.filter(it=>it.kind==='image'||it.kind==='edit').map(it=>it.name);
       try{
-        const r=await fetch('/api/pitchdeck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,names})});
+        const tier=document.getElementById('deckTier')?.value||'fast';
+        const r=await fetch('/api/pitchdeck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,names,tier})});
         if(!r.ok){ const j=await r.json().catch(()=>({})); alert(j.error||'export failed'); return; }
         const blob=await r.blob(); const u=URL.createObjectURL(blob);
         const a=document.createElement('a'); a.href=u; a.download='pitch-deck.html'; a.click(); URL.revokeObjectURL(u);
@@ -1045,7 +1049,8 @@
       hint.textContent='storyboarding…'; out.innerHTML='';
       try{
         const shots=parseInt(document.getElementById('dirShots').value)||6;
-        const r=await fetch('/api/director/shotlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea,shots})});
+        const tier=document.getElementById('dirTier').value;
+        const r=await fetch('/api/director/shotlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea,shots,tier})});
         const j=await r.json().catch(()=>({}));
         if(!r.ok){ hint.textContent=j.error||('error '+r.status); return; }
         const list=j.shots||[];
@@ -1151,7 +1156,7 @@
       });
     }
     function addCastChar(){ if(castChars.length>=6){ document.getElementById('castHint').textContent='max 6 characters'; return; } castChars.push({prompt:'',cell:12}); renderCast(); }
-    function castSpec(){ return { base:document.getElementById('castBase').value, characters:castChars.filter(c=>c.prompt.trim()).map(c=>({prompt:c.prompt,cell:c.cell})), relationship:document.getElementById('castRel').value }; }
+    function castSpec(){ return { base:document.getElementById('castBase').value, characters:castChars.filter(c=>c.prompt.trim()).map(c=>({prompt:c.prompt,cell:c.cell})), relationship:document.getElementById('castRel').value, tier:document.getElementById('castTier').value }; }
     async function composeCast(){
       const hint=document.getElementById('castHint'), out=document.getElementById('castOut');
       try{
