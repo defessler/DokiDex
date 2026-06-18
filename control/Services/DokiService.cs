@@ -121,8 +121,11 @@ public sealed class DokiService
         var args = new List<string>(GenCli.BuildArgs(req)) { "-BodyOnly" };
         var (ok, stdout, _) = await CaptureFullAsync(args, TimeSpan.FromSeconds(60), ct).ConfigureAwait(false);
         if (!ok) return null;
-        foreach (var line in stdout.Split('\n').Reverse())
-        { var t = line.Trim(); if (t.StartsWith('{')) return t; }   // the body is the JSON line BodyOnly prints
+        // scan bottom-to-top for the JSON line BodyOnly prints (explicit reverse loop — avoids the ambiguous
+        // array .Reverse() that can bind to the void Span overload under some SDKs / Release publish).
+        var lines = stdout.Split('\n');
+        for (int i = lines.Length - 1; i >= 0; i--)
+        { var t = lines[i].Trim(); if (t.StartsWith('{')) return t; }
         return null;
     }
 
