@@ -61,7 +61,17 @@
     .pbar { height:3px; background:var(--bg); } .pbar > div { height:100%; background:var(--cyan); transition:width .3s; }
     /* live canvas (slice 1): single-slot img2img preview pane next to the sketch */
     .livewrap { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; margin-top:6px; }
-    .livepane { position:relative; width:384px; max-width:100%; aspect-ratio:3/2; background:var(--bg); border:1px solid var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    /* Edit surface: one tab strip routing Sketch / Inpaint / Outpaint into a single grouped region. */
+    .edittabs { display:flex; gap:6px; margin:6px 0 2px; }
+    .edittab { background:var(--surface2); border:1px solid var(--border); color:var(--dim); border-radius:6px 6px 0 0; padding:5px 14px; font-size:12px; cursor:pointer; }
+    .edittab.on { color:var(--text); background:var(--surface); border-bottom-color:var(--surface); }
+    .edittab.muted { opacity:.4; cursor:not-allowed; pointer-events:none; }
+    :root { --livepane-w:384px; }
+    .livepane { position:relative; width:var(--livepane-w, 384px); max-width:100%; aspect-ratio:3/2; background:var(--bg); border:1px solid var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    /* resize-grip: drag the bottom-right corner to set --livepane-w (height tracks via aspect-ratio). */
+    .resize-grip { position:absolute; right:0; bottom:0; width:16px; height:16px; cursor:nwse-resize; touch-action:none; z-index:3;
+      background:linear-gradient(135deg, transparent 0 50%, var(--dim) 50% 60%, transparent 60% 70%, var(--dim) 70% 80%, transparent 80%); opacity:.6; }
+    .resize-grip:hover { opacity:1; }
     .livepane img { width:100%; height:100%; object-fit:contain; display:block; }
     .livepane .ph { color:var(--dim); font-size:12px; padding:0 16px; text-align:center; }
     .livebadge { position:absolute; top:6px; right:6px; display:none; align-items:center; gap:6px; font-size:10px; font-family:"Cascadia Mono",Consolas,monospace; color:var(--cyan); background:rgba(0,0,0,.55); border-radius:6px; padding:3px 8px; }
@@ -195,6 +205,13 @@
         <label>×<select id="interpMult" class="kin" style="width:auto"><option>2</option><option>4</option></select></label>
         <label id="videoQualityLabel" style="display:none" title="quality: Wan 2.2 A14B dual-expert (GGUF Q4) — bigger, sharper, slower. Off = fast Wan 2.2 TI2V-5B (default)."><input id="videoQuality" type="checkbox"> quality <span class="hint">(slower)</span></label>
       </div>
+      <!-- Edit surface: ONE tab strip routing Sketch / Inpaint / Outpaint into the grouped region below. Tabs only
+           toggle which inner box shows (display) — they never move/resize/clear the sketch canvas. -->
+      <div class="edittabs" id="editTabs" style="display:none">
+        <button class="edittab" id="tab-sketch" onclick="setEditMode('sketch')">Sketch</button>
+        <button class="edittab" id="tab-inpaint" onclick="setEditMode('inpaint')" title="paint a region to change (needs an init image in Edit kind)">Inpaint</button>
+        <button class="edittab" id="tab-outpaint" onclick="setEditMode('outpaint')" title="extend the canvas outward (needs an init image in Edit kind)">Outpaint</button>
+      </div>
       <details id="controlbox" style="display:none;margin:4px 0">
         <summary class="hint" style="cursor:pointer">ControlNet (guide structure from an image)</summary>
         <div id="cnList" style="margin-top:6px"></div>
@@ -215,6 +232,7 @@
               <div class="ph" id="livePh">Turn on <b>Live render</b> and sketch — your drawing renders here in real time.</div>
               <img id="livePane" style="display:none" alt="">
               <div class="livebadge" id="liveBadge"><div class="spinner"></div><span id="liveBadgeTxt">rendering…</span></div>
+              <div class="resize-grip" id="livePaneGrip" title="drag to resize the preview"></div>
             </div>
           </div>
         </div>
@@ -226,7 +244,10 @@
           <canvas id="maskcanvas" style="position:absolute;left:0;top:0;cursor:crosshair;opacity:0.5"></canvas>
         </div>
         <div style="margin-top:4px"><button class="xbtn" id="wandBtn" onclick="toggleWand()">magic wand: off</button> <button class="xbtn" id="samBtn" onclick="toggleSam()">SAM click: off</button> <button class="xbtn" onclick="clearMask()">clear mask</button> <button class="xbtn" onclick="invertMask()" title="swap the masked / unmasked regions">invert</button> <label class="hint" title="brush size (or scroll on the canvas)">brush <input id="brushSize" type="range" min="2" max="80" value="14" style="width:80px;vertical-align:middle" oninput="setBrush(this.value)"> <span id="brushVal">14</span></label> <button class="xbtn" onclick="removeBackground()" title="keep the masked subject, drop the rest → transparent PNG (Library)">remove bg</button> <span id="samHint" class="hint"></span></div>
-        <div style="margin-top:6px" class="row">
+      </div>
+      <div id="outpaintbox" style="display:none;margin:4px 0 12px">
+        <div class="hint" style="margin-bottom:4px">Extend the canvas outward — the new border is filled via the Edit path:</div>
+        <div class="row">
           <span class="hint">Outpaint:</span>
           <button class="xbtn" onclick="outpaint('left')" title="extend the canvas leftward and fill it">◀</button>
           <button class="xbtn" onclick="outpaint('up')">▲</button>
@@ -494,7 +515,31 @@
     const KINDS = ['image','video','music','edit','i2v','foley'];
     const MODS = [['fast','Fast'],['refine','Refine'],['face','Face'],['realism','Realism'],['upscale','Upscale']];
     const VIDEO = new Set(['video','i2v','foley']);
-    let state = { view:'create', kind:'image', mods:{}, mediaActive:false, llmActive:false, initImage:null };
+    let state = { view:'create', kind:'image', mods:{}, mediaActive:false, llmActive:false, initImage:null, editMode:'sketch' };
+    // ===== DD-PURE-BEGIN (extracted verbatim for the headless Node test in EditSurfaceTests.cs) =====
+    // Pure, DOM-free reducers. editSurface() decides which Edit-surface region shows + whether a painted mask
+    // is POSTed; clampWidth() bounds the resizable live-pane width. Keep these PURE (no document/window) so the
+    // test harness can `new Function`-eval this block and assert their truth tables.
+    function editSurface(kind, hasInit, maskDrawn, editMode){
+      const m = editMode || 'sketch';
+      const inpaintOk = kind==='edit' && !!hasInit;            // Inpaint tab is only valid for edit + an init image
+      const sketchOk  = kind==='image' || kind==='edit';        // Sketch tab is valid for the image-ish kinds
+      // Fallback so the surface never goes blank: if the active tab can't show for this kind/init, fall to sketch.
+      let eff = m;
+      if (m==='inpaint' && !inpaintOk) eff = 'sketch';
+      else if (m==='outpaint' && !inpaintOk) eff = 'sketch';   // Outpaint also needs edit+init (it inpaints a new border)
+      return {
+        showSketch:   sketchOk && eff==='sketch',
+        showInpaint:  inpaintOk && eff==='inpaint',
+        showOutpaint: inpaintOk && eff==='outpaint',
+        // mask is sent ONLY on the Inpaint tab (edit + init + something painted) — a mask left on Inpaint while
+        // the user switches to Sketch/Outpaint must NOT be POSTed.
+        sendMask:     kind==='edit' && !!hasInit && !!maskDrawn && eff==='inpaint',
+        effMode: eff
+      };
+    }
+    function clampWidth(req, containerW){ return Math.max(240, Math.min(req, Math.min(960, containerW))); }
+    // ===== DD-PURE-END =====
 
     function setView(v){ state.view=v;
       for (const x of ['create','director','chat','cast','voice','flow','scene','status','library','models']) {
@@ -583,7 +628,9 @@
     }
     function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
     function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; document.getElementById('videoQualityLabel').style.display = state.kind==='video' ? '' : 'none'; }
-    function updateControlBox(){ document.getElementById('controlbox').style.display = (state.kind==='image'||state.kind==='edit') ? '' : 'none'; }
+    // The sketch box (#controlbox) is now ONE region of the Edit surface; its visibility is owned by
+    // updateEditSurface(). Kept as a thin delegate so existing renderControls() callers stay valid.
+    function updateControlBox(){ updateEditSurface(); }
     function updateRefLabel(){ document.getElementById('refLabel').style.display = (state.initImage && (state.kind==='image'||state.kind==='edit')) ? '' : 'none'; }
     // ControlNet stacking: 1-3 units, each {model, pre, strength, image}. unit 0's image is also fed by the sketch.
     let _cnModels=[], _cnLoaded=false;
@@ -654,10 +701,32 @@
       return out.join(',');
     }
     let _maskDrawn=false, _maskDrawing=false;
-    function updateMaskBox(){
-      const show = state.kind==='edit' && !!state.initImage;
-      document.getElementById('maskbox').style.display = show ? '' : 'none';
-      if (show) setupMask();
+    // SINGLE source of truth for the Edit surface. updateMaskBox() (the historical name every caller uses) now
+    // delegates here so there is exactly ONE updateMaskBox declaration (JS hoisting made the prior duplicate win).
+    function updateMaskBox(){ updateEditSurface(); }
+    // Switch the active Edit tab (display routing only — does not move/clear the sketch canvas).
+    function setEditMode(mode){ state.editMode = mode; updateEditSurface(); }
+    // Apply the pure editSurface() reducer to the three region displays + the tab on/muted states. The tab strip
+    // is visible whenever the sketch region is relevant (image-ish kinds); Inpaint/Outpaint tabs are non-clickable
+    // (.muted -> pointer-events:none) until kind==='edit' with an init image.
+    function updateEditSurface(){
+      const inpaintOk = state.kind==='edit' && !!state.initImage;
+      const sketchOk  = state.kind==='image' || state.kind==='edit';
+      const s = editSurface(state.kind, !!state.initImage, _maskDrawn, state.editMode);
+      // The reducer's fallback may redirect to 'sketch' (e.g. Inpaint tab active but no init) — reflect that so the
+      // highlighted tab matches the shown region without clobbering the user's chosen editMode persistently.
+      const cb=document.getElementById('controlbox'); if(cb) cb.style.display = s.showSketch ? '' : 'none';
+      const mb=document.getElementById('maskbox');    if(mb) mb.style.display = s.showInpaint ? '' : 'none';
+      const ob=document.getElementById('outpaintbox');if(ob) ob.style.display = s.showOutpaint ? '' : 'none';
+      const tabs=document.getElementById('editTabs'); if(tabs) tabs.style.display = sketchOk ? '' : 'none';
+      const setTab=(id,on)=>{ const el=document.getElementById(id); if(el){ el.classList.toggle('on',on); } };
+      const mute=(id,muted)=>{ const el=document.getElementById(id); if(el){ el.classList.toggle('muted',muted); el.disabled=muted; } };
+      setTab('tab-sketch',   s.showSketch);
+      setTab('tab-inpaint',  s.showInpaint);
+      setTab('tab-outpaint', s.showOutpaint);
+      mute('tab-inpaint',  !inpaintOk);
+      mute('tab-outpaint', !inpaintOk);
+      if (s.showInpaint) setupMask();
     }
     function setupMask(){
       const img=document.getElementById('maskimg'), cv=document.getElementById('maskcanvas');
@@ -793,7 +862,9 @@
         }
         if (state.initImage) body.initImage = state.initImage;
         if (state.initImage && (state.kind==='image'||state.kind==='edit') && document.getElementById('refMode').checked) body.reference = true;
-        if (state.kind==='edit' && state.initImage && _maskDrawn) body.maskImage = document.getElementById('maskcanvas').toDataURL('image/png');
+        // Mask gate via the pure reducer: also requires the Inpaint tab is active, so a mask painted on Inpaint
+        // then left while switching to Sketch/Outpaint is NOT POSTed. (Identical to today when on the Inpaint tab.)
+        if (editSurface(state.kind, !!state.initImage, _maskDrawn, state.editMode).sendMask) body.maskImage = document.getElementById('maskcanvas').toDataURL('image/png');
         const r = await fetch('/api/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
         if(!r.ok){ const e=await r.json().catch(()=>({})); hint.textContent = 'error: '+(e.error||r.status); return; }
         hint.textContent=''; pollJobs();
@@ -2112,6 +2183,18 @@
       cv.addEventListener('pointermove',e=>{if(!drawing)return;const[nx,ny]=at(e);line(lx,ly,nx,ny);lx=nx;ly=ny;});
       window.addEventListener('pointerup',()=>{ if(drawing){ drawing=false; if(cnUnits[0]){ cnUnits[0].image=cv.toDataURL('image/png'); renderCnUnits(); } scheduleLiveRender(); } });
     })();
+    // Resizable live/preview pane: drag the bottom-right grip to set --livepane-w (height tracks via aspect-ratio).
+    // Width is CLAMPED by the pure clampWidth() and persisted to localStorage (first localStorage use).
+    function setLivepaneW(w){ document.documentElement.style.setProperty('--livepane-w', w+'px'); }
+    (function(){
+      const grip=document.getElementById('livePaneGrip'), pane=document.getElementById('livePaneWrap'); if(!grip||!pane) return;
+      let dragging=false;
+      const containerW=()=>{ const p=pane.parentElement; return (p&&p.clientWidth)||pane.clientWidth||960; };
+      grip.addEventListener('pointerdown',e=>{ dragging=true; grip.setPointerCapture&&grip.setPointerCapture(e.pointerId); e.preventDefault(); });
+      grip.addEventListener('pointermove',e=>{ if(!dragging) return; const left=pane.getBoundingClientRect().left; const w=clampWidth(Math.round(e.clientX-left), containerW()); setLivepaneW(w); });
+      const end=()=>{ if(!dragging) return; dragging=false; const w=clampWidth(Math.round(parseFloat(getComputedStyle(pane).width))||384, containerW()); setLivepaneW(w); try{ localStorage.setItem('dd.livepaneW', String(w)); }catch{} };
+      grip.addEventListener('pointerup',end); grip.addEventListener('pointercancel',end);
+    })();
     // ============================================================================================
     // Live canvas (RECOMMENDED FIRST SLICE): the EXISTING sketch canvas promoted to also drive a
     // debounced, low-denoise img2img render off its bitmap via the EXISTING /api/generate endpoint.
@@ -2157,6 +2240,7 @@
     function scheduleLiveRender(){
       if(!document.getElementById('liveCanvas').checked) return;
       if(state.view!=='create') return;
+      if(state.editMode!=='sketch') return;   // the sketch canvas is hidden off the Sketch tab — don't live-render
       clearTimeout(_liveCanvasTimer);
       _liveCanvasTimer=setTimeout(renderLive, LIVE_DEBOUNCE_MS);
     }
@@ -2166,6 +2250,7 @@
       // View guard: the newest-wins re-fire below calls renderLive() DIRECTLY (not via scheduleLiveRender), so
       // without this an off-canvas navigation while Live stays checked could fire one extra /api/generate.
       if(state.view!=='create') return;
+      if(state.editMode!=='sketch') return;   // same guard: a replayed stroke must not live-render off the Sketch tab
       const cv=document.getElementById('sketch'); if(!cv) return;
       // If a render is already in flight, just mark dirty — when it finishes we render ONCE from the latest canvas.
       if(_liveInflight){ _liveDirty=true; return; }
@@ -2224,6 +2309,8 @@
       window.addEventListener('mouseup', () => { _maskDrawing=false; });
       cv.addEventListener('wheel', e => { e.preventDefault(); setBrush(_brush + (e.deltaY<0?2:-2)); const s=document.getElementById('brushSize'); if(s) s.value=_brush; }, {passive:false});   // scroll = brush size
     })();
+    // Restore a persisted live-pane width, re-clamped against the current container (defends a stale oversized value).
+    (function(){ try{ const raw=parseFloat(localStorage.getItem('dd.livepaneW')); if(raw>0){ const p=document.getElementById('livePaneWrap'); const cw=(p&&p.parentElement&&p.parentElement.clientWidth)||960; setLivepaneW(clampWidth(raw, cw)); } }catch{} })();
     renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); loadImageModels(); document.getElementById('prompt').focus();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
