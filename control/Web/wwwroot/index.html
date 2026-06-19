@@ -118,6 +118,7 @@
   <main>
     <section id="view-create">
       <div id="guard"></div>
+      <div id="pendingGen"></div>
       <textarea id="prompt" placeholder="Describe what to generate…  (__wildcards__ supported · Ctrl+Enter to generate)"></textarea>
       <div class="pills" id="kinds"></div>
       <div class="pills" id="styleChips"></div>
@@ -418,6 +419,7 @@
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
+      if (v==='create') loadPendingGen();
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
       if (v==='models') loadModels();
       if (v==='voice') loadVoices();
@@ -1261,6 +1263,35 @@
       const b = $(`<div class="banner"><span>The GPU isn't in MEDIA mode — generation needs it.</span><button class="ghost">Switch to MEDIA</button></div>`);
       b.querySelector('button').onclick = async()=>{ await fetch('/api/mode/media',{method:'POST'}); };
       el.appendChild(b);
+    }
+    // ---- Pending image-gens queued FROM CHAT (generate_image tool). Chat runs the LLM resident on the single GPU,
+    // GPU-exclusive with SwarmUI, so a chat-requested gen can't render mid-conversation — the tool persists it and
+    // we surface it here in the create view so the user picks it up after flipping to MEDIA. "→ composer" prefills
+    // the existing fields (no new gen path); dismiss DELETEs the durable file. Newest-first, bounded preview. ----
+    async function loadPendingGen(){
+      const el = document.getElementById('pendingGen'); if(!el) return; el.innerHTML='';
+      let list=[]; try{ list = await (await fetch('/api/pending-gen')).json(); }catch{ return; }
+      if(!Array.isArray(list) || !list.length) return;
+      const wrap = $(`<div class="banner" style="background:#06181a;border-color:#16505a;color:var(--cyan);flex-direction:column;align-items:stretch;gap:8px"></div>`);
+      wrap.appendChild($(`<span><b>${list.length}</b> image${list.length>1?'s':''} queued from chat — pick one into the composer, then Generate.</span>`));
+      list.forEach(p=>{
+        const cnt = p.count>1 ? ` ×${p.count}` : '';
+        const mdl = p.model ? ` · ${esc(p.model)}` : '';
+        const row = $(`<div style="display:flex;align-items:center;gap:8px"></div>`);
+        row.appendChild($(`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.prompt)}">${esc(p.prompt)}<small class="hint"> (${esc(p.kind)}${cnt}${mdl})</small></span>`));
+        const use = $(`<button class="ghost" type="button">→ composer</button>`);
+        use.onclick = ()=>{
+          document.getElementById('prompt').value = p.prompt||'';
+          const c=document.getElementById('count'); if(c) c.value = Math.min(Math.max(p.count||1,1),9);
+          const m=document.getElementById('genModel'); if(m && p.model && [...m.options].some(o=>o.value===p.model)) m.value = p.model;
+          state.kind = (p.kind==='edit') ? 'edit' : 'image'; renderControls();
+          document.getElementById('prompt').focus();
+        };
+        const del = $(`<button class="xbtn" type="button" title="dismiss">✕</button>`);
+        del.onclick = async()=>{ try{ await fetch('/api/pending-gen/'+encodeURIComponent(p.id),{method:'DELETE'}); }catch{} loadPendingGen(); };
+        row.appendChild(use); row.appendChild(del); wrap.appendChild(row);
+      });
+      el.appendChild(wrap);
     }
     // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
     let _chatMsgs=[], _chatConv=null;

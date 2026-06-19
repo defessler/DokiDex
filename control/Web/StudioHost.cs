@@ -372,6 +372,11 @@ public static class StudioHost
             ChatStore.Load(id) is { } conv ? Results.Json(conv) : Results.NotFound());
         api.MapDelete("/chats/{id}", (string id) => ChatStore.Delete(id) ? Results.Ok() : Results.NotFound());
 
+        // ---- pending image-gen queued FROM CHAT (the generate_image tool's durable side; the create view surfaces
+        // it so the user can pick it up after flipping the GPU to MEDIA). Id is server-generated => no client path. ----
+        api.MapGet("/pending-gen", () => Results.Json(PendingGenStore.List()));
+        api.MapDelete("/pending-gen/{id}", (string id) => PendingGenStore.Delete(id) ? Results.Ok() : Results.NotFound());
+
         // ---- multi-character composer (base scene + isolated per-character regions -> one raw SwarmUI prompt) ----
         // Pure compile (no GPU); the SPA generates the result via /api/generate with raw=true so the <object:..>
         // regional tags reach SwarmUI unrewritten.

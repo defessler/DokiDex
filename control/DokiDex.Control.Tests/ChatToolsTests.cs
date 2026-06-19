@@ -10,6 +10,12 @@ namespace DokiDex.Control.Tests;
 // OpenAI function-tool shape, and (b) Run's arg-parse + unknown-tool fall-through. The search_library happy
 // path itself touches the gallery on disk (GalleryService.List) and is exercised only thinly here — the
 // fragile parsing is what's locked. Mirrors the small-curated-toolset / bounded-loop mitigation in decisions.md.
+//
+// [Collection("PendingGenStore")] — the generate_image Run tests WRITE to the shared on-disk pending-gen/ dir
+// under RepoPaths.Root. xUnit parallelizes test CLASSES, so without serializing these against PendingGenStoreTests
+// a concurrent Enqueue/Delete could interleave with this class's queue-and-cleanup and flap. The collection makes
+// the two store-writing classes run serially (identity asserts already guard within-class).
+[Collection("PendingGenStore")]
 public class ChatToolsTests
 {
     [Fact]
@@ -22,9 +28,10 @@ public class ChatToolsTests
         var root = doc.RootElement;
 
         Assert.Equal(JsonValueKind.Array, root.ValueKind);
-        Assert.Equal(3, root.GetArrayLength());   // gated 1 -> 3: search_library + web_search + code_search
+        Assert.Equal(4, root.GetArrayLength());   // gated 1 -> 4: + generate_image (the lone write-action tool)
 
-        // EVERY tool is a well-formed OpenAI function schema with a {query:string} parameter.
+        // EVERY tool is a well-formed OpenAI function schema with a required string param the model fills first:
+        // the three READ tools take {query:string}; the one WRITE tool (generate_image) takes {prompt:string}.
         foreach (var tool in root.EnumerateArray())
         {
             Assert.Equal("function", tool.GetProperty("type").GetString());
@@ -33,12 +40,32 @@ public class ChatToolsTests
             Assert.False(string.IsNullOrWhiteSpace(fn.GetProperty("description").GetString()));
             var p = fn.GetProperty("parameters");
             Assert.Equal("object", p.GetProperty("type").GetString());
-            Assert.True(p.GetProperty("properties").TryGetProperty("query", out var q));
-            Assert.Equal("string", q.GetProperty("type").GetString());
+            var props = p.GetProperty("properties");
+            var key = props.TryGetProperty("query", out var q) ? q : props.GetProperty("prompt");
+            Assert.Equal("string", key.GetProperty("type").GetString());
         }
 
         var names = root.EnumerateArray().Select(t => t.GetProperty("function").GetProperty("name").GetString()).ToList();
-        Assert.Equal(new[] { "search_library", "web_search", "code_search" }, names);
+        Assert.Equal(new[] { "search_library", "web_search", "code_search", "generate_image" }, names);
+    }
+
+    [Fact]
+    public void generate_image_schema_has_a_required_prompt_and_the_optional_gen_fields()
+    {
+        // The write-action tool's params map 1:1 onto GenRequest(Prompt, Kind, Model, Count): a REQUIRED prompt
+        // plus optional kind/model/count. The required array names exactly prompt (the others default in MapGenArgs).
+        var json = JsonSerializer.Serialize(ChatTools.GenerateImageSchema);
+        using var doc = JsonDocument.Parse(json);
+        var fn = doc.RootElement.GetProperty("function");
+        Assert.Equal("generate_image", fn.GetProperty("name").GetString());
+        var p = fn.GetProperty("parameters");
+        var props = p.GetProperty("properties");
+        Assert.Equal("string", props.GetProperty("prompt").GetProperty("type").GetString());
+        Assert.True(props.TryGetProperty("kind", out _));
+        Assert.True(props.TryGetProperty("model", out _));
+        Assert.Equal("integer", props.GetProperty("count").GetProperty("type").GetString());
+        var required = p.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(new[] { "prompt" }, required);
     }
 
     [Fact]
@@ -51,6 +78,78 @@ public class ChatToolsTests
         Assert.Contains("search_library", result);
         Assert.Contains("web_search", result);
         Assert.Contains("code_search", result);
+        Assert.Contains("generate_image", result);
+    }
+
+    [Theory]
+    // defaults: missing kind => "image", missing model => null, missing count => 1
+    [InlineData("{\"prompt\":\"a cat\"}", "a cat", "image", null, 1)]
+    [InlineData("{\"prompt\":\"  spaced  \",\"kind\":\"edit\",\"model\":\"sdxl\",\"count\":3}", "spaced", "edit", "sdxl", 3)]
+    // kind clamped to the image family: video/music/i2v/foley => "image"
+    [InlineData("{\"prompt\":\"x\",\"kind\":\"video\"}", "x", "image", null, 1)]
+    [InlineData("{\"prompt\":\"x\",\"kind\":\"EDIT\"}", "x", "edit", null, 1)]   // case-insensitive
+    // count clamped to 1..9
+    [InlineData("{\"prompt\":\"x\",\"count\":99}", "x", "image", null, 9)]
+    [InlineData("{\"prompt\":\"x\",\"count\":0}", "x", "image", null, 1)]
+    [InlineData("{\"prompt\":\"x\",\"count\":-5}", "x", "image", null, 1)]
+    // tolerant of a string-typed count (some models emit "count":"4")
+    [InlineData("{\"prompt\":\"x\",\"count\":\"4\"}", "x", "image", null, 4)]
+    public void MapGenArgs_parses_defaults_and_clamps(string args, string ep, string ek, string? em, int ec)
+    {
+        var (prompt, kind, model, count) = ChatTools.MapGenArgs(args);
+        Assert.Equal(ep, prompt);
+        Assert.Equal(ek, kind);
+        Assert.Equal(em, model);
+        Assert.Equal(ec, count);
+    }
+
+    [Theory]
+    [InlineData("{\"prompt\":\"   \"}")]   // whitespace prompt
+    [InlineData("{\"kind\":\"image\"}")]   // missing prompt
+    [InlineData("")]                        // no arguments at all
+    [InlineData("not json")]                // malformed
+    public void MapGenArgs_blank_or_missing_prompt_yields_empty_prompt(string args)
+    {
+        var (prompt, _, _, _) = ChatTools.MapGenArgs(args);
+        Assert.Equal("", prompt);   // the executor turns an empty prompt into the "need a prompt" line, never throws
+    }
+
+    [Fact]
+    public void FormatGenQueued_is_bounded_and_interpolates_count_and_kind()
+    {
+        var one = ChatTools.FormatGenQueued(1, "image");
+        Assert.Contains("1 image", one);
+        Assert.Contains("Media mode", one, System.StringComparison.OrdinalIgnoreCase);
+        Assert.True(one.Length < 300, $"queued result should stay bounded, was {one.Length}");
+
+        var many = ChatTools.FormatGenQueued(5, "edit");
+        Assert.Contains("5 edit", many);
+    }
+
+    [Fact]
+    public void Run_for_generate_image_with_a_prompt_queues_and_returns_the_bounded_notice()
+    {
+        // The disk touch (PendingGenStore.Enqueue) is graceful; a present prompt returns the queued notice and
+        // names the Media-mode switch. We clean up any file this enqueues so the test leaves no residue.
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var result = ChatTools.Run("generate_image", "{\"prompt\":\"a neon dragon\",\"count\":2}");
+        Assert.Contains("Media mode", result, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Queued 2", result);   // the surfaced phrase (FormatGenQueued), not a position-blind stray '2'
+        foreach (var p in PendingGenStore.List())
+            if (!before.Contains(p.Id)) PendingGenStore.Delete(p.Id);
+    }
+
+    [Fact]
+    public void Run_for_generate_image_with_a_blank_prompt_asks_for_a_prompt_and_does_not_queue()
+    {
+        // IDENTITY snapshot, not a raw global Count: PendingGenStore.List() reads the shared on-disk pending-gen/
+        // dir under RepoPaths.Root and xUnit runs test CLASSES in parallel, so a concurrent Enqueue (e.g.
+        // PendingGenStoreTests) would move a plain before/after Count and spuriously fail. Snapshot the set of ids
+        // before, then assert NO NEW id appeared — robust no matter how many records a sibling class adds.
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var result = ChatTools.Run("generate_image", "{\"prompt\":\"   \"}");
+        Assert.Contains("prompt", result, System.StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));   // this call queued nothing
     }
 
     [Theory]

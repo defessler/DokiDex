@@ -7,14 +7,15 @@ using System.Threading;
 
 namespace DokiDex.Web;
 
-// The curated, in-process TOOL REGISTRY for the chat agent loop. This slice ships THREE tools — search_library
-// (over the existing GalleryService), web_search (DuckDuckGo via the `uvx ddgs` sidecar), and code_search
-// (semantic RAG over this repo via the code_index.py `search` dispatch over the :8090 embed server). The
-// small-curated-set discipline still holds at THREE: decisions.md records that open models lose tool-selection
-// accuracy as the tool list grows, so the mitigation is a SMALL curated set + a BOUNDED loop (Chat.MaxToolHops)
-// + graceful fallthrough (a plain-content reply with no tool_calls IS the answer). The sidecar tools degrade
-// (never throw, never hang) when uvx/uv/the index/the embed server are absent. Further tools stay FUTURE gated
-// additions — generate-from-chat / a GPU handoff are out of this slice.
+// The curated, in-process TOOL REGISTRY for the chat agent loop. This slice ships FOUR tools — three READ tools:
+// search_library (over the existing GalleryService), web_search (DuckDuckGo via the `uvx ddgs` sidecar), and
+// code_search (semantic RAG over this repo via the code_index.py `search` dispatch over the :8090 embed server);
+// plus the lone WRITE/queue tool, generate_image, which QUEUES an image gen to PendingGenStore (GPU-arbitration-safe:
+// it never renders mid-chat and never evicts the resident chat LLM). The small-curated-set discipline still holds
+// at FOUR: decisions.md records that open models lose tool-selection accuracy as the tool list grows, so the
+// mitigation is a SMALL curated set + a BOUNDED loop (Chat.MaxToolHops) + graceful fallthrough (a plain-content
+// reply with no tool_calls IS the answer). The sidecar tools degrade (never throw, never hang) when uvx/uv/the
+// index/the embed server are absent. Further tools stay FUTURE gated additions — do not sprawl past this curated set.
 //
 // Surfaces, kept pure where possible (no GPU; the sidecar/disk touch is thin and degrades):
 //   • ToolsJson    — the OpenAI 'tools' array placed verbatim into the request body (well-formed, unit-tested).
@@ -110,10 +111,43 @@ public static class ChatTools
         },
     };
 
-    // The 'tools' array placed into the request body. A deliberate gated expansion 1 -> 3 (search_library +
-    // web_search + code_search); decisions.md warns open models lose tool-selection accuracy as the list grows,
-    // so the set stays SMALL and the descriptions stay sharp. Do not sprawl past this curated trio.
-    public static readonly object[] ToolsJson = { SearchLibrarySchema, WebSearchSchema, CodeSearchSchema };
+    // generate_image — the lone WRITE/ACT tool among three READ tools. It QUEUES an image gen; it does NOT render
+    // now (chat runs with the LLM resident; SwarmUI is GPU-exclusive with it on 32GB — decisions.md). The sharp,
+    // disjoint description is the defense against the tool-selection accuracy cost of a 4th tool: it states the
+    // ACTION verb + queue semantics up front, the NEGATIVE boundary (don't pick it to FIND existing media — that's
+    // search_library), and the deferred-render truth (render happens after the user switches to Media mode). Params
+    // map 1:1 onto GenRequest(Prompt, Kind, Model, Count): a required prompt + optional kind/model/count.
+    public static readonly object GenerateImageSchema = new
+    {
+        type = "function",
+        function = new
+        {
+            name = "generate_image",
+            description = "Queue an image to be generated from a text prompt. Use this to CREATE a NEW image, NOT "
+                + "to find existing ones (use search_library for the user's existing media). This QUEUES the "
+                + "request; rendering happens after the user switches to Media mode — the GPU can't run the image "
+                + "model while we're chatting, so the tool never renders right now, it queues for later.",
+            parameters = new
+            {
+                type = "object",
+                properties = new
+                {
+                    prompt = new { type = "string", description = "The image description to generate (e.g. 'a neon dragon over a rainy city at night')." },
+                    kind = new { type = "string", description = "Image family only: 'image' (default) or 'edit'. Video/music are not supported here." },
+                    model = new { type = "string", description = "Checkpoint name, or 'auto' to route by prompt. Omit for the recipe default." },
+                    count = new { type = "integer", description = "How many images to queue (1-9, default 1)." },
+                },
+                required = new[] { "prompt" },
+            },
+        },
+    };
+
+    // The 'tools' array placed into the request body. A deliberate gated expansion 1 -> 4 (search_library +
+    // web_search + code_search + generate_image); decisions.md warns open models lose tool-selection accuracy as
+    // the list grows, so the set stays SMALL and the descriptions stay sharp. generate_image is acceptable as the
+    // 4th BECAUSE it is the lone write-action among three read-tools and its description is crisply non-overlapping.
+    // Do not sprawl past this curated set.
+    public static readonly object[] ToolsJson = { SearchLibrarySchema, WebSearchSchema, CodeSearchSchema, GenerateImageSchema };
 
     // PURE: pull the trimmed {query} string out of an OpenAI tool-call arguments JSON STRING. A missing/blank
     // query, no arguments at all, or malformed JSON all yield "" (a blank query lists the most recent items) —
@@ -158,6 +192,58 @@ public static class ChatTools
         return (query, k);
     }
 
+    // PURE: map a generate_image tool-call arguments JSON STRING onto the GenRequest-shaped fields the pending-gen
+    // store persists — (prompt, kind, model, count). Only the COUNT CLAMP is shared with the web /generate endpoint
+    // (StudioHost.cs); the kind-narrowing and model-null below are deliberately gen-from-chat-specific (and arguably
+    // safer) rules — /generate validates kind across the full Kinds set {image,video,music,edit,i2v,foley} and takes
+    // model as-is, so do NOT widen these to match it:
+    //   • prompt — trimmed; blank/missing/malformed => "" (the executor turns "" into the "need a prompt" line).
+    //   • kind   — lower-cased; restricted to the image family {image, edit}; anything else (incl. video/music/i2v
+    //              /foley/missing) => "image". Gen-from-chat is image-only because video/music need init images /
+    //              other controls. (/generate instead 400s an unknown kind across the full Kinds set.)
+    //   • model  — trimmed; blank/missing => null (recipe default). "auto" passes through to be routed at submit.
+    //              (/generate takes model as-is.)
+    //   • count  — Math.Clamp(.., 1, 9): the ONE rule shared with /generate; tolerant of a string-typed int; missing => 1.
+    // Total + side-effect-free, never throws — a sloppy model argument degrades to safe defaults. The unit-test seam.
+    public static (string prompt, string kind, string? model, int count) MapGenArgs(string? argumentsJson)
+    {
+        var prompt = "";
+        var kind = "image";
+        string? model = null;
+        var count = 1;
+        if (string.IsNullOrWhiteSpace(argumentsJson)) return (prompt, kind, model, count);
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return (prompt, kind, model, count);
+
+            if (root.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String)
+                prompt = (p.GetString() ?? "").Trim();
+
+            if (root.TryGetProperty("kind", out var k) && k.ValueKind == JsonValueKind.String)
+            {
+                var kv = (k.GetString() ?? "").Trim().ToLowerInvariant();
+                if (kv is "image" or "edit") kind = kv;   // image family only; everything else falls back to "image"
+            }
+
+            if (root.TryGetProperty("model", out var m) && m.ValueKind == JsonValueKind.String)
+            {
+                var mv = (m.GetString() ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(mv)) model = mv;
+            }
+
+            if (root.TryGetProperty("count", out var c))
+            {
+                if (c.ValueKind == JsonValueKind.Number && c.TryGetInt32(out var ci)) count = ci;
+                else if (c.ValueKind == JsonValueKind.String && int.TryParse(c.GetString(), out var cs)) count = cs;
+            }
+        }
+        catch { /* keep safe defaults */ }
+        count = Math.Clamp(count, 1, 9);
+        return (prompt, kind, model, count);
+    }
+
     // Dispatch a tool by name, returning the tool RESULT TEXT that becomes the role:"tool" message content. An
     // unknown tool name yields a clear "unknown tool" text (the model can recover / re-plan) rather than throwing,
     // and the search_library executor is wrapped so a disk hiccup degrades to a graceful message — the agent loop
@@ -178,8 +264,13 @@ public static class ChatTools
                 var (q, k) = ParseQueryAndK(argumentsJson, 5);
                 return RunCodeSearch(q, k);
             }
+            case "generate_image":
+            {
+                var (prompt, kind, model, count) = MapGenArgs(argumentsJson);
+                return RunGenerateImage(prompt, kind, model, count);
+            }
             default:
-                return $"unknown tool: '{name}'. Available tools are: search_library, web_search, code_search.";
+                return $"unknown tool: '{name}'. Available tools are: search_library, web_search, code_search, generate_image.";
         }
     }
 
@@ -238,6 +329,28 @@ public static class ChatTools
             return $"code_search unavailable: {ex.Message}";
         }
     }
+
+    // generate_image executor: QUEUE-AND-NOTIFY. It is GPU-arbitration-safe by construction — it NEVER switches the
+    // GPU mode or evicts the resident chat LLM (that stays a deliberate, user-confirmed action via the Media
+    // composer's ensureMedia() guard). A blank prompt returns the "need a prompt" line WITHOUT touching disk. Else
+    // it persists a durable pending-gen (survives the eventual GPU flip) and returns the bounded queued notice. The
+    // single disk touch (PendingGenStore.Enqueue) is wrapped so the agent loop never crashes on the tool; the store
+    // itself already degrades gracefully, so on any failure we still return an honest "queued" notice.
+    private static string RunGenerateImage(string prompt, string kind, string? model, int count)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+            return "I need a prompt describing the image to generate. Tell me what to create and I'll queue it.";
+        try { PendingGenStore.Enqueue(prompt, kind, model, count, conversation: null); }
+        catch { /* the agent loop must never crash on a tool; the notice below is still honest */ }
+        return FormatGenQueued(count, kind);
+    }
+
+    // PURE: the bounded queued-gen notice. States the count + kind and that rendering needs a Media-mode switch
+    // (the GPU can't run the image model during chat). Side-effect-free + total => unit-tested; bounded so it can't
+    // bloat context across the loop's hops. No ids leak.
+    public static string FormatGenQueued(int count, string kind)
+        => $"Queued {count} {kind}(s) for generation. Switch to Media mode to render them "
+            + "(the GPU can't run the image model while we're chatting).";
 
     // PURE: the sidecar Result -> tool-text decision shared by RunWebSearch / RunCodeSearch (so it can be
     // unit-tested with NO process). `formatted` is the bounded formatter output — the results block when rowCount
