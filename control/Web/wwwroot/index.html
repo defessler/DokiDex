@@ -239,8 +239,21 @@
         <div class="row" style="align-items:flex-start;gap:8px;margin-top:6px">
           <input id="newPersonaName" class="kin" style="width:200px" placeholder="name">
           <textarea id="newPersonaSystem" class="kin" style="flex:1;min-height:60px" placeholder="system / behavior (uncensored)"></textarea>
+          <label class="hint">lorebook <select id="newPersonaLorebook" class="kin" style="width:auto"><option value="">none</option></select></label>
           <button class="ghost" onclick="savePersona()">Save</button>
           <span class="hint" id="newPersonaHint"></span>
+        </div>
+      </details>
+      <details style="margin:4px 0 8px">
+        <summary class="hint" style="cursor:pointer">+ lorebooks (World Info)</summary>
+        <div style="margin-top:6px">
+          <div class="row" style="align-items:center;gap:8px">
+            <input id="newLoreName" class="kin" style="width:200px" placeholder="lorebook name">
+            <button class="ghost" onclick="addLoreRow()">+ entry</button>
+            <button class="ghost" onclick="saveLorebook()">Save</button>
+            <span class="hint" id="newLoreHint"></span>
+          </div>
+          <div id="loreRows" style="margin-top:6px"></div>
         </div>
       </details>
       <div id="chatLog"></div>
@@ -383,7 +396,7 @@
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
-      if (v==='chat') { loadPersonas(); loadThreads(); renderChatGuard(); document.getElementById('chatInput').focus(); }
+      if (v==='chat') { loadPersonas(); loadLorebooks(); loadThreads(); renderChatGuard(); document.getElementById('chatInput').focus(); }
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];
@@ -1241,16 +1254,56 @@
     async function savePersona(){
       const name=document.getElementById('newPersonaName').value.trim();
       const system=document.getElementById('newPersonaSystem').value.trim();
+      const lorebook=document.getElementById('newPersonaLorebook').value;
       const h=document.getElementById('newPersonaHint');
       if(!name){ h.textContent='name it first'; return; }
       try{
-        // PersonaCard body (case-insensitive bind); P0 collects name + system only — the rest stay null/empty.
+        // PersonaCard body (case-insensitive bind); P0 collects name + system, P3 adds the lorebook ref — the rest stay null/empty.
         const r=await fetch('/api/personas',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({name, system, persona:'', greeting:'', examples:''})});
+          body:JSON.stringify({name, system, persona:'', greeting:'', examples:'', lorebook})});
         if(!r.ok){ h.textContent='bad persona name'; return; }
         const sel=document.getElementById('chatPersona'); sel.value=name;   // preserved across loadPersonas()
         await loadPersonas();
         h.textContent='saved '+esc(name); document.getElementById('newPersonaName').value=''; document.getElementById('newPersonaSystem').value='';
+      }catch{ h.textContent='save failed'; }
+    }
+    // Lorebook list — fills the persona-form picker (blank "none" + each saved lorebook by name).
+    async function loadLorebooks(){
+      const sel=document.getElementById('newPersonaLorebook'); if(!sel) return; const cur=sel.value;
+      try{ const list=await (await fetch('/api/lorebooks')).json();
+        sel.innerHTML='<option value="">none</option>';
+        (list||[]).forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+        sel.value=cur;
+      }catch{}
+    }
+    // One editable lore-entry row: keys (comma-separated) + content + an enabled checkbox.
+    function addLoreRow(keys,content,enabled){
+      const wrap=document.getElementById('loreRows');
+      const row=$(`<div class="row" style="align-items:flex-start;gap:8px;margin-top:6px"></div>`);
+      const k=$(`<input class="kin loreKeys" style="width:200px" placeholder="keys (comma-separated)">`); k.value=keys||'';
+      const c=$(`<textarea class="kin loreContent" style="flex:1;min-height:48px" placeholder="injected content"></textarea>`); c.value=content||'';
+      const lbl=$(`<label class="hint" style="white-space:nowrap">on <input type="checkbox" class="loreEnabled"></label>`);
+      lbl.querySelector('input').checked = enabled!==false;
+      const rm=$(`<button class="ghost" title="remove">×</button>`); rm.onclick=()=>row.remove();
+      row.appendChild(k); row.appendChild(c); row.appendChild(lbl); row.appendChild(rm);
+      wrap.appendChild(row);
+    }
+    // Collect the rows into the LoreBook(Name, Entries:[LoreEntry(Keys,Content,Enabled)]) shape the endpoint binds.
+    async function saveLorebook(){
+      const name=document.getElementById('newLoreName').value.trim();
+      const h=document.getElementById('newLoreHint');
+      if(!name){ h.textContent='name it first'; return; }
+      const entries=[...document.querySelectorAll('#loreRows .row')].map(r=>({
+        keys:r.querySelector('.loreKeys').value.trim(),
+        content:r.querySelector('.loreContent').value.trim(),
+        enabled:r.querySelector('.loreEnabled').checked
+      })).filter(e=>e.keys||e.content);
+      try{
+        const r=await fetch('/api/lorebooks',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({name, entries})});
+        if(!r.ok){ h.textContent='bad lorebook name'; return; }
+        h.textContent='saved '+esc(name);
+        await loadLorebooks();   // refresh the persona-form picker so the new book is selectable
       }catch{ h.textContent='save failed'; }
     }
     async function loadThreads(){

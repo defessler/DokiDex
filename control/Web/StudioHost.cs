@@ -350,6 +350,14 @@ public static class StudioHost
             Persona.Save(body) ? Results.Ok() : Results.BadRequest(new { error = "bad persona name" }));
         api.MapDelete("/personas/{name}", (string name) => Persona.Delete(name) ? Results.Ok() : Results.NotFound());
 
+        // ---- lorebooks ("World Info" keyword-triggered context injection) — clone of /api/recipes ----
+        api.MapGet("/lorebooks", () => Results.Json(Lorebook.List()));
+        api.MapGet("/lorebooks/{name}", (string name) =>
+            Lorebook.Load(name) is { } book ? Results.Json(book) : Results.NotFound());
+        api.MapPost("/lorebooks", (LoreBook body) =>
+            Lorebook.Save(body) ? Results.Ok() : Results.BadRequest(new { error = "bad lorebook name" }));
+        api.MapDelete("/lorebooks/{name}", (string name) => Lorebook.Delete(name) ? Results.Ok() : Results.NotFound());
+
         // ---- persisted conversations (server-generated id => no client path => no traversal) — clone of /api/searches ----
         api.MapGet("/chats", () => Results.Json(ChatStore.List()));
         api.MapGet("/chats/{id}", (string id) =>

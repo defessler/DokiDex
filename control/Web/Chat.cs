@@ -24,6 +24,10 @@ public static class Chat
     // Most-recent turns folded into each request (bounds max_tokens). Full transcript still persists on disk.
     private const int HistoryTurnBudget = 20;
 
+    // P3 lorebook caps: at most this many activated [World Info] entries / cumulative chars per request.
+    private const int LoreMaxEntries = 8;
+    private const int LoreMaxChars = 1500;
+
     public sealed record Result(bool Ok, string ConversationId, string Text, string? Message);
 
     // One streamed event from StreamAsync. The FIRST event is always a Meta carrying the conversation id (so the
@@ -50,7 +54,8 @@ public static class Chat
         // Prior turns: the persisted transcript, or a stateless caller's supplied Messages when there's none.
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
 
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget);
+        var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore);
 
         var temperature = 0.8;
         var maxTokens = 1024;
@@ -96,7 +101,8 @@ public static class Chat
                    ?? ChatStore.NewConversation(body.Persona, card?.Lorebook);
 
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget);
+        var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore);
 
         // Hand the conversation id to the endpoint up front (so the SPA can capture it before any token).
         yield return StreamEvent.Meta(conv.Id);
@@ -136,4 +142,25 @@ public static class Chat
         => conv.Messages.Count > 0
             ? conv.Messages
             : (supplied ?? (IReadOnlyList<ChatTurn>)Array.Empty<ChatTurn>());
+
+    // P3: load the card's lorebook (if any) and activate the [World Info] entries whose keys appear in the recent
+    // transcript (the trimmed history turns' content + the new user message). Returns null when the card carries
+    // no lorebook (so ChatPrompt.Build preserves the exact pre-P3 output) — behavior is identical for cards
+    // without a lorebook. Graceful: a missing/unreadable lorebook simply yields no injection. Internal so the
+    // no-lorebook short-circuit is unit-testable with no disk.
+    internal static IReadOnlyList<LoreEntry>? ActivateLore(
+        string? lorebookName, IReadOnlyList<ChatTurn> history, string userMessage)
+    {
+        if (string.IsNullOrWhiteSpace(lorebookName)) return null;
+        var book = Lorebook.Load(lorebookName);
+        if (book?.Entries is not { Count: > 0 }) return null;
+
+        // Scan EXACTLY the turns the prompt will send: the same recent-non-empty-within-budget window
+        // ChatPrompt.Build uses (single source of truth), plus the new user message. Sharing the window means a
+        // lore entry can never fire on a turn Build then trims away.
+        var recent = ChatPrompt.RecentTurns(history, HistoryTurnBudget);
+        var scanText = string.Join("\n", recent.Select(t => t.Content)) + "\n" + userMessage;
+
+        return Lorebook.Activate(book.Entries, scanText, LoreMaxEntries, LoreMaxChars);
+    }
 }

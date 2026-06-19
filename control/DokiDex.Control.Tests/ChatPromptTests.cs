@@ -26,6 +26,9 @@ public class ChatPromptTests
     private static ChatTurn U(string c) => new("user", c, null);
     private static ChatTurn A(string c) => new("assistant", c, null);
 
+    // Read role+content off a ChatTurn (RecentTurns returns turns, not the anonymous message objects above).
+    private static (string role, string content) Read2(ChatTurn t) => (t.Role, t.Content);
+
     [Fact]
     public void Card_only_yields_one_system_turn_then_the_user_turn()
     {
@@ -116,5 +119,99 @@ public class ChatPromptTests
         Assert.Equal(3, msgs.Count);
         Assert.Equal(("assistant", "real reply"), Read(msgs[1]));
         Assert.Equal(("user", "go"), Read(msgs[2]));
+    }
+
+    [Fact]
+    public void Active_lore_is_injected_after_the_card_bundle_and_before_history(  )
+    {
+        // ordering: system bundle -> [World Info] -> history -> user turn (P3 lorebook injection).
+        var hist = new List<ChatTurn> { U("first user"), A("first reply") };
+        var lore = new List<LoreEntry>
+        {
+            new(Keys: "dragon", Content: "Dragons rule the north.", Enabled: true),
+        };
+        var msgs = ChatPrompt.Build(Card(system: "You are Doki."), hist, "the new turn",
+            historyTurnBudget: 20, activeLore: lore);
+
+        Assert.Equal(5, msgs.Count); // system + [World Info] + 2 history + user
+
+        Assert.Equal("system", Read(msgs[0]).role);
+        Assert.Contains("You are Doki.", Read(msgs[0]).content);
+
+        var (r1, c1) = Read(msgs[1]);
+        Assert.Equal("system", r1);
+        Assert.Contains("World Info", c1);
+        Assert.Contains("Dragons rule the north.", c1);
+
+        Assert.Equal(("user", "first user"), Read(msgs[2]));
+        Assert.Equal(("assistant", "first reply"), Read(msgs[3]));
+        Assert.Equal(("user", "the new turn"), Read(msgs[4]));
+    }
+
+    // ---- RecentTurns: the shared "recent non-empty turns within budget" window (single source of truth used by
+    //      BOTH Build's history trim and Chat.ActivateLore's keyword-scan window). ----
+
+    [Fact]
+    public void RecentTurns_keeps_only_non_empty_turns_in_chronological_order()
+    {
+        var hist = new List<ChatTurn> { U("  "), A("real reply"), U(""), U("second user") };
+        var kept = ChatPrompt.RecentTurns(hist, budget: 20);
+
+        Assert.Equal(2, kept.Count);
+        Assert.Equal(("assistant", "real reply"), Read2(kept[0]));
+        Assert.Equal(("user", "second user"), Read2(kept[1]));
+    }
+
+    [Fact]
+    public void RecentTurns_takes_the_most_recent_budget_after_dropping_blanks()
+    {
+        // blank turns interleaved; only non-empty count toward the budget, most-recent-wins, chronological.
+        var hist = new List<ChatTurn> { U("t1"), A(" "), U("t2"), A("t3"), U(""), A("t4") };
+        var kept = ChatPrompt.RecentTurns(hist, budget: 2);
+
+        Assert.Equal(2, kept.Count);
+        Assert.Equal(("assistant", "t3"), Read2(kept[0]));
+        Assert.Equal(("assistant", "t4"), Read2(kept[1]));
+    }
+
+    [Fact]
+    public void RecentTurns_returns_all_non_empty_when_under_budget()
+    {
+        var hist = new List<ChatTurn> { U("a"), A("b") };
+        var kept = ChatPrompt.RecentTurns(hist, budget: 20);
+        Assert.Equal(2, kept.Count);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void RecentTurns_with_a_non_positive_budget_is_empty(int budget)
+    {
+        var hist = new List<ChatTurn> { U("a"), A("b") };
+        Assert.Empty(ChatPrompt.RecentTurns(hist, budget));
+    }
+
+    [Fact]
+    public void RecentTurns_on_empty_or_all_blank_history_is_empty()
+    {
+        Assert.Empty(ChatPrompt.RecentTurns(new List<ChatTurn>(), budget: 20));
+        Assert.Empty(ChatPrompt.RecentTurns(new List<ChatTurn> { U(" "), A("") }, budget: 20));
+    }
+
+    [Fact]
+    public void Null_or_empty_active_lore_preserves_the_exact_default_output()
+    {
+        var hist = new List<ChatTurn> { U("first user"), A("first reply") };
+        var withDefault = ChatPrompt.Build(Card(), hist, "go", historyTurnBudget: 20);
+        var withNull = ChatPrompt.Build(Card(), hist, "go", historyTurnBudget: 20, activeLore: null);
+        var withEmpty = ChatPrompt.Build(Card(), hist, "go", historyTurnBudget: 20, activeLore: new List<LoreEntry>());
+
+        Assert.Equal(withDefault.Count, withNull.Count);
+        Assert.Equal(withDefault.Count, withEmpty.Count);
+        for (int i = 0; i < withDefault.Count; i++)
+        {
+            Assert.Equal(Read(withDefault[i]), Read(withNull[i]));
+            Assert.Equal(Read(withDefault[i]), Read(withEmpty[i]));
+        }
     }
 }

@@ -60,4 +60,15 @@ public class ChatTests
         Assert.False(r.Ok);
         Assert.Equal("empty message", r.Message);
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ActivateLore_returns_null_when_the_card_has_no_lorebook(string? lorebookName)
+    {
+        // No lorebook name => no injection and NO disk touched, so ChatPrompt.Build keeps its exact pre-P3 output.
+        var history = new List<ChatTurn> { U("the dragon roared") };
+        Assert.Null(Chat.ActivateLore(lorebookName, history, "tell me more"));
+    }
 }
