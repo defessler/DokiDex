@@ -255,7 +255,7 @@ if (-not (Test-Path (Join-Path $swModels "diffusion_models\ltxv-2b-0.9.8-distill
 } else {
     try {
         $sidL = (Invoke-RestMethod "$base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-        $lb = @{ session_id = $sidL; images = 1; prompt = "a paper boat floating down a rain-soaked street gutter"; model = "ltxv-2b-0.9.8-distilled.safetensors"; textvideoframes = 49; steps = 8; cfgscale = 1; width = 768; height = 512; videofps = 24; videoformat = "h264-mp4" } | ConvertTo-Json
+        $lb = @{ session_id = $sidL; images = 1; prompt = "a paper boat floating down a rain-soaked street gutter"; model = "ltxv-2b-0.9.8-distilled.safetensors"; textvideoframes = 49; steps = 8; cfgscale = 1; width = 768; height = 512; videofps = 24; videoformat = "h264-mp4"; sampler = "euler"; scheduler = "normal" } | ConvertTo-Json
         $lr = Invoke-RestMethod "$base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 400 -Body $lb
         $lmp4 = @($lr.images) | Where-Object { $_ -match '\.mp4$' }
         $results["fast video (LTXV)"] = if ($lmp4) { "PASS  $(@($lmp4)[0])" } else { "FAIL  no mp4" }

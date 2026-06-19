@@ -135,7 +135,12 @@ function Get-GenRecipe {
         #   from the 5B as the starting point, to be tuned live; (3) the 32GB fit of the dual ~9.65GB Q4_K_M
         #   experts in StepSwap + (4) the city96 ComfyUI-GGUF node install / GGUF arch auto-detect.
         'video' {
-            if ($Fast)         { @{ model = 'ltxv-2b-0.9.8-distilled.safetensors'; textvideoframes = 97; steps = 8;  cfgscale = 1;   width = 768; height = 512; videofps = 24; videoformat = 'h264-mp4' } }
+            # -Fast = LTXV-2b-0.9.8-distilled (native lightricks-ltx-video checkpoint, T5/VAE auto-fetched). The
+            # OFFICIAL ComfyUI LTXV 0.9.8 distilled template runs it at 8 steps / CFG 1 / sampler euler /
+            # scheduler 'normal' / frames 8n+1 (97 is valid) / native 768x512 / 24fps. sampler+scheduler are the
+            # LTXV-tuned settings (without them this arm inherited SwarmUI's video defaults, uni_pc/simple). Do NOT
+            # raise CFG above 1 (doc: doubles VRAM for no quality gain). 6.34GB all-in-one -> huge 32GB headroom.
+            if ($Fast)         { @{ model = 'ltxv-2b-0.9.8-distilled.safetensors'; textvideoframes = 97; steps = 8;  cfgscale = 1;   width = 768; height = 512; videofps = 24; videoformat = 'h264-mp4'; sampler = 'euler'; scheduler = 'normal' } }
             # refinerupscale=1 (explicit, no resize): here the refiner group is reused for a noise-EXPERT
             # StepSwap (a denoising handoff from the high- to the low-noise expert), NOT the hi-res upscale the
             # image -Upscale/-Refine path uses it for — so it must NOT inherit that path's refinerupscale=2.

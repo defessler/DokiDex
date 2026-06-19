@@ -59,6 +59,10 @@ Assert ($vid.sigmashift -eq 8 -and $vid.sampler -eq 'uni_pc')      "video -> sig
 $vidFast = Get-GenRecipe -Kind video -Fast
 Assert ($vidFast.model -eq 'ltxv-2b-0.9.8-distilled.safetensors')  "video -Fast -> LTXV distilled"
 Assert ($vidFast.steps -eq 8)                                      "video -Fast -> 8 steps"
+# LTXV distilled OFFICIAL recipe: euler / 'normal' scheduler (ComfyUI LTXV 0.9.8 distilled template).
+# Without these the -Fast arm inherited SwarmUI's video defaults (uni_pc/simple) instead of LTXV's.
+Assert ($vidFast.cfgscale -eq 1)                                   "video -Fast -> cfg 1 (do NOT raise: doubles VRAM, no quality gain)"
+Assert ($vidFast.sampler -eq 'euler' -and $vidFast.scheduler -eq 'normal') "video -Fast -> euler / normal (LTXV distilled template)"
 
 # video -Quality = the GATED Wan 2.2 A14B GGUF dual-expert tier (quality video). SwarmUI wires the two
 # noise experts via its image-refiner StepSwap: base = HIGH-noise expert, Refiner Model = LOW-noise expert,
