@@ -59,6 +59,14 @@
     .spinner { width:22px; height:22px; border:2px solid var(--border); border-top-color:var(--cyan); border-radius:50%; animation:spin 0.9s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
     .pbar { height:3px; background:var(--bg); } .pbar > div { height:100%; background:var(--cyan); transition:width .3s; }
+    /* live canvas (slice 1): single-slot img2img preview pane next to the sketch */
+    .livewrap { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; margin-top:6px; }
+    .livepane { position:relative; width:384px; max-width:100%; aspect-ratio:3/2; background:var(--bg); border:1px solid var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .livepane img { width:100%; height:100%; object-fit:contain; display:block; }
+    .livepane .ph { color:var(--dim); font-size:12px; padding:0 16px; text-align:center; }
+    .livebadge { position:absolute; top:6px; right:6px; display:none; align-items:center; gap:6px; font-size:10px; font-family:"Cascadia Mono",Consolas,monospace; color:var(--cyan); background:rgba(0,0,0,.55); border-radius:6px; padding:3px 8px; }
+    .livebadge.on { display:flex; }
+    .livebadge .spinner { width:11px; height:11px; border-width:2px; }
     .xbtn { background:none; border:1px solid var(--border); color:var(--dim); border-radius:4px; font-size:10px; padding:2px 8px; cursor:pointer; }
     .xbtn:hover { color:var(--danger); border-color:var(--danger); }
     .kin { width:90px; background:var(--surface2); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:3px 6px; }
@@ -173,8 +181,22 @@
         <button class="xbtn" id="cnAdd" onclick="addCnUnit()">+ stack a ControlNet</button>
         <div style="margin-top:8px">
           <div class="hint" style="margin-bottom:4px">…or sketch unit 1's control image (draw a rough structure, set its type=scribble):</div>
-          <canvas id="sketch" width="384" height="256" style="border:1px solid var(--border);border-radius:6px;background:#fff;cursor:crosshair;touch-action:none"></canvas>
-          <div style="margin-top:4px"><button class="xbtn" onclick="clearSketch()">clear sketch</button></div>
+          <div class="livewrap">
+            <div>
+              <canvas id="sketch" width="384" height="256" style="border:1px solid var(--border);border-radius:6px;background:#fff;cursor:crosshair;touch-action:none"></canvas>
+              <div style="margin-top:4px" class="mods">
+                <button class="xbtn" onclick="clearSketch()">clear sketch</button>
+                <label title="render the sketch as a fast low-denoise img2img as you draw (turbo, seed-locked) — GPU-exclusive, needs MEDIA mode"><input id="liveCanvas" type="checkbox" onchange="onLiveCanvasToggle()"> Live render</label>
+                <label class="hint" title="denoise: lower = closer to the sketch, higher = more imagined detail">denoise <input id="liveDenoise" type="range" min="0.15" max="0.85" step="0.05" value="0.35" style="width:90px;vertical-align:middle"> <span id="liveDenoiseVal">0.35</span></label>
+              </div>
+            </div>
+            <!-- single-slot live pane: keyed by the current live-render id, NOT a Results card per stroke -->
+            <div class="livepane" id="livePaneWrap">
+              <div class="ph" id="livePh">Turn on <b>Live render</b> and sketch — your drawing renders here in real time.</div>
+              <img id="livePane" style="display:none" alt="">
+              <div class="livebadge" id="liveBadge"><div class="spinner"></div><span id="liveBadgeTxt">rendering…</span></div>
+            </div>
+          </div>
         </div>
       </details>
       <div id="maskbox" style="display:none;margin:4px 0 12px">
@@ -1693,8 +1715,105 @@
       let lx=0,ly=0;
       cv.addEventListener('pointerdown',e=>{drawing=true;[lx,ly]=at(e);line(lx,ly,lx,ly);});
       cv.addEventListener('pointermove',e=>{if(!drawing)return;const[nx,ny]=at(e);line(lx,ly,nx,ny);lx=nx;ly=ny;});
-      window.addEventListener('pointerup',()=>{ if(drawing){ drawing=false; if(cnUnits[0]){ cnUnits[0].image=cv.toDataURL('image/png'); renderCnUnits(); } } });
+      window.addEventListener('pointerup',()=>{ if(drawing){ drawing=false; if(cnUnits[0]){ cnUnits[0].image=cv.toDataURL('image/png'); renderCnUnits(); } scheduleLiveRender(); } });
     })();
+    // ============================================================================================
+    // Live canvas (RECOMMENDED FIRST SLICE): the EXISTING sketch canvas promoted to also drive a
+    // debounced, low-denoise img2img render off its bitmap via the EXISTING /api/generate endpoint.
+    // {prompt, kind:'image', fast:true, initImage:sketch.toDataURL(), strength, aspect:'3:2', seed:<locked>,
+    // ephemeral:true} maps onto the already-tested GenRequest/GenCli + doki-gen recipe. `ephemeral` is a
+    // persistence-only flag (no Library sidecar, %TEMP% artifact, hidden from the Results grid) — the argv is
+    // identical to a normal fast img2img, so the recipe contract / LiveCanvasTests are unchanged.
+    // (see LiveCanvasTests.cs). GPU-exclusivity-safe (ensureMedia + the server _gpu semaphore) and
+    // flood-proof via debounce + single-flight newest-wins coalescing into ONE live pane (no card/stroke).
+    // ============================================================================================
+    const LIVE_DEBOUNCE_MS = 200;   // trailing-edge: a fast scribble collapses to one render (tune to F1 latency)
+    let _liveCanvasTimer = null;    // debounce handle
+    let _liveInflight = false;      // single-flight: at most one render on the GPU at a time
+    let _liveDirty = false;         // newest-wins: a stroke landed while a render was in flight -> render once more
+    let _liveInflightId = null;     // the in-flight live job id (single-flight sentinel; no global cancel — see FIX 4)
+    let _liveSeed = null;           // seed-lock for the session so successive renders are coherent (the "live" feel)
+    let _liveEnsured = false;       // ensureMedia() gate runs once per live session, not per stroke
+
+    document.getElementById('liveDenoise').addEventListener('input', e => {
+      document.getElementById('liveDenoiseVal').textContent = (+e.target.value).toFixed(2);
+    });
+    async function onLiveCanvasToggle(){
+      const on = document.getElementById('liveCanvas').checked;
+      if(!on){ // turning off: stop the loop, clear single-flight state, leave the last frame visible
+        clearTimeout(_liveCanvasTimer); _liveDirty=false; setLiveBadge(false); return;
+      }
+      // turn on: lock a seed for this session + gate on the SAME media guard the composer uses (GPU-exclusive).
+      _liveSeed = Math.floor(Math.random()*1e9);
+      _liveEnsured = false;
+      if(!await ensureMedia()){ document.getElementById('liveCanvas').checked=false; return; }
+      _liveEnsured = true;
+      if(_sketchDrawn) scheduleLiveRender();   // render whatever is already on the canvas
+    }
+    function setLiveBadge(on, txt){
+      const b=document.getElementById('liveBadge'); if(!b) return;
+      b.classList.toggle('on', !!on); if(txt) document.getElementById('liveBadgeTxt').textContent=txt;
+    }
+    function showLiveFrame(url){
+      const img=document.getElementById('livePane'), ph=document.getElementById('livePh');
+      if(!url) return; img.src=url; img.style.display=''; if(ph) ph.style.display='none';
+    }
+    // DEBOUNCE: every stroke resets the timer; only the trailing edge fires renderLive().
+    function scheduleLiveRender(){
+      if(!document.getElementById('liveCanvas').checked) return;
+      if(state.view!=='create') return;
+      clearTimeout(_liveCanvasTimer);
+      _liveCanvasTimer=setTimeout(renderLive, LIVE_DEBOUNCE_MS);
+    }
+    // SINGLE-FLIGHT + DROP-STALE (newest-wins): at most one render in flight + at most one queued.
+    async function renderLive(){
+      const cb=document.getElementById('liveCanvas'); if(!cb || !cb.checked) return;
+      // View guard: the newest-wins re-fire below calls renderLive() DIRECTLY (not via scheduleLiveRender), so
+      // without this an off-canvas navigation while Live stays checked could fire one extra /api/generate.
+      if(state.view!=='create') return;
+      const cv=document.getElementById('sketch'); if(!cv) return;
+      // If a render is already in flight, just mark dirty — when it finishes we render ONCE from the latest canvas.
+      if(_liveInflight){ _liveDirty=true; return; }
+      // SINGLE-FLIGHT LATCH FIRST: claim the in-flight slot BEFORE the ensureMedia() await, so a second debounced
+      // renderLive() firing during the media-switch wait sees _liveInflight and just marks dirty (no double-submit).
+      _liveInflight=true; _liveDirty=false;
+      let jobId=null, errShown=false;
+      try{
+        // Re-assert the media guard (handles an eviction mid-session); cheap when already media.
+        if(!_liveEnsured || !state.mediaActive){ if(!await ensureMedia()){ return; } _liveEnsured=true; }
+        const prompt=(document.getElementById('prompt').value.trim())||'sketch';
+        const strength=parseFloat(document.getElementById('liveDenoise').value)||0.35;
+        setLiveBadge(true,'rendering…');
+        const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
+          // aspect MATCHES the 384x256 (3:2) sketch canvas + the 3/2 live pane so the drawing isn't squashed.
+          body:JSON.stringify({ prompt, kind:'image', fast:true, initImage:cv.toDataURL('image/png'),
+                                strength, aspect:'3:2', seed:_liveSeed, ephemeral:true })});
+        if(r.ok){ const job=await r.json(); jobId=job.id; _liveInflightId=jobId; errShown=await pollLiveJob(jobId); }
+        else { setLiveBadge(true, (await r.json().catch(()=>({}))).error || 'render failed'); errShown=true; }
+      }catch{ setLiveBadge(true,'render failed'); errShown=true; }
+      finally{
+        _liveInflight=false; if(_liveInflightId===jobId) _liveInflightId=null;
+        // newest-wins: a stroke arrived while we rendered -> submit exactly one fresh render from the latest canvas.
+        if(_liveDirty && cb.checked && state.view==='create'){ _liveDirty=false; renderLive(); }
+        // Only clear the badge when the last render SUCCEEDED. A render error must stay visible (it's the only
+        // feedback the user gets) — leave the error badge up until the next successful render clears it.
+        else if(!errShown){ setLiveBadge(false); }
+      }
+    }
+    // Poll the live job to its final artifact, streaming the in-flight preview into the single live pane.
+    // Returns true if it surfaced an error badge (so renderLive's finally won't immediately clear it).
+    async function pollLiveJob(id){
+      for(let n=0;n<120;n++){
+        let j=null; try{ j=await (await fetch('/api/jobs/'+id)).json(); }catch{}
+        if(j){
+          if(j.preview) showLiveFrame(j.preview);
+          if(j.status==='done'){ if(j.mediaUrl) showLiveFrame(j.mediaUrl); return false; }
+          if(j.status==='failed'){ setLiveBadge(true, j.message||'render failed'); return true; }
+        }
+        await new Promise(r=>setTimeout(r,250));
+      }
+      return false;
+    }
     let _endImage=null;
     document.getElementById('endFile').addEventListener('change', e => {
       const f=e.target.files[0]; const nm=document.getElementById('endName');

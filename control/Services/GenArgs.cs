@@ -44,7 +44,10 @@ public sealed record GenRequest(
     int InterpolateMult = 2,           // interpolation multiplier
     string? Workflow = null,           // run an installed SwarmUI custom ComfyUI workflow by name (SUPIR/InstantID/own)
     string? Tile = null,               // seamless-tileable output (true/x/y); image/edit only
-    string? Model = null)              // checkpoint override (manual picker / Auto router); null = recipe default
+    string? Model = null,              // checkpoint override (manual picker / Auto router); null = recipe default
+    bool Ephemeral = false)            // real-time canvas preview: a throwaway render — NOT a Library item, NOT a
+                                       // Results card. Persistence-only flag (never reaches argv): the artifact
+                                       // goes to %TEMP%, gets no gallery sidecar, and is excluded from Recent().
 {
     // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
     public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };

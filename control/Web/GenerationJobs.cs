@@ -18,7 +18,8 @@ public sealed record GenSubmit(
     List<ControlUnit>? ControlNets = null,
     string? EndImage = null, bool Reference = false, double RefWeight = 0.6,
     string? Interpolate = null, int InterpolateMult = 2, string? Workflow = null, string? Tile = null,
-    string? Model = null);   // checkpoint: a model name, "auto" (route), or null = recipe default
+    string? Model = null,    // checkpoint: a model name, "auto" (route), or null = recipe default
+    bool Ephemeral = false); // real-time canvas preview: throwaway render (no Library sidecar, %TEMP%, hidden from Recent())
 
 // One generation job, tracked in memory for the session.
 public sealed class GenJob
@@ -28,12 +29,22 @@ public sealed class GenJob
     public required string Kind { get; init; }
     public string? Parent { get; init; }              // source artifact name this was derived from (lineage)
     public string? Model { get; init; }               // resolved checkpoint (for the model-compare grid label)
+    public bool Ephemeral { get; init; }              // live-canvas preview: no sidecar, %TEMP% artifact, hidden from Recent()
     public string Status { get; set; } = "queued";   // queued | running | done | failed
     public double Progress { get; set; }              // 0..1, fed by the GenerateText2ImageWS bridge
     public string? Preview { get; set; }              // in-flight preview (data: URL) while running
     public string? Message { get; set; }
     public string? ArtifactPath { get; set; }
     public bool HasArtifact => !string.IsNullOrEmpty(ArtifactPath) && File.Exists(ArtifactPath);
+
+    // ---- Pure ephemeral/live persistence decisions (single source of truth; unit-tested GPU-free) ----
+    // Live-canvas previews are throwaway: they must NOT surface in the Results grid (Recent feed) and must NOT
+    // write a Library sidecar. Both Recent() and RunAsync delegate to these so the policy can't drift, and the
+    // decision is testable without a DokiService/SwarmUI/GPU (GenerationJobs itself isn't unit-isolable).
+    public static bool ShouldAppearInRecent(bool ephemeral) => !ephemeral;   // ephemeral => hidden from /api/jobs
+    public static bool ShouldPersist(bool ephemeral) => !ephemeral;          // ephemeral => no GalleryService sidecar
+    // Recent()'s filter, exposed as a pure projection so the exclusion is the SAME logic the tests pin.
+    public static IEnumerable<GenJob> FilterRecent(IEnumerable<GenJob> jobs) => jobs.Where(j => ShouldAppearInRecent(j.Ephemeral));
 
     public object ToDto() => new
     {
@@ -64,7 +75,7 @@ public sealed class GenerationJobs
 
     public GenJob Submit(GenRequest req, string? parent = null)
     {
-        var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind, Parent = parent, Model = req.Model };
+        var job = new GenJob { Id = $"g{Interlocked.Increment(ref _seq):D4}", Prompt = req.Prompt, Kind = req.Kind, Parent = parent, Model = req.Model, Ephemeral = req.Ephemeral };
         _jobs[job.Id] = job;
         var cts = new CancellationTokenSource();
         _cts[job.Id] = cts;
@@ -73,7 +84,10 @@ public sealed class GenerationJobs
     }
 
     public GenJob? Get(string id) => _jobs.TryGetValue(id, out var j) ? j : null;
-    public IEnumerable<GenJob> Recent(int n = 60) => _jobs.Values.OrderByDescending(j => j.Id).Take(n);
+    // Ephemeral (live-canvas) jobs are reachable by id (the live pane polls /api/jobs/{id}) but excluded from the
+    // Recent() feed, so the 1.5s pollJobs() grid timer never sprays a Results card per stroke-batch render.
+    // The exclusion is the pure GenJob.FilterRecent predicate (single source of truth, unit-tested GPU-free).
+    public IEnumerable<GenJob> Recent(int n = 60) => GenJob.FilterRecent(_jobs.Values).OrderByDescending(j => j.Id).Take(n);
 
     // Cancel: interrupt SwarmUI's current gen AND cancel our token (stops the WS receive + the gate wait).
     public async Task Cancel(string id)
@@ -95,7 +109,11 @@ public sealed class GenerationJobs
                 var body = await _doki.GetGenBodyAsync(req, ct).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(body)) { job.Status = "failed"; job.Message = "could not build the generation request"; return; }
 
-                var outPath = _doki.NewGenOutPath(req.Kind);
+                // Live-canvas previews are throwaway: write to %TEMP% (NOT the persistent DokiGen/ Library dir) so a
+                // minute of sketching can't litter the Library with files. Real gens still use NewGenOutPath.
+                var outPath = req.Ephemeral
+                    ? Path.Combine(Path.GetTempPath(), $"dokidex-live-{job.Id}{GenRequest.OutExtensionFor(req.Kind)}")
+                    : _doki.NewGenOutPath(req.Kind);
                 var outcome = await SwarmGen.RunAsync(body!, outPath, p =>
                 {
                     job.Progress = p.Overall > 1.0 ? p.Overall / 100.0 : p.Overall;
@@ -106,9 +124,23 @@ public sealed class GenerationJobs
                 if (outcome.Ok)
                 {
                     job.ArtifactPath = outcome.ArtifactPath; job.Progress = 1; job.Preview = null; job.Status = "done"; job.Message = "done";
-                    GalleryService.WriteSidecar(outcome.ArtifactPath!, job.Id, job.Kind, job.Prompt, job.Parent);   // persist for the Library
+                    // Live-canvas previews are ephemeral: no Library sidecar (would make every stroke-batch render a
+                    // permanent gallery item). Real gens persist for the Library as before. The decision is the pure
+                    // GenJob.ShouldPersist predicate (same logic the unit tests pin).
+                    if (GenJob.ShouldPersist(job.Ephemeral))
+                        GalleryService.WriteSidecar(outcome.ArtifactPath!, job.Id, job.Kind, job.Prompt, job.Parent);   // persist for the Library
                 }
                 else { job.Status = "failed"; job.Message = StripAnsi(outcome.Message); }
+
+                // Live-canvas cleanup: a live session must not leak %TEMP% files. The per-render init PNG that
+                // /api/generate decoded from the canvas data-URL is consumed by the run, so delete it now (one
+                // per debounced stroke-batch). The throwaway output still has to outlive the live pane's
+                // /api/media/{id} fetch, so it's deleted on a short TTL. Real gens keep their Library artifact.
+                if (req.Ephemeral)
+                {
+                    TryDeleteLiveTemp(req.InitImage);                  // the dokidex-init-*.png for THIS render
+                    ScheduleEphemeralArtifactCleanup(outPath);         // the dokidex-live-{id} output, on a TTL
+                }
             }
             finally { _gpu.Release(); }
         }
@@ -116,6 +148,30 @@ public sealed class GenerationJobs
         catch (Exception ex) { job.Status = "failed"; job.Message = StripAnsi(ex.Message); }
         finally { _cts.TryRemove(job.Id, out _); await Push(job).ConfigureAwait(false); }
     }
+
+    // How long an ephemeral live-render artifact lingers in %TEMP% before deletion — long enough for the live
+    // pane's /api/media/{id} fetch to load it, short enough that a long sketch session never piles up files.
+    private static readonly TimeSpan EphemeralArtifactTtl = TimeSpan.FromSeconds(60);
+
+    // Delete a per-render live TEMP file (the decoded init PNG). Guarded to ONLY touch files we created in the
+    // system temp dir with the dokidex- prefix — never a user-supplied server path that happened to be the init.
+    private static void TryDeleteLiveTemp(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            var name = Path.GetFileName(path);
+            if (dir is null || !string.Equals(Path.TrimEndingDirectorySeparator(dir), Path.TrimEndingDirectorySeparator(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)) return;
+            if (!name.StartsWith("dokidex-", StringComparison.OrdinalIgnoreCase)) return;
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { /* best-effort cleanup; a stranded temp file is harmless next to a hang */ }
+    }
+
+    // Fire-and-forget: after the TTL, delete the ephemeral output artifact so it doesn't accumulate in %TEMP%.
+    private static void ScheduleEphemeralArtifactCleanup(string outPath)
+        => _ = Task.Run(async () => { try { await Task.Delay(EphemeralArtifactTtl).ConfigureAwait(false); } catch { } TryDeleteLiveTemp(outPath); });
 
     private Task Push(GenJob job)
     {
