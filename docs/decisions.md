@@ -1,5 +1,83 @@
 # Decision log
 
+## 2026-06-19 — Legacy `.doc` (OLE binary Word) KB ingest (the LAST v0.15 ingest follow-up) → **DEFER** the reader + **FIX the silent garbage-attach** (clean rejection; NO heavy install)
+
+**Question.** The KB binary-ingest path (`doc_ingest_bin` → `extract_text`) supports `.pdf` (pypdf) and `.docx`
+(python-docx), with a gated `-Ocr` scanned-PDF fallback. The last labeled v0.15 ingest follow-up: should we WIRE
+**legacy `.doc`** (the Word 97-2003 **OLE2 Compound File** binary format — NOT OOXML; **python-docx does NOT read
+it**) → text on a single-user Windows box, or DEFER? And — separately — is a `.doc` upload handled CLEANLY today?
+
+**Today's behavior (verified empirically, NOT assumed).** A `.doc` was **MISHANDLED, not cleanly rejected.**
+`extract_text("legacy.doc", oleBytes)` fell through the `.pdf`/`.docx` branch into the `data.decode("utf-8",
+"replace")` passthrough. Run against real OLE2 magic (`D0 CF 11 E0 A1 B1 1A E1` + binary body), it returned a
+1030-char string that was **~50% U+FFFD replacement chars + control bytes**; `chunk_text` then emitted **1 non-empty
+garbage chunk** that would embed + store under the `.doc` source — i.e. a **misleading "attached, N chunks"** with an
+unsearchable noise chunk silently polluting the KB. This is exactly the "treated as utf-8 → garbage chunks"
+fall-through the follow-up flagged.
+
+**`.doc` → text options (WebFetch-confirmed against primary sources, with honest weight):**
+- **Pure-pip pure-Python reader — NONE clean exists.** `docx2txt` is **`.docx`-only** (PyPI: "extract text and
+  images from **docx** files"); `mammoth` + `python-docx` are **`.docx`/OOXML-only** too. `olefile` IS pure-pip +
+  pure-Python + zero-dep, but it is a **low-level OLE2 CONTAINER parser** only — it lists/reads raw streams
+  (`WordDocument`, `0Table`/`1Table`); extracting clean body text requires hand-parsing the FIB + **piece table** +
+  reassembling fragments with per-piece encodings (a substantial, fragile binary-format reimplementation), and there
+  is **no maintained high-level pure-pip lib** that does this. So the "rides the existing uv-overlay like `.docx`"
+  ideal has **no real candidate**.
+- **`textract` — does NOT help on Windows.** Even the **actively-maintained `textract` 2.0.0 (2026-04-27)** has **no
+  pure-Python `.doc` path**: its `doc_parser.py` shells out to **`["antiword", filename]`**, and its own docs say
+  *"antiword is required by the .doc parser (note: **no longer actively maintained**)"* — and **antiword is not
+  available on Windows** (apt/brew only; no Chocolatey/winget package). A renewed maintainer doesn't change the
+  Windows-`.doc` story at all.
+- **LibreOffice headless** (`soffice --headless --convert-to txt`) — robust + cross-format, but a **HEAVY system
+  dep** (full office suite) for a legacy niche, and on **Windows specifically** has **documented UTF-8 corruption on
+  `.doc`→txt** conversion + is not thread-safe. This is the only genuinely-working local path, but it is the same
+  weight class as a gated `-Flag` system binary (cf. `-Ocr`'s UB-Mannheim Tesseract) — too heavy to justify here.
+- **antiword** — unmaintained AND not Windows-installable (the textract dep above). Out.
+- **`aspose-words` / `spire.doc`** — **commercial/proprietary** ("Free To Use But Restricted, Other/Proprietary
+  License"; eval-mode limits). They DO read `.doc`, but a paid/restricted lib is a non-starter for this app. Out.
+- **MS Word COM automation** — needs Word installed (not assumable; fragile out-of-proc automation). Out.
+
+**Verdict — DEFER the reader; FIX the rejection.** There is **no clean + light pure-pip path** for legacy `.doc` on
+Windows: every option is heavy (LibreOffice), Windows-unavailable/unmaintained (antiword/textract), commercial
+(aspose/spire), or a brittle by-hand OLE/piece-table reimplementation (olefile). And **modern Word docs are `.docx`,
+which IS already supported.** So per the DECISION RULE, DEFER means **no heavy install / no gated `-Flag` / no recipe
+change** — the gated-registry (`tests/gated-registry.ps1`), `setup.ps1`, `doki.ps1`, and the OCR/`.docx`/`.pdf`/`.txt`/
+`.md` paths are **all kept byte-for-byte**. The real user-facing win is the **clean rejection** (the niche doesn't
+justify a heavy dep; a confusing garbage-attach is the actual bug).
+
+**What changed (the rejection fix ONLY — no install change):**
+- `serving/memory-mcp/doc_index.py`: a new catchable **`_Unsupported`** domain error + a **`_REJECTED_EXTS =
+  {".doc", ".dot"}`** set. `extract_text` now rejects `.doc`/`.dot` on the **extension alone** (bytes never parsed)
+  **BEFORE** the utf-8 passthrough, raising `_Unsupported` with the clear message *"legacy .doc/.dot (Word 97-2003)
+  isn't supported — convert it to .docx, .pdf, or .txt and attach that."* It is **DISTINCT from `_ExtractFailed`** (a
+  `.doc` is a VALID file, just an unsupported FORMAT — not "corrupt/encrypted"), so the messages stay honest. The CLI
+  `doc_ingest_bin` handler maps it to a **DISTINCT exit 7** (alongside 3 = parsers-missing / 4 = corrupt / 5 =
+  too-large), so the C# side never shows the misleading embed-down 503 or the wrong corrupt-file text.
+- `control/Web/DocSearch.cs`: `MapIngestBinExit` gains an **exit-7** arm surfacing the same clear convert-to message
+  (falling back to a clear default when stdout carries no `{"error":…}`) — never "embed server", never "corrupt".
+- The `.docx`/`.pdf`/`.txt`/`.md`/`-Ocr` extraction paths + the chunker/embed/retrieval + the `accept=` upload list
+  are **untouched** (the picker already omits `.doc`; the server-side rejection covers a dragged/renamed `.doc`).
+- TDD: `tests/doc_index.test.py` (**148 → 161**) pins the `extract_text` `.doc`/`.dot` rejection (incl. case-
+  insensitive `.DOC`/`.DOT`, the empty-bytes/extension-only path, and `_Unsupported` ≠ `_ExtractFailed`) + the CLI
+  exit-7 mapping; `DocSearchTests` (**607 → 608**) pins the `MapIngestBinExit` exit-7 message contract.
+
+**When to revisit.** If a robust local `.doc`→text path is later wanted, the only credible route is a **gated
+`-LibreOffice` (or `-DocConvert`) sidecar** — a winget/Program-Files `soffice.exe` running `--headless --convert-to
+txt` as a pre-extraction step, registered in `tests/gated-registry.ps1` with a `SystemFile` shape **exactly like
+`-Ocr`'s Tesseract** (mind the Windows UTF-8-on-`.doc` corruption — convert to a UTF-8-safe filter or `.docx` first).
+Or, if a **maintained high-level pure-pip legacy-`.doc` reader** ever appears (one that reassembles the FIB/piece
+table, not just olefile's raw streams), wire it lazily into `extract_text` on the uv-overlay mirroring the `.docx`
+path. Until one of those exists, **`.doc` stays cleanly rejected with the convert-to-.docx message** and `.docx` is
+the supported Word format.
+
+**Sources.** docx2txt (`.docx`-only) — pypi.org/project/docx2txt ; textract `.doc`→antiword + "antiword no longer
+maintained / Windows-unavailable" — pypi.org/project/textract, the repo `textract/parsers/doc_parser.py`
+(`["antiword", filename]`) + readthedocs installation ; olefile (pure-Python OLE2 **container** only) —
+github.com/decalage2/olefile + the WordDocument/piece-table structure (learn.microsoft.com) ; aspose-words
+(commercial "Free To Use But Restricted, Other/Proprietary") — pypi.org/project/aspose-words ; LibreOffice headless
+`--convert-to txt` + the Windows UTF-8-corruption/not-thread-safe caveats — ask.libreoffice.org +
+github.com/scivision/office-headless.
+
 ## 2026-06-19 — Best-local-video census (HunyuanVideo / Mochi-1 / CogVideoX / HunyuanVideo 1.5 / Kandinsky 5 Lite) → **DEFER** (Wan 2.2 + LTX cover the 32GB spectrum; NO install/recipe change)
 
 **Question.** Among the notable open text/image-to-video models, is there one that is a clearly **BETTER quality

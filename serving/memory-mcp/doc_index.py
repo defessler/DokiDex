@@ -130,6 +130,17 @@ class _DocTooLarge(Exception):
     maps it to {"error": …} + exit 5 — the same 'document too large' contract as the C# text path."""
 
 
+class _Unsupported(Exception):
+    """A KNOWN-but-UNSUPPORTED document FORMAT (legacy OLE binary Word: .doc / .dot). DISTINCT from _ExtractFailed
+    (the file is VALID — it is just a format this build can't read) so it surfaces an HONEST "convert to .docx/.pdf/
+    .txt" message instead of a misleading "corrupt/encrypted" one OR — worse — falling through to the utf-8
+    passthrough that 'replace'-decodes the OLE binary into a GARBAGE chunk (a misleading "attached, N chunks").
+    The CLI handler maps it to {"error": …} + exit 7 (distinct from 3/4/5). See the v0.15 ingest follow-up in
+    docs/decisions.md: there is no clean pure-pip legacy-.doc reader (python-docx is OOXML-only; textract->antiword
+    is Windows-unavailable+unmaintained; olefile is a low-level container only; LibreOffice is too heavy a system
+    dep for the niche), so .doc is cleanly REJECTED rather than half-supported."""
+
+
 def _ocr_available():
     """Return the OCR deps triple (fitz, pytesseract, Image) ONLY when BOTH the pip parsers import AND the
     Tesseract binary is locatable; else None. NEVER raises (a missing piece on the txt/md/text-PDF path must be
@@ -236,8 +247,9 @@ def _extract_pdf(data):
 
 
 def _extract_docx(data):
-    """Plain text of an OOXML .docx via python-docx (lazy import). Reads paragraph text only; legacy .doc (OLE)
-    is NOT supported by python-docx and is out of scope (a follow-up needing a different lib)."""
+    """Plain text of an OOXML .docx via python-docx (lazy import). Reads paragraph text only; legacy .doc/.dot
+    (OLE binary Word) is NOT readable by python-docx and is REJECTED upstream in extract_text (_Unsupported, exit
+    7) — the v0.15 follow-up DEFERred wiring a reader (no clean light pure-pip path; docs/decisions.md)."""
     try:
         from docx import Document               # pip dist is 'python-docx'; import package is 'docx'
     except ImportError:
@@ -246,16 +258,31 @@ def _extract_docx(data):
     return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
 
 
-def extract_text(source, data):
-    """Route raw bytes -> plain text on the source EXTENSION: .pdf -> pypdf, .docx -> python-docx, else utf-8
-    decode (txt/md and any other extension — the stdlib zero-dep path, mangled bytes 'replace'd, never thrown).
-    The extracted text drops straight into the EXISTING chunk_text -> embed -> store pipeline unchanged.
+# Legacy OLE binary Word formats (.doc Word 97-2003 documents + .dot templates) that python-docx (OOXML-only)
+# CANNOT read. They are EXPLICITLY REJECTED (raise _Unsupported) rather than allowed to fall through to the utf-8
+# passthrough below — an OLE2 Compound File 'replace'-decodes into ~half U+FFFD garbage that chunk_text would still
+# emit as a noise chunk + store under the source (a misleading "attached, N chunks"). The v0.15 ingest follow-up
+# evaluated wiring a reader and chose DEFER (no clean light pure-pip path — see docs/decisions.md); a clean
+# rejection with an actionable "convert to .docx/.pdf/.txt" message is the real user-facing win. Modern Word docs
+# are .docx, which IS supported. (.dot/.doc only — .docx/.dotx/.docm OOXML are NOT here; .docx routes to python-docx.)
+_REJECTED_EXTS = {".doc", ".dot"}
 
-    NEVER exits and NEVER lets a parser traceback escape: a missing parser dep re-raises _ParserMissing; ANY
-    other exception from the parser (a corrupt / encrypted / not-really-that-format file) is wrapped in
-    _ExtractFailed with a clear message. The CLI handler is the one place that turns either into a printed
-    {"error": …} + the right exit code — so this stays importable + reusable by a non-CLI consumer."""
+
+def extract_text(source, data):
+    """Route raw bytes -> plain text on the source EXTENSION: .pdf -> pypdf, .docx -> python-docx, legacy OLE
+    .doc/.dot -> REJECTED (_Unsupported, a clear convert-to message), else utf-8 decode (txt/md and any other
+    extension — the stdlib zero-dep path, mangled bytes 'replace'd, never thrown). The extracted text drops
+    straight into the EXISTING chunk_text -> embed -> store pipeline unchanged.
+
+    NEVER exits and NEVER lets a parser traceback escape: a missing parser dep re-raises _ParserMissing; a legacy
+    .doc/.dot raises _Unsupported (a VALID file, just an unsupported FORMAT — NOT corrupt); ANY other exception
+    from the parser (a corrupt / encrypted / not-really-that-format file) is wrapped in _ExtractFailed with a clear
+    message. The CLI handler is the one place that turns each into a printed {"error": …} + the right exit code —
+    so this stays importable + reusable by a non-CLI consumer."""
     ext = os.path.splitext(source)[1].lower()
+    if ext in _REJECTED_EXTS:                    # legacy OLE binary Word: reject on the EXTENSION (bytes never parsed)
+        raise _Unsupported(
+            "legacy .doc/.dot (Word 97-2003) isn't supported — convert it to .docx, .pdf, or .txt and attach that.")
     if ext == ".pdf" or ext == ".docx":
         try:
             return _extract_pdf(data) if ext == ".pdf" else _extract_docx(data)
@@ -598,9 +625,10 @@ def _cli(argv):
     Subcommands:
       doc_ingest KB SOURCE     — read the document TEXT from STDIN, chunk+embed+store it; prints {"chunks":N}.
       doc_ingest_bin KB SOURCE — read the raw FILE BYTES from STDIN, extract text by extension (.pdf->pypdf,
-                                 .docx->python-docx, else utf-8), then the SAME chunk+embed+store; {"chunks":N}.
-                                 Distinct error exits (NOT the embed-down 1): 3 = parsers couldn't load, 4 =
-                                 corrupt/encrypted/wrong-format file, 5 = extracted text over MAX_DOC_CHARS.
+                                 .docx->python-docx, legacy .doc/.dot->rejected, else utf-8), then the SAME
+                                 chunk+embed+store; {"chunks":N}. Distinct error exits (NOT the embed-down 1):
+                                 3 = parsers couldn't load, 4 = corrupt/encrypted/wrong-format file, 5 = extracted
+                                 text over MAX_DOC_CHARS, 7 = unsupported FORMAT (legacy OLE .doc/.dot).
       doc_search KB QUERY [K]  — prints a JSON array of {source,ord,content,score}.
       doc_sources KB           — prints a JSON array of {source,chunks}.
       doc_remove KB SOURCE     — prints {"removed":N}.
@@ -629,6 +657,8 @@ def _cli(argv):
             text = extract_text(src, data)        # parse ONCE (reused for the 0-chunk signal below)
         except _ParserMissing as e:               # parsers couldn't load (offline / unresolved) -> exit 3
             print(json.dumps({"error": str(e)})); return 3
+        except _Unsupported as e:                 # legacy .doc/.dot (valid file, unsupported FORMAT) -> exit 7
+            print(json.dumps({"error": str(e)})); return 7
         except _ExtractFailed as e:               # corrupt / encrypted / not-really-that-format file -> exit 4
             print(json.dumps({"error": str(e)})); return 4
         # enforce the same MAX_DOC_CHARS cap ingest_bin does, here on the already-extracted text (exit 5) — so a

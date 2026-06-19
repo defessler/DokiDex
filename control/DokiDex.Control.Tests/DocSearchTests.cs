@@ -217,6 +217,30 @@ public class DocSearchTests
     }
 
     [Fact]
+    public void MapIngestBinExit_exit7_is_the_clear_unsupported_format_message_not_a_503()
+    {
+        // The v0.15 ingest follow-up (WIRE-vs-DEFER -> DEFER): a legacy OLE binary .doc/.dot exits 7 (the format is
+        // UNSUPPORTED — python-docx is OOXML-only and there's no clean light pure-pip legacy-.doc reader). It must
+        // surface the script's clear "convert to .docx/.pdf/.txt" message — NOT the corrupt-file 4 (the file is
+        // valid), and NEVER the embed-down 503 (the embed server is fine). Distinct from the generic non-zero below.
+        const string stdout = "{\"error\":\"legacy .doc/.dot (Word 97-2003) isn't supported — convert it to .docx, .pdf, or .txt and attach that.\"}";
+        var r = DocSearch.MapIngestBinExit(7, stdout);
+        Assert.False(r.Ok);
+        Assert.Equal(0, r.Chunks);
+        Assert.Contains(".docx", r.Message!);
+        Assert.Contains("convert", r.Message!, System.StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("embed server", r.Message!);
+
+        // even with NO parseable stdout, exit 7 must surface a clear unsupported-format default (the distinct exit
+        // code alone tells us it's an unsupported FORMAT, not a corrupt file and not a down embed server).
+        var rNoBody = DocSearch.MapIngestBinExit(7, "");
+        Assert.False(rNoBody.Ok);
+        Assert.Contains(".docx", rNoBody.Message!);
+        Assert.DoesNotContain("embed server", rNoBody.Message!);
+        Assert.DoesNotContain("corrupt", rNoBody.Message!, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void MapIngestBinExit_generic_nonzero_names_both_offline_parsers_and_a_down_embed_server()
     {
         // FIX 5: the realistic live failure on the binary path is `uv` failing to RESOLVE pypdf/python-docx OFFLINE

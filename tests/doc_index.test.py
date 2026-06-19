@@ -178,6 +178,42 @@ try:
     check(doc_index.extract_text("SHOUT.TXT", b"loud") == "loud",
           "extract_text extension match is case-insensitive")
 
+    # --- legacy .doc / .dot (OLE binary Word) EXPLICIT REJECTION (the v0.15 ingest follow-up: WIRE-vs-DEFER
+    #     evaluated -> DEFER; see docs/decisions.md). python-docx reads ONLY OOXML .docx, NOT the OLE2 Compound
+    #     File .doc/.dot — there is no clean pure-pip reader (olefile is a low-level container only; textract ->
+    #     antiword is Windows-unavailable+unmaintained; aspose/spire are commercial; LibreOffice is too heavy a
+    #     system dep for the niche). So rather than let an OLE .doc fall through to the utf-8 passthrough (which
+    #     'replace'-decodes the binary into a GARBAGE chunk that embeds + stores under the source — a misleading
+    #     "attached, N chunks"), extract_text REJECTS .doc/.dot with the catchable _Unsupported domain error and a
+    #     clear "convert to .docx/.pdf/.txt" message. The OLE2 magic header is the real legacy-.doc signature. ---
+    _ole_magic = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + bytes(range(256))   # OLE2 Compound File header + binary body
+    for _src in ("legacy.doc", "memo.DOC", "template.dot", "macro.DOT"):
+        threw = None
+        try:
+            doc_index.extract_text(_src, _ole_magic)
+        except doc_index._Unsupported as us:
+            threw = us
+        except Exception as e:                       # MUST be the clean _Unsupported, never a raw traceback / other error
+            threw = ("WRONG", e)
+        check(isinstance(threw, doc_index._Unsupported),
+              f"extract_text({_src}) RAISES _Unsupported (legacy .doc/.dot is not utf-8 garbage-decoded)")
+        check(isinstance(threw, doc_index._Unsupported) and ".docx" in str(threw)
+              and ("convert" in str(threw).lower()),
+              f"extract_text({_src}) _Unsupported message tells the user to convert to .docx/.pdf/.txt")
+    # _Unsupported is DISTINCT from _ExtractFailed (a .doc is a VALID file, just an unsupported FORMAT — not
+    # "corrupt/encrypted"), so the two surface different, honest messages and (below) different CLI exit codes.
+    check(issubclass(doc_index._Unsupported, Exception)
+          and not issubclass(doc_index._Unsupported, doc_index._ExtractFailed),
+          "_Unsupported is its own domain error, NOT a subclass of _ExtractFailed (a valid file, unsupported format)")
+    # the rejection is decided on the EXTENSION alone (bytes never parsed) — an empty .doc is rejected just the same.
+    threw_empty = None
+    try:
+        doc_index.extract_text("blank.doc", b"")
+    except doc_index._Unsupported as us:
+        threw_empty = us
+    check(isinstance(threw_empty, doc_index._Unsupported),
+          "extract_text(.doc) rejects on the extension alone — even empty bytes (never a utf-8 passthrough)")
+
     # .pdf -> _extract_pdf, .docx -> _extract_docx. Stub both so the dispatch is tested with NO real lib.
     _orig_pdf, _orig_docx = doc_index._extract_pdf, doc_index._extract_docx
     try:
@@ -587,6 +623,18 @@ try:
     check(c5 == 5, f"CLI doc_ingest_bin: over-MAX_DOC_CHARS extracted text -> exit 5 (got {c5})")
     check(isinstance(j5, dict) and "too large" in j5.get("error", ""),
           "CLI exit-5 prints the clear {\"error\":\"document too large (N chars) — split it ...\"}")
+
+    # exit 7: an UNSUPPORTED FORMAT (legacy .doc/.dot). The handler maps extract_text's _Unsupported to a DISTINCT
+    # exit 7 + a clear "convert to .docx/.pdf/.txt" {"error":…} — NOT the corrupt-file 4, NOT the embed-down 1 (the
+    # file is fine + the embed server is fine; the FORMAT just isn't supported). The OLE2 magic is the real .doc sig.
+    c7, j7 = _run_cli(["doc_index.py", "doc_ingest_bin", "kbCLI", "legacy.doc"],
+                      b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" + bytes(range(64)))
+    check(c7 == 7, f"CLI doc_ingest_bin: legacy .doc (OLE) -> exit 7 unsupported-format (got {c7})")
+    check(isinstance(j7, dict) and ".docx" in j7.get("error", "") and "convert" in j7.get("error", "").lower(),
+          "CLI exit-7 prints the clear {\"error\":\"…convert to .docx/.pdf/.txt\"} (no garbage utf-8 attach)")
+    # .dot is rejected identically (a Word template is the same OLE container — neither is read by python-docx).
+    c7b, _ = _run_cli(["doc_index.py", "doc_ingest_bin", "kbCLI", "memo.dot"], b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
+    check(c7b == 7, f"CLI doc_ingest_bin: legacy .dot template -> exit 7 unsupported-format (got {c7b})")
 
     # exit 0 unchanged: a valid in-bounds extracted PDF still ingests + prints {"chunks":N}. Stub ingest_doc to a
     # positive count (the real embed path is covered by the stub-embedder ingest tests above); this locks the _cli

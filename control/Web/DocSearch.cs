@@ -254,11 +254,12 @@ public static class DocSearch
         catch (Exception ex) { KillTree(p); return new IngestResult(false, 0, $"ingest error: {ex.Message}"); }
     }
 
-    // Ingest one BINARY document (.pdf/.docx — or any extension; the server decodes utf-8 for the rest) under
-    // (kbId, source): the raw FILE BYTES are piped via STDIN to `doc_ingest_bin`, which extracts text by extension
-    // and reuses the SAME chunk+embed+store pipeline. Distinct error exits each surface a CLEAR, RIGHT message (NEVER
-    // the misleading embed-down 503): 3 = parsers couldn't load, 4 = corrupt/encrypted/wrong-format file, 5 =
-    // extracted text over MaxDocChars (the same too-large contract as the text path). Never throws, never hangs.
+    // Ingest one BINARY document (.pdf/.docx — or any extension; the server decodes utf-8 for the rest, and rejects
+    // legacy OLE .doc/.dot) under (kbId, source): the raw FILE BYTES are piped via STDIN to `doc_ingest_bin`, which
+    // extracts text by extension and reuses the SAME chunk+embed+store pipeline. Distinct error exits each surface a
+    // CLEAR, RIGHT message (NEVER the misleading embed-down 503): 3 = parsers couldn't load, 4 = corrupt/encrypted/
+    // wrong-format file, 5 = extracted text over MaxDocChars (the same too-large contract as the text path), 7 =
+    // unsupported FORMAT (legacy .doc/.dot — convert to .docx/.pdf/.txt). Never throws, never hangs.
     public static async Task<IngestResult> IngestBinAsync(string kbId, string source, byte[] data, CancellationToken ct)
     {
         // Bound on RAW BYTES FIRST — before the install check and any spawn — so an over-cap upload fails fast with
@@ -303,6 +304,8 @@ public static class DocSearch
     //   exit 3  -> the parsers couldn't load (offline / unresolved): surface the script's clear `uv run --with …` hint
     //   exit 4  -> the FILE is unreadable (corrupt, encrypted, not really that format): a clear "couldn't read" message
     //   exit 5  -> the EXTRACTED text exceeds MaxDocChars: the SAME "document too large" message as the text path
+    //   exit 7  -> an UNSUPPORTED FORMAT (legacy OLE binary .doc/.dot): a clear "convert to .docx/.pdf/.txt" — NOT
+    //              the corrupt-file 4 (the file is VALID) and NOT the embed-down 503 (the v0.15 follow-up DEFER)
     //   other   -> generic: parsers may be unavailable OFFLINE, or the embed server is down — name BOTH (FIX 5)
     public static IngestResult MapIngestBinExit(int exitCode, string? stdout) => exitCode switch
     {
@@ -313,6 +316,8 @@ public static class DocSearch
                  ?? "couldn't read this file (corrupt, encrypted, or not a valid PDF/DOCX)."),
         5 => new IngestResult(false, 0, ParseError(stdout)
                  ?? $"document too large — split it or attach a smaller file (max {MaxDocChars} chars)."),
+        7 => new IngestResult(false, 0, ParseError(stdout)
+                 ?? "legacy .doc/.dot (Word 97-2003) isn't supported — convert it to .docx, .pdf, or .txt and attach that."),
         _ => new IngestResult(false, 0,
                  "document ingest failed (the parsers may be unavailable offline, or the embed server is down — see start-embed.ps1)."),
     };
