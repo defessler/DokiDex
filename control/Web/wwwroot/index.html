@@ -33,6 +33,7 @@
     button.primary { background:#0E7490; color:var(--text); border:1px solid #0E7490; border-radius:6px; padding:10px 22px; font-size:14px; cursor:pointer; }
     button.primary:hover { background:#1190b0; }
     button.ghost { background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; }
+    button.ghost:disabled, button.ghost.disabled { opacity:.45; cursor:not-allowed; }
     .hint { color:var(--dim); font-size:12px; }
     h2 { font-size:11px; letter-spacing:1px; color:var(--dim); font-weight:600; text-transform:uppercase; margin:24px 0 10px; }
     .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
@@ -89,6 +90,10 @@
     #chatImagePicker .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px}
     #chatImagePicker .pcell{cursor:pointer;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--surface3)}
     #chatImagePicker .pcell img{display:block;width:100%;height:72px;object-fit:cover}
+    /* Pn.1 tools: composer toggle + inline tool-step chips above an assistant bubble */
+    #chatTools.on{color:#06121a;background:var(--cyan);border-color:var(--cyan);font-weight:600}
+    .toolsteps{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 5px}
+    .toolsteps .tchip{display:inline-block;font-size:11px;color:var(--cyan);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #chatImagePicker .pcell:hover{border-color:var(--cyan)}
   </style>
 </head>
@@ -280,7 +285,8 @@
       <div id="chatImagePicker"><p class="hint" id="chatImagePickerHint" style="margin:0 0 6px">Pick a Library image…</p><div class="pgrid" id="chatImageGrid"></div></div>
       <div class="mods" style="align-items:center;margin-top:6px">
         <label title="fast = the interactive coder model; quality = the heavy model (slower, stronger), swapped in on demand">Speed <select id="chatTier" class="kin" style="width:auto"><option value="fast">fast</option><option value="quality">quality · slower</option></select></label>
-        <button class="ghost" type="button" onclick="toggleChatImagePicker()" title="Attach one Library image so the assistant can see it (uses the vision model)">+ image</button>
+        <button class="ghost" id="chatImageBtn" type="button" onclick="toggleChatImagePicker()" title="Attach one Library image so the assistant can see it (uses the vision model)">+ image</button>
+        <button class="ghost" id="chatTools" type="button" aria-pressed="false" onclick="toggleChatTools()" title="Let the assistant use tools (e.g. search your Library). Runs non-streaming. Text-only — can't be combined with an attached image.">🔧 tools</button>
         <button class="primary" onclick="sendChat()">Send</button>
         <button class="ghost" onclick="newChat()">New</button>
         <span class="hint" id="chatHint"></span>
@@ -1411,14 +1417,20 @@
     function setChatImage(name){
       _chatImage=name||null;
       const chip=document.getElementById('chatImageChip');
-      if(!_chatImage){ chip.style.display='none'; return; }
+      if(!_chatImage){ chip.style.display='none'; syncChatModeLocks(); return; }
       document.getElementById('chatImageThumb').src='/api/gallery/media/'+encodeURIComponent(_chatImage);
       document.getElementById('chatImageName').textContent=_chatImage;
       chip.style.display='flex';
       document.getElementById('chatImagePicker').style.display='none';
+      // Tools + image are MUTUALLY EXCLUSIVE (the agent loop is text-only): attaching an image cancels tools mode
+      // so the image is never silently dropped on the way to the text-only /api/chat agent path.
+      if(_chatTools){ _chatTools=false; document.getElementById('chatHint').textContent='tools turned off — image is vision-only'; }
+      syncChatModeLocks();
     }
     function clearChatImage(){ setChatImage(null); }
     async function toggleChatImagePicker(){
+      // Tools mode is text-only: never open the image picker while it's active (the button is also disabled).
+      if(_chatTools){ document.getElementById('chatHint').textContent='tools mode is text-only — turn tools off to attach an image'; return; }
       const p=document.getElementById('chatImagePicker');
       if(p.style.display!=='none' && p.style.display!==''){ p.style.display='none'; return; }
       const grid=document.getElementById('chatImageGrid'), hint=document.getElementById('chatImagePickerHint');
@@ -1438,6 +1450,61 @@
           grid.appendChild(cell);
         });
       }catch{ hint.textContent='could not load the Library'; }
+    }
+    // ---- Pn.1 tools: a composer toggle that, when ON, sends NON-STREAMING with tools:true (tools only work ----
+    // non-streaming). OFF (default) keeps the exact streaming send. The agent loop returns the tool steps taken,
+    // which render as small inline chips above the assistant bubble. textContent only (no innerHTML on model data).
+    let _chatTools=false;
+    function toggleChatTools(){
+      _chatTools=!_chatTools;
+      // Tools + image are MUTUALLY EXCLUSIVE (the agent loop is text-only). Turning tools ON clears any pending
+      // image so it can't be silently discarded, and the "+ image" button is disabled while tools mode is active.
+      if(_chatTools && _chatImage){ clearChatImage(); document.getElementById('chatHint').textContent='tools mode is text-only — image removed'; }
+      syncChatModeLocks();
+    }
+    // Reconcile the two mutually-exclusive composer modes' UI: the tools button's pressed state, and disabling the
+    // "+ image" button while tools mode is ON (so a user can never attach an image that the text-only agent path
+    // would silently drop). Called from BOTH toggles so the locked state stays consistent whichever fired.
+    function syncChatModeLocks(){
+      const b=document.getElementById('chatTools');
+      if(b){ b.classList.toggle('on',_chatTools); b.setAttribute('aria-pressed',_chatTools?'true':'false'); }
+      const img=document.getElementById('chatImageBtn');
+      if(img){ img.disabled=_chatTools; img.classList.toggle('disabled',_chatTools);
+        img.title=_chatTools?'Disabled in tools mode — the agent loop is text-only':'Attach one Library image so the assistant can see it (uses the vision model)'; }
+    }
+    // Render the tool trace as chips ABOVE an assistant bubble (e.g. "🔧 search_library: <query>"). The backend
+    // shape is steps:[{tool, args}]; we read each step defensively and label via textContent only.
+    function renderToolSteps(bub, steps){
+      if(!Array.isArray(steps) || !steps.length || !bub || !bub.parentNode) return;
+      const wrap=document.createElement('div'); wrap.className='toolsteps';
+      steps.forEach(s=>{
+        const name=(s&&(s.tool||s.name))||'tool';
+        // Backend ToolStep carries the raw arguments JSON (camelCase: argumentsJson); show a readable preview —
+        // the parsed 'query' when present, else the trimmed raw JSON. Defensive: never throw on a bad/odd shape.
+        let arg=(s&&(s.args||s.arguments||s.query||s.argumentsJson))||'';
+        if(typeof arg==='string' && arg.trim().startsWith('{')){
+          try{ const o=JSON.parse(arg); arg=o.query||o.q||arg; }catch{}
+        } else if(arg && typeof arg!=='string'){ arg=arg.query||arg.q||JSON.stringify(arg); }
+        const chip=document.createElement('span'); chip.className='tchip';
+        chip.textContent='🔧 '+name+(arg?(': '+arg):'');
+        chip.title=chip.textContent;
+        wrap.appendChild(chip);
+      });
+      bub.parentNode.insertBefore(wrap, bub);
+    }
+    // Tools send path: NON-streaming POST /api/chat with tools:true. Renders the final answer + any tool-step chips.
+    async function sendChatTools(text,fresh,image){
+      const hint=document.getElementById('chatHint');
+      const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
+          message:text, tier:document.getElementById('chatTier').value, image:image||null, tools:true})});
+      const j=await r.json();
+      if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
+      _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text});
+      const bub=appendBubble('assistant', j.text);
+      renderToolSteps(bub, j.steps);   // backend emits only `steps`
+      hint.textContent='';
+      if(fresh) loadThreads();
     }
     // Non-streaming POST /api/chat — kept as the P2 transport fallback (real 503 contract).
     async function sendChatOnce(text,fresh,image){
@@ -1459,6 +1526,8 @@
       const image=_chatImage; clearChatImage();
       appendBubble('user',text); _chatMsgs.push({role:'user',content:text}); inp.value=''; hint.textContent='thinking…';
       const fresh = !_chatConv;
+      // Pn.1: tools ON → NON-streaming agent loop (tools only work non-streaming). Everything else is unchanged.
+      if(_chatTools){ try{ await sendChatTools(text,fresh,image); }catch{ hint.textContent='request failed'; } return; }
       // P2 streaming: append an empty assistant bubble, read SSE frames off res.body, append each token live.
       const bub=appendBubble('assistant',''); let acc='', got=false;
       try{

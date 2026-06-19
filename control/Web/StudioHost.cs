@@ -294,12 +294,20 @@ public static class StudioHost
         // instruct model (:8080, agent/coexist mode). The server persists history in ChatStore, so the SPA need
         // not resend the transcript. Mirrors the Director 503 "start agent mode first" contract verbatim: when
         // the LLM is down the request returns 503 + the canonical message (same as Director at the shotlist endpoint).
+        // When body.Tools is true the turn runs through the bounded TOOL-CALLING agent loop (Chat.AgentAsync) with
+        // the curated single-tool registry (search_library) and returns the tool steps taken; Tools=false (the
+        // default) keeps the exact current Chat.SendAsync path. Same 503 + canonical-string contract either way.
         api.MapPost("/chat", async (ChatRequest body, CancellationToken ct) =>
         {
-            var r = await Chat.SendAsync(body, LlmTiers.Resolve(body.Tier), ct);
-            return r.Ok
-                ? Results.Json(new { conversation = r.ConversationId, text = r.Text })
-                : Results.Json(new { error = r.Message }, statusCode: 503);   // canonical "start agent mode first"
+            var r = body.Tools
+                ? await Chat.AgentAsync(body, LlmTiers.Resolve(body.Tier), ct)
+                : await Chat.SendAsync(body, LlmTiers.Resolve(body.Tier), ct);
+            if (!r.Ok)
+                return Results.Json(new { error = r.Message }, statusCode: 503);   // canonical "start agent mode first"
+            // Only the tools path carries steps; the plain send omits the field entirely (no "steps":null noise).
+            return r.Steps is { Count: > 0 }
+                ? Results.Json(new { conversation = r.ConversationId, text = r.Text, steps = r.Steps })
+                : Results.Json(new { conversation = r.ConversationId, text = r.Text });
         });
 
         // ---- persona chat (P2, streaming): the streaming twin of POST /api/chat over SSE on the POST response ----

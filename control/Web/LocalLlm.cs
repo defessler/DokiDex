@@ -26,6 +26,104 @@ public static class LocalLlm
 
     public sealed record ChatResult(bool Ok, string Text, string? Error);
 
+    // ONE parsed tool call from choices[0].message.tool_calls[]. ArgumentsJson is the RAW function.arguments
+    // string (an OpenAI tool-call carries arguments as a JSON STRING, not an object), passed verbatim to the
+    // tool executor (ChatTools.Run). Id is the upstream tool_call_id echoed back on the role:"tool" result turn.
+    public sealed record ToolCall(string Id, string Name, string ArgumentsJson);
+
+    // The tool-calling result of ChatToolsAsync: BOTH the assistant content (may be empty when the model chose a
+    // tool instead of answering) AND the parsed tool_calls (empty when the model just answered). Ok=false +
+    // Error mirrors ChatResult's degradation (LLM down / no model) so the agent loop ends gracefully.
+    public sealed record ToolChatResult(bool Ok, string Content, IReadOnlyList<ToolCall> ToolCalls, string? Error);
+
+    // PURE: extract choices[0].message.tool_calls[].{id, function.name, function.arguments} from a llama-swap
+    // /v1/chat/completions response. The exact shape is proven by serving/test-toolcall.ps1
+    // (choices[0].message.tool_calls[].function.{name,arguments}). Returns EMPTY for: a plain content reply with
+    // no tool_calls (the graceful fallthrough — that content is the answer), an empty tool_calls array, and any
+    // malformed/partial JSON. A call with no function.name is skipped (cannot be dispatched); missing arguments
+    // (or a non-STRING arguments value some open models emit, e.g. a JSON object) default to "{}". A missing id is
+    // SYNTHESIZED as a unique "call_<index>" — never "" — so two id-less calls in one hop don't collide on the same
+    // tool_call_id when the loop echoes the role:"tool" results. Total + side-effect-free — unit-tested like ParseSseDelta.
+    public static IReadOnlyList<ToolCall> ParseToolCalls(string responseJson)
+    {
+        if (string.IsNullOrWhiteSpace(responseJson)) return Array.Empty<ToolCall>();
+        try
+        {
+            using var doc = JsonDocument.Parse(responseJson);
+            if (!doc.RootElement.TryGetProperty("choices", out var choices)
+                || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
+                return Array.Empty<ToolCall>();
+            if (!choices[0].TryGetProperty("message", out var message)
+                || !message.TryGetProperty("tool_calls", out var toolCalls)
+                || toolCalls.ValueKind != JsonValueKind.Array || toolCalls.GetArrayLength() == 0)
+                return Array.Empty<ToolCall>();
+
+            var list = new List<ToolCall>();
+            var index = 0;
+            foreach (var tc in toolCalls.EnumerateArray())
+            {
+                var slot = index++;   // positional index of THIS entry (used to synthesize an id when absent)
+                if (!tc.TryGetProperty("function", out var fn)) continue;
+                if (!fn.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String) continue;
+                var name = nameEl.GetString();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                // A missing/blank/non-string id is replaced with a synthesized unique id so id-less calls can't
+                // collide on tool_call_id "" (the loop relies on the id to correlate each role:"tool" result).
+                var id = tc.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                    ? (idEl.GetString() ?? "") : "";
+                if (string.IsNullOrWhiteSpace(id)) id = $"call_{slot}";
+
+                // OpenAI carries arguments as a JSON STRING; a non-string value (e.g. an object some open models
+                // emit) is NOT a valid arguments payload here, so fall back to "{}" rather than mis-reading it.
+                var args = fn.TryGetProperty("arguments", out var argEl) && argEl.ValueKind == JsonValueKind.String
+                    ? argEl.GetString() ?? "{}" : "{}";
+                if (string.IsNullOrWhiteSpace(args)) args = "{}";
+
+                list.Add(new ToolCall(id, name!, args));
+            }
+            return list;
+        }
+        catch { return Array.Empty<ToolCall>(); }
+    }
+
+    // Tool-calling multi-turn chat (agent loop, non-streaming): the SAME array-based Body as ChatTurnsAsync plus a
+    // 'tools' array + tool_choice:"auto", returning BOTH the assistant content AND the parsed tool_calls. The
+    // open-model risk (some models emit a TEXTUAL <function=...> rather than real tool_calls) is mitigated upstream
+    // by ParseToolCalls returning empty for any non-tool_calls reply => the agent loop treats that content as the
+    // final answer. Degrades exactly like PostAsync: LLM down / no model => Ok=false + the canonical message.
+    public static async Task<ToolChatResult> ChatToolsAsync(
+        IReadOnlyList<object> messages, object toolsJson, double temperature, int maxTokens,
+        CancellationToken ct, string? model = null)
+    {
+        var body = Body(messages.ToArray(), temperature, maxTokens, model);
+        body["tools"] = toolsJson;
+        body["tool_choice"] = "auto";
+        try
+        {
+            using var resp = await Http.PostAsJsonAsync(ChatUrl, body, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return new ToolChatResult(false, "", Array.Empty<ToolCall>(),
+                    $"LLM returned {(int)resp.StatusCode} — is a model loaded? (start agent mode)");
+            var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var toolCalls = ParseToolCalls(raw);
+            string content = "";
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                if (doc.RootElement.TryGetProperty("choices", out var choices)
+                    && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0
+                    && choices[0].TryGetProperty("message", out var msg)
+                    && msg.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
+                    content = c.GetString() ?? "";
+            }
+            catch { /* content stays "" — tool_calls already parsed above */ }
+            return new ToolChatResult(true, content, toolCalls, null);
+        }
+        catch (OperationCanceledException) { return new ToolChatResult(false, "", Array.Empty<ToolCall>(), "cancelled"); }
+        catch (Exception ex) { return new ToolChatResult(false, "", Array.Empty<ToolCall>(), $"LLM not reachable at :8080 — start agent mode first ({ex.Message})"); }
+    }
+
     // `model` (optional) selects which llama-swap model serves the request — the speed/quality TIER (see
     // LlmTiers). Null omits the field entirely, preserving the pre-tier behavior (llama-swap's loaded default).
     public static Task<ChatResult> ChatAsync(string system, string user, double temperature, int maxTokens, CancellationToken ct, string? model = null)

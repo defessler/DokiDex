@@ -15,9 +15,12 @@ namespace DokiDex.Web;
 // Image (P5 vision-in-chat, optional) = a GALLERY IMAGE NAME (resolved server-side to a data: URL via
 // GalleryService.ImageDataUrl). When present + resolvable, the turn is answered by the VISION model (the tier is
 // forced to LlmTiers.Vision regardless of the requested speed Tier); an unresolvable name is ignored (text-only).
+// Tools (Pn, default false) routes the turn through the bounded TOOL-CALLING agent loop (Chat.AgentAsync) with
+// the curated single-tool registry (ChatTools) instead of the plain Chat.SendAsync path. Tools=false keeps the
+// exact current non-tool behavior. Streaming + tools is a later slice (the stream endpoint ignores Tools).
 public sealed record ChatRequest(
     string? Conversation, string? Persona, string? Message, string? Tier, IReadOnlyList<ChatTurn>? Messages = null,
-    string? Image = null);
+    string? Image = null, bool Tools = false);
 
 // The persona-chat orchestrator (mirrors Director/Rewriter shape): load the card + the conversation, assemble
 // the prompt via the pure ChatPrompt.Build, run the multi-turn LLM call, persist BOTH turns, and return a
@@ -32,7 +35,29 @@ public static class Chat
     private const int LoreMaxEntries = 8;
     private const int LoreMaxChars = 1500;
 
-    public sealed record Result(bool Ok, string ConversationId, string Text, string? Message);
+    // Steps defaults to empty so the existing SendAsync callers/tests are unaffected; AgentAsync fills it with
+    // the tool calls taken (each: the tool name + a short preview of its result) for an optional SPA trace.
+    public sealed record Result(bool Ok, string ConversationId, string Text, string? Message,
+        IReadOnlyList<ToolStep>? Steps = null);
+
+    // One executed tool hop in the agent loop (for an optional SPA "tools taken" trace): the tool name, the raw
+    // arguments JSON the model supplied, and the tool result text fed back as the role:"tool" turn.
+    public sealed record ToolStep(string Tool, string ArgumentsJson, string Result);
+
+    // The bounded agent loop's hop cap: at most this many tool-execution rounds before the loop stops and returns
+    // the last content (or a graceful "stopped after N steps"). A small cap is the open-model mitigation from
+    // decisions.md — a model that keeps requesting tools can never spin forever.
+    public const int MaxToolHops = 4;
+
+    // Overall wall-clock budget for ONE agent turn. AgentAsync can drive up to (MaxToolHops + 1) SEQUENTIAL LLM
+    // calls, each otherwise bounded only by the shared 3-min HttpClient timeout — so N stacked timeouts could reach
+    // ~15 min. A single linked CTS (this budget AND the incoming ct) caps the WHOLE turn instead; on expiry the loop
+    // ends gracefully and returns whatever text accumulated (or the canonical "stopped" message).
+    private static readonly TimeSpan AgentTurnTimeout = TimeSpan.FromMinutes(4);
+
+    // Tool-calling runs a LOWER temperature than free-form chat: open models pick tools more reliably when less
+    // random (serving/test-toolcall.ps1 uses 0.2). Distinct from SendAsync/StreamAsync's 0.8 conversational temp.
+    private const double ToolTemperature = 0.3;
 
     // One streamed event from StreamAsync. The FIRST event is always a Meta carrying the conversation id (so the
     // SPA can capture it before any token arrives); every subsequent event is a Delta carrying one token chunk.
@@ -87,6 +112,134 @@ public static class Chat
         ChatStore.Save(conv);   // graceful: a save failure does not fail the reply the user already has
 
         return new Result(true, conv.Id, reply, null);
+    }
+
+    // PURE loop-termination decision (no GPU/disk): take another hop only when the model requested at least one
+    // tool AND we are still under the hop cap. No tool_calls => the model's content IS the answer (graceful
+    // fallthrough, the open-model mitigation). hop is the number of hops ALREADY taken. Total + unit-tested so the
+    // bound can't silently drift.
+    public static bool ShouldContinue(IReadOnlyList<LocalLlm.ToolCall> toolCalls, int hop, int maxHops)
+        => toolCalls is { Count: > 0 } && hop < maxHops;
+
+    // PURE per-hop transcript shaping (no GPU/disk): append ONE assistant tool-call turn followed by ONE role:"tool"
+    // result message per executed call onto the mutable working transcript, in assistant-THEN-results order. The
+    // assistant turn carries content:NULL (OpenAI convention for a tool-call message — not "") plus the tool_calls;
+    // each result echoes the SAME tool_call_id its call carried (ids are synthesized upstream in ParseToolCalls when
+    // the model omits one, so correlation always holds and id-less calls can't collide). `results[i]` is the tool
+    // output for `toolCalls[i]`; a short results array is tolerated (a missing result => "" content). Extracted from
+    // AgentAsync so this wire-shape is unit-testable without a live model.
+    public static void AppendToolRound(
+        List<object> working, string? assistantContent,
+        IReadOnlyList<LocalLlm.ToolCall> toolCalls, IReadOnlyList<string> results)
+    {
+        working.Add(new
+        {
+            role = "assistant",
+            content = (string?)null,   // tool-call assistant turn => content is null, not ""
+            tool_calls = toolCalls.Select(tc => new
+            {
+                id = tc.Id,
+                type = "function",
+                function = new { name = tc.Name, arguments = tc.ArgumentsJson },
+            }).ToArray(),
+        });
+        for (var i = 0; i < toolCalls.Count; i++)
+        {
+            var tc = toolCalls[i];
+            var content = i < results.Count ? results[i] : "";
+            working.Add(new { role = "tool", tool_call_id = tc.Id, name = tc.Name, content });
+        }
+    }
+
+    // TOOL-CALLING agent loop (Pn, non-streaming): the agentic twin of SendAsync. Builds the prompt via the pure
+    // ChatPrompt.Build, then calls LocalLlm.ChatToolsAsync (same Body + a 'tools' array + tool_choice:"auto").
+    // While the model returns tool_calls AND hops remain: append the assistant tool-call message + one role:"tool"
+    // result message per call (tool_call_id + ChatTools.Run output) and RE-CALL. Stops when the model returns
+    // content with no tool_calls (that content is the answer) OR MaxToolHops is hit (returns the last content, or a
+    // graceful "stopped after N steps" if none). Persists the user + final assistant turns exactly like SendAsync
+    // (reusing SelectHistory + the empty-message guard). The live LLM call degrades like SendAsync when :8080 is
+    // down (Ok=false + the canonical message => the endpoint maps to the same 503 contract).
+    public static async Task<Result> AgentAsync(ChatRequest body, string? model, CancellationToken ct)
+    {
+        var userMessage = (body?.Message ?? "").Trim();
+        if (userMessage.Length == 0) return new Result(false, "", "", "empty message");
+
+        var card = Persona.Load(body!.Persona);   // null name / unknown => built-in default persona
+
+        var conv = ChatStore.Load(body.Conversation)
+                   ?? ChatStore.NewConversation(body.Persona, card?.Lorebook);
+
+        IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
+        var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
+
+        // The agent loop is text-only (no vision-in-chat this slice): keep the requested speed tier as-is.
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore);
+
+        // A MUTABLE working transcript for the loop: we append the assistant tool-call turns + tool results onto a
+        // copy of the built messages, then re-call. The persisted conversation only ever stores the user turn + the
+        // FINAL assistant answer (tool plumbing is an implementation detail, not chat history).
+        var working = new List<object>(messages);
+
+        var maxTokens = 1024;
+        var steps = new List<ToolStep>();
+        string finalText = "";
+
+        // Bound the WHOLE turn (not each hop): one linked CTS combining the caller's ct with AgentTurnTimeout, so up
+        // to MaxToolHops+1 sequential LLM calls can't stack N×3-min timeouts. On budget expiry we return whatever
+        // text accumulated (or the canonical "stopped" message) — graceful, like the hop-cap fallthrough.
+        using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        turnCts.CancelAfter(AgentTurnTimeout);
+        var loopCt = turnCts.Token;
+
+        for (var hop = 0; ; hop++)
+        {
+            var turn = await LocalLlm.ChatToolsAsync(working, ChatTools.ToolsJson, ToolTemperature, maxTokens, loopCt, model)
+                .ConfigureAwait(false);
+            if (!turn.Ok)
+            {
+                // Our overall budget elapsed (the caller's ct is NOT cancelled, only our linked timeout fired): end
+                // gracefully with what we have so far rather than surfacing a bare error / a 503.
+                if (turnCts.IsCancellationRequested && !ct.IsCancellationRequested) break;
+                return new Result(false, conv.Id, "", turn.Error);
+            }
+
+            finalText = (turn.Content ?? "").Trim();
+
+            if (!ShouldContinue(turn.ToolCalls, hop, MaxToolHops))
+                break;   // no tool_calls (content is the answer) OR hop cap reached
+
+            // Execute each requested tool, recording a ToolStep trace, then echo the assistant's tool-call turn +
+            // one role:"tool" result per call onto the working transcript via the pure AppendToolRound (content:null
+            // on the assistant turn; the synthesized-or-real tool_call_id correlates each result to its call).
+            var results = new List<string>(turn.ToolCalls.Count);
+            foreach (var tc in turn.ToolCalls)
+            {
+                var result = ChatTools.Run(tc.Name, tc.ArgumentsJson);
+                steps.Add(new ToolStep(tc.Name, tc.ArgumentsJson, result));
+                results.Add(result);
+            }
+            AppendToolRound(working, turn.Content, turn.ToolCalls, results);
+        }
+
+        // Graceful: if the model never produced text (exhausted its hops on tools, or the overall turn timed out
+        // mid-flight), say so rather than persist an empty turn the user can't read.
+        var reply = finalText.Length > 0
+            ? finalText
+            : (steps.Count > 0
+                ? $"(stopped after {steps.Count} tool step(s) without a final answer)"
+                : "(the assistant did not return an answer in time)");
+
+        // Persist BOTH turns (user + final assistant), exactly like SendAsync, so reload restores the thread.
+        var now = DateTime.UtcNow.ToString("o");
+        var appended = new List<ChatTurn>(conv.Messages)
+        {
+            new("user", userMessage, now),
+            new("assistant", reply, now),
+        };
+        conv = conv with { Messages = appended };
+        ChatStore.Save(conv);   // graceful: a save failure does not fail the reply the user already has
+
+        return new Result(true, conv.Id, reply, null, steps);
     }
 
     // STREAMING send (P2): the streaming twin of SendAsync. Loads the card + conversation (reusing SelectHistory
