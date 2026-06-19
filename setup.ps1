@@ -26,6 +26,7 @@ param(
     [switch]$Nunchaku,  # optional sidecar: Nunchaku NVFP4 speed runtime (wheel + ComfyUI-nunchaku node) — ~3x faster on Blackwell/RTX-50xx for the Z-Image-Turbo (the default base) + Qwen-Image NVFP4 svdq variants. +Models full fetches them. (FLUX.2 Klein NVFP4 is BFL-native FP4, fetched under -Models full, not here.)
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
     [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
+    [switch]$Ocr,       # optional sidecar: scanned/image-PDF OCR for the KB ("chat with your documents"). Installs Tesseract (UB-Mannheim) + the lazy pip parsers (pymupdf/pytesseract/Pillow) on the doc_ingest_bin uv overlay. Off by default; a text PDF never touches it. NO GPU, no always-on server.
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
                         # so don't install the .NET SDK to rebuild it — only -Media needs the SDK (SwarmUI).
     [ValidateSet("lean", "full")][string]$Models = "lean"
@@ -278,6 +279,34 @@ if ($Kokoro) {
     # the launcher's MODEL_DIR reads, (3) espeak-ng phonemization loads via PHONEMIZER_ESPEAK_LIBRARY, and (4)
     # /v1/audio/speech actually synthesizes on the GPU.
     Ok "Kokoro ready -> :8006 (OpenAI /v1/audio/speech, fixed preset voices, NO cloning). Weights are downloaded NOW by setup.ps1 -Kokoro (install-time); first '.\doki.ps1 up' just starts the already-provisioned server."
+}
+
+# ---- OCR: GATED scanned/image-PDF text extraction for the KB ("chat with your documents") — additive, opt-in ----
+# Closes the explicit v0.15 gap: today a scanned/photographed PDF extracts to ~empty text via pypdf -> 0 chunks +
+# the benign "looks scanned (OCR not supported)" hint. With -Ocr, doc_index._extract_pdf renders the pages
+# (pymupdf, bundled MuPDF — NO poppler/ghostscript) + OCRs them (pytesseract -> the Tesseract binary) and feeds
+# the text into the EXISTING chunk->embed->store pipeline UNCHANGED. A normal TEXT PDF never touches any of this
+# (no OCR, no new import). CPU-only, no always-on server, no GPU.
+if ($Ocr) {
+    Info "OCR for scanned/image PDFs (Tesseract UB-Mannheim + pymupdf/pytesseract/Pillow) — gated KB add-on"
+    # Tesseract: the UB-Mannheim Windows build (5.x, bundles English tessdata) — THE community-standard build every
+    # Python/Windows tutorial targets. Its installer (an NSIS/Nullsoft setup.exe, NOT an MSI) does NOT add
+    # tesseract.exe to PATH by default (the PATH checkbox was removed to avoid truncating a long PATH), so verify by
+    # the fixed install path the installer drops — exactly as -Kokoro verifies the espeak-ng DLL on disk rather than
+    # a PATH command. doc_index.py points pytesseract.tesseract_cmd at this same path (TESSERACT_CMD overrides) so
+    # OCR works without a PATH edit.
+    Ensure-WinGet "UB-Mannheim.TesseractOCR" $null
+    $tess = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if (Test-Path $tess) { Ok "Tesseract present -> $tess" }
+    else { Warn "Tesseract not found at $tess — scanned-PDF OCR will no-op until UB-Mannheim.TesseractOCR is installed (re-run setup.ps1 -Ocr)." }
+    # The pip parsers are pure-pip wheels resolved on-demand by uv on the doc_ingest_bin `--with` overlay (see
+    # DocSearch.cs ParserWith) — NOT a venv here. Warm uv's cache now so the first scanned-PDF ingest isn't slow:
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        Info "warming the uv OCR-parser cache (pymupdf/pytesseract/Pillow) ..."
+        try { uv pip install --system pymupdf pytesseract Pillow 2>$null | Out-Null } catch {}
+        # (non-fatal: the live ingest path resolves them via `uv run --with ...` regardless; this just pre-caches.)
+    }
+    Ok "OCR add-on installed (scanned PDFs now ingest into the KB; a text PDF is unchanged)."
 }
 
 # ---- Demucs: standalone audio stem separation (vocals/drums/bass/other) — optional, model-free DSP ----

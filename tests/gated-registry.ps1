@@ -111,6 +111,18 @@ $GatedRegistry = [ordered]@{
         OnGpu    = 'Confirm the remsky/Kokoro-FastAPI server boots on :8006 (uvicorn api.src.main:app) and a /v1/audio/speech synth returns a WAV; the Kokoro-82M weights auto-download on first .\doki.ps1 up.'
     }
 
+    'Scanned-PDF OCR (-Ocr)' = @{
+        Flag       = 'Ocr'
+        # A winget SYSTEM binary (UB-Mannheim Tesseract), not a ComfyUI node (NodeDir) nor a venv sidecar (VenvRoot):
+        # the install is an absolute Program Files path, not under $swarm/$root. Get-GatedStatus has a SystemFile
+        # branch: Ready when the binary exists, else NotInstalled. The pip parsers (pymupdf/pytesseract/Pillow) ride
+        # the uv doc_ingest_bin overlay — no pre-fetched on-disk weight — so Files is empty; there is no SwarmUI JSON.
+        SystemFile = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
+        Files      = @()
+        Workflow   = $null
+        OnGpu      = 'Installed, no render gate (CPU-only OCR; no labeled on-GPU step). Confirm: a scanned PDF ingests >0 chunks end-to-end via doc_ingest_bin; pytesseract resolves the binary at the Program Files path on a fresh box.'
+    }
+
     'Demucs (-Demucs)' = @{
         Flag     = 'Demucs'
         VenvRoot = 'audio-tools\demucs\.venv'
@@ -157,6 +169,13 @@ function Get-GatedStatus {
         [Parameter(Mandatory)] $Entry,
         [Parameter(Mandatory)] [scriptblock] $Exists
     )
+    # A winget SYSTEM-binary integration (-Ocr: UB-Mannheim Tesseract) installs to an ABSOLUTE Program Files path,
+    # not under $swarm/$root and with no NodeDir/VenvRoot/weights/workflow — so it is the simplest shape: Ready when
+    # the binary exists on disk, else NotInstalled. Handle it first so the $swarm/$root rooting below never applies.
+    if ($Entry.SystemFile) {
+        return $(if (& $Exists $Entry.SystemFile) { $GatedStatus.Ready } else { $GatedStatus.NotInstalled })
+    }
+
     # locate the install on disk: ComfyUI node dir (under $swarm) OR a standalone venv (under $root). Normalize
     # to full paths (collapse ..\) so the string the predicate sees is stable regardless of how the caller
     # rooted us — the live Test-Path is path-form agnostic, but a stubbed string-equality predicate is not.

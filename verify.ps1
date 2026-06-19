@@ -287,7 +287,7 @@ if (-not ((Test-Path $cwfPath) -and (Test-Path $foleyModel))) {
     } catch { $results["Wan->Foley audio"] = "FAIL  $($_.Exception.Message)" }
 }
 
-# 8. GATED integrations (-Gated) — the 9 session-shipped sidecars that ALL still need an on-GPU pass. This block
+# 8. GATED integrations (-Gated) — the 11 session-shipped sidecars (some CPU-only, no on-GPU pass). This block
 #    ONLY runs under `doki verify -Gated`, so the default `doki verify` executes byte-for-byte as before. For each
 #    gated integration it checks what is checkable WITHOUT a GPU (the node clone dir + the weight files on disk) via
 #    the SAME shared registry the source-derived coverage test pins (tests\gated-registry.ps1), maps the pure status

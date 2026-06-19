@@ -54,6 +54,15 @@ CHUNK_OVERLAP = 200
 MAX_DOC_CHARS = 200_000
 MAX_CHUNKS = 200
 
+# OCR render bounds (the -Ocr scanned-PDF path only — a normal text PDF never reaches _ocr_pdf). A crafted small
+# (<1.5MB) scanned PDF can declare thousands of pages OR a huge MediaBox, so rendering EVERY page at dpi=300 with no
+# cap could spike peak memory. MAX_OCR_PAGES bounds the page FAN-OUT (OCR the first N; a truncation is noted), and
+# OCR_MAX_PIXELS bounds a SINGLE page's bitmap: a page whose dpi=300 pixmap would exceed this budget is re-rendered
+# at a clamped (lower) dpi so a pathological MediaBox can't allocate a giant bitmap. Both are best-effort safety
+# rails — OCR stays graceful (a page that still can't render is simply skipped per the per-page try/except).
+MAX_OCR_PAGES = 50
+OCR_MAX_PIXELS = 40_000_000   # ~40 MP — comfortably covers an A4/Letter page at 300dpi (~8.7 MP), caps the rest
+
 # Portability (the v0.16 KB export/import follow-up): a generous CEILING on the number of chunks a single
 # imported envelope may insert, so a FORGED .ddkb file can't fan out into an unbounded number of DB rows. Well
 # above MAX_CHUNKS=200 (the per-SOURCE cap) since a KB has many sources — a few hundred docs at 200 chunks each
@@ -121,14 +130,109 @@ class _DocTooLarge(Exception):
     maps it to {"error": …} + exit 5 — the same 'document too large' contract as the C# text path."""
 
 
+def _ocr_available():
+    """Return the OCR deps triple (fitz, pytesseract, Image) ONLY when BOTH the pip parsers import AND the
+    Tesseract binary is locatable; else None. NEVER raises (a missing piece on the txt/md/text-PDF path must be
+    a clean degrade, not a crash). The three libs are imported INSIDE this function so the fast paths never load
+    them. Wires pytesseract at the UB-Mannheim default install dir — the installer does NOT add tesseract.exe to
+    PATH (the PATH checkbox was removed to avoid truncating a long PATH), so without this `pytesseract` can't find
+    the binary on a fresh box. TESSERACT_CMD overrides for a custom install; if neither the env path nor the
+    default exists we trust PATH and let pytesseract degrade per-page (-> '' -> the existing 0-chunk no-op). This
+    is the same shape as the -Kokoro launcher hardcoding the espeak-ng DLL absolute path rather than a PATH lookup."""
+    try:
+        import fitz            # noqa: F401 — pymupdf; renders PDF pages with bundled MuPDF, NO poppler/ghostscript
+        import pytesseract
+        from PIL import Image  # noqa: F401 — hands the rendered PNG to pytesseract.image_to_string
+    except ImportError:
+        return None
+    cmd = os.environ.get("TESSERACT_CMD") or r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(cmd):
+        pytesseract.pytesseract.tesseract_cmd = cmd
+    # else: trust PATH (a custom install); pytesseract errors per-page and we degrade to 0 chunks (still no crash).
+    return (fitz, pytesseract, Image)
+
+
+OCR_MIN_DPI = 72   # don't render below this (sub-72dpi OCR is unreadable); a page that STILL won't fit is skipped
+
+
+def _ocr_dpi_for_page(page, dpi=300):
+    """Pick a render dpi that keeps a SINGLE page's pixmap under OCR_MAX_PIXELS so a pathological MediaBox can't
+    allocate a giant bitmap (FIX 2). Returns the dpi to render at, or None to SKIP the page (it can't fit the pixel
+    budget even at OCR_MIN_DPI — never allocate the giant bitmap). page.rect is in POINTS (1/72in); pixels at `dpi`
+    = w/72*dpi * h/72*dpi. If that exceeds the budget, scale dpi down by sqrt(budget/pixels), floored at OCR_MIN_DPI;
+    if even OCR_MIN_DPI overflows, return None. Defensive: a page without a usable .rect (or any error) just keeps the
+    default dpi — the per-page try/except is the final backstop, so this never raises."""
+    try:
+        rect = page.rect
+        w_pt, h_pt = float(rect.width), float(rect.height)
+        px = (w_pt / 72.0 * dpi) * (h_pt / 72.0 * dpi)
+        if px > OCR_MAX_PIXELS and px > 0:
+            scaled = int(dpi * math.sqrt(OCR_MAX_PIXELS / px))
+            if scaled < OCR_MIN_DPI:
+                # even the floor dpi would exceed the budget -> SKIP (don't allocate a multi-hundred-MP bitmap)
+                floor_px = (w_pt / 72.0 * OCR_MIN_DPI) * (h_pt / 72.0 * OCR_MIN_DPI)
+                return None if floor_px > OCR_MAX_PIXELS else OCR_MIN_DPI
+            return scaled
+    except Exception:
+        pass
+    return dpi
+
+
+def _ocr_pdf(data, deps=None):
+    """Render each PDF page (pymupdf) -> PNG bytes -> pytesseract.image_to_string, joined. Lazy + INJECTABLE: `deps`
+    is the (fitz, pytesseract, Image) triple so the render+OCR join is unit-tested with fakes (no MuPDF, no Tesseract,
+    no GPU). BEST-EFFORT + BOUNDED + GRACEFUL:
+      • FIX 1 — the WHOLE attempt (incl. fitz.open) is guarded: ANY OCR failure (MuPDF can't open the doc, etc.)
+        returns "" (the scanned 0-chunk no-op), it NEVER escapes to extract_text's _ExtractFailed (exit 4);
+      • FIX 2 — OCR at most MAX_OCR_PAGES pages (a crafted thousand-page scan can't fan out), and clamp each page's
+        render dpi so a huge MediaBox can't allocate a giant bitmap;
+      • per-PAGE failures are still swallowed so one bad page can't abort the rest.
+    Returns "" when nothing was recognized (a blank scan) — the caller keeps the existing 0-chunk no-op."""
+    deps = deps or _ocr_available()
+    if not deps:
+        return ""
+    fitz, pytesseract, Image = deps
+    out = []
+    try:
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            truncated = False
+            for n, page in enumerate(doc):
+                if n >= MAX_OCR_PAGES:            # bound the page fan-out (FIX 2) — OCR the first N, note the rest
+                    truncated = True
+                    break
+                try:
+                    dpi = _ocr_dpi_for_page(page)          # clamp a pathological MediaBox (FIX 2)
+                    if dpi is None:
+                        continue                  # page too large to fit the pixel budget even at the floor -> skip
+                    png = page.get_pixmap(dpi=dpi).tobytes("png")
+                    with Image.open(io.BytesIO(png)) as im:   # close the decoder/handle per page (FIX 5a)
+                        out.append(pytesseract.image_to_string(im) or "")
+                except Exception:
+                    pass                          # one unreadable page must not abort OCR of the rest
+            if truncated:
+                out.append(f"\n[OCR truncated at the first {MAX_OCR_PAGES} pages]")
+    except Exception:
+        return ""                                 # ANY whole-document OCR failure degrades to the 0-chunk no-op (FIX 1)
+    return "\n".join(out)
+
+
 def _extract_pdf(data):
-    """Plain text of a TEXT-based PDF via pypdf (lazy import). Scanned / image-only PDFs have no text layer and
-    return ~empty here — the pipeline then writes 0 chunks (a benign no-op the UI surfaces as 'looks scanned')."""
+    """Plain text of a TEXT-based PDF via pypdf (lazy import). A scanned / image-only PDF has no text layer, so
+    pypdf returns ~empty; when the OCR add-on (-Ocr: pymupdf/pytesseract/Pillow + the Tesseract binary) is
+    AVAILABLE we then render+OCR the pages and feed THAT into the same pipeline. When OCR is ABSENT (or a blank
+    scan) we return the empty text unchanged -> 0 chunks + the existing 'looks scanned' hint, byte-for-byte."""
     try:
         from pypdf import PdfReader            # lazy: NEVER imported on the txt/md path
     except ImportError:
-        raise _ParserMissing("the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ...)")
-    return "\n".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(data)).pages)
+        raise _ParserMissing("the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ... "
+                             "— the -Ocr scanned-PDF wheels pymupdf/pytesseract/Pillow ride the SAME overlay)")
+    text = "\n".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(data)).pages)
+    if text.strip():
+        return text                           # TEXT PDF — UNCHANGED: OCR never runs, its deps never import
+    deps = _ocr_available()                   # scanned/image-only: try OCR ONLY if the add-on is installed
+    if deps:
+        return _ocr_pdf(data, deps)           # may still be '' (blank scan) -> 0 chunks (the existing no-op)
+    return text                               # OCR absent -> '' -> 0 chunks + the current "looks scanned" hint
 
 
 def _extract_docx(data):
@@ -137,7 +241,8 @@ def _extract_docx(data):
     try:
         from docx import Document               # pip dist is 'python-docx'; import package is 'docx'
     except ImportError:
-        raise _ParserMissing("the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ...)")
+        raise _ParserMissing("the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ... "
+                             "— the -Ocr scanned-PDF wheels pymupdf/pytesseract/Pillow ride the SAME overlay)")
     return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
 
 

@@ -496,10 +496,12 @@ public static class StudioHost
             if (string.IsNullOrWhiteSpace(conv.KbId))
                 ChatStore.Save(conv with { KbId = id });   // graceful: a save failure doesn't undo the ingest
 
-            // chunks==0 on a successful exit means a scanned/image-only PDF (no text layer) — surface a hint so the
-            // user isn't confused by a silent no-op (OCR is out of scope for v0.14, a labeled follow-up).
+            // chunks==0 on a successful exit means a scanned/image-only PDF (no extractable text). -Ocr CAN now OCR
+            // these, but this endpoint has no cheap signal for whether Tesseract is installed (that's python-side, via
+            // doc_index._ocr_available), so surface ONE accurate line covering both states: OCR isn't installed yet, OR
+            // it ran and the scan is unreadable. (A text PDF that yields chunks never hits this branch.)
             var note = r.Chunks == 0
-                ? "no text found — looks like a scanned/image PDF (OCR not yet supported)."
+                ? "no text found — scanned/image PDF returned no extractable text (install -Ocr for OCR if not already, or the scan is unreadable)."
                 : null;
             return Results.Json(new { source, chunks = r.Chunks, note });
         });
@@ -717,8 +719,10 @@ public static class StudioHost
             var r = await DocSearch.IngestBinAsync(id, source, bytes, ct);
             if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
 
+            // chunks==0 => a scanned/image-only PDF (no extractable text). -Ocr can OCR these, but this endpoint can't
+            // cheaply tell whether Tesseract is installed (python-side only), so use ONE accurate line for both states.
             var note = r.Chunks == 0
-                ? "no text found — looks like a scanned/image PDF (OCR not yet supported)."
+                ? "no text found — scanned/image PDF returned no extractable text (install -Ocr for OCR if not already, or the scan is unreadable)."
                 : null;
             return Results.Json(new { source, chunks = r.Chunks, note });
         });

@@ -1,7 +1,7 @@
 # tests/verify-gated.test.ps1 — the `doki verify -Gated` gated-integration registry + pure status logic.
 #
-# `doki verify -Gated` extends verify.ps1 to report, for EVERY gated integration (the 10 setup.ps1 -Flag
-# sidecars: -Sam/-Demucs/-Train/-FaceId/-InfiniteTalk/-LatentSync/-Pulid/-Nunchaku/-TtsSuite/-Kokoro), what is
+# `doki verify -Gated` extends verify.ps1 to report, for EVERY gated integration (the 11 setup.ps1 -Flag sidecars:
+# -Sam/-Demucs/-Train/-FaceId/-InfiniteTalk/-LatentSync/-Pulid/-Nunchaku/-TtsSuite/-Kokoro/-Ocr), what is
 # checkable WITHOUT a GPU — the node clone dir + the weight files on disk — and PRINTS the on-GPU TODO that
 # decisions.md records. Multi-GB weights are gitignored + ABSENT in CI, so the checks must DEGRADE to
 # 'not installed', NEVER fail the harness; the live node-load/render stays SKIP-by-default.
@@ -71,7 +71,7 @@ function Get-MinedGatedFlags {
 
     # 2. positive `if ($Flag){...}` blocks (bare-variable clause — NOT `-not $Flag`, NOT a comparison) whose Flag is
     #    a [switch] param AND whose block body performs an install action.
-    $installRx = '(?i)(Git-Clone|Get-Model|custom_nodes|-m\s+pip\s+install|Pip\s+\$)'
+    $installRx = '(?i)(Git-Clone|Get-Model|custom_nodes|-m\s+pip\s+install|Pip\s+\$|Ensure-WinGet\s+"[^"]+"\s+\$null)'
     $mined = $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] }, $true) | ForEach-Object {
         $cond = $_.Clauses[0].Item1
         # the clause must be a BARE variable reference ($Flag), so `-not $Media` / `$Models -eq 'full'` never match
@@ -89,7 +89,7 @@ function Get-MinedGatedFlags {
 
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $setup).Path, [ref]$null, [ref]$null)
 $gatedFlags = Get-MinedGatedFlags -Ast $ast -AllowList $AlwaysOnFlags
-Assert ($gatedFlags.Count -eq 10) "setup.ps1 source-derives EXACTLY the 10 gated -Flag install blocks ($($gatedFlags.Count) found: $(($gatedFlags | Sort-Object) -join ', '))"
+Assert ($gatedFlags.Count -eq 11) "setup.ps1 source-derives EXACTLY the 11 gated -Flag install blocks ($($gatedFlags.Count) found: $(($gatedFlags | Sort-Object) -join ', '))"
 # the always-on installers must be EXCLUDED (they're the default-verify stack, not gated sidecars)
 foreach ($a in @('Tts', 'Stt', 'Vision', 'LlmCandidates', 'Managed', 'Media')) {
     Assert ($gatedFlags -notcontains $a) "coverage: always-on -$a is NOT mined as a gated sidecar (correctly excluded from the gated set)"
@@ -139,8 +139,9 @@ foreach ($name in $GatedRegistry.Keys) {
     $e = $GatedRegistry[$name]
     Assert ($e.Flag)  "shape: '$name' declares its -Flag"
     Assert ($e.OnGpu) "shape: '$name' carries the on-GPU TODO runbook string"
-    # a sidecar either clones a node dir (NodeDir) or installs a venv (VenvRoot) — at least one locates it on disk
-    Assert ($e.NodeDir -or $e.VenvRoot) "shape: '$name' locates its install on disk (NodeDir or VenvRoot)"
+    # a sidecar either clones a node dir (NodeDir), installs a venv (VenvRoot), or drops a system binary
+    # (SystemFile, the winget -Ocr shape) — at least one locates it on disk
+    Assert ($e.NodeDir -or $e.VenvRoot -or $e.SystemFile) "shape: '$name' locates its install on disk (NodeDir, VenvRoot, or SystemFile)"
     Assert ($e.ContainsKey('Files')) "shape: '$name' declares its weight Files (possibly empty for pip-only sidecars)"
 }
 
@@ -148,16 +149,17 @@ Write-Host "`nSTATUS ENUM + LABELING — the producer/consumer token table, and 
 # (c) the status enum is the SINGLE source of truth both Get-GatedStatus and verify.ps1's PASS/SKIP switch use.
 Assert ($null -ne $GatedStatus) "gated-registry.ps1 exposes the `$GatedStatus token table (the producer/consumer enum)"
 Assert ($GatedStatus.Ready -eq 'ready' -and $GatedStatus.Partial -eq 'partial' -and $GatedStatus.NotInstalled -eq 'not installed' -and $GatedStatus.WorkflowTodo -eq 'installed; workflow is on-GPU TODO') "the `$GatedStatus tokens carry the exact status values the classifier returns + the grid prints"
-# (a) the verify.ps1 'ready' PASS line branches on whether the entry has a labeled on-GPU RENDER step: the venv
-# sidecars (Demucs/Sam/Train) record 'no labeled on-GPU step' in their OnGpu, so they must NOT be told a render is
-# still TODO; the render-gated integrations must be. Pin that discriminator (the exact predicate verify.ps1 uses:
-# OnGpu -notmatch 'no labeled on-GPU step') so an OnGpu edit can't silently flip a label.
-$noRenderFlags = @('Demucs', 'Sam', 'Train')   # the venv sidecars with no on-GPU render gate
+# (a) the verify.ps1 'ready' PASS line branches on whether the entry has a labeled on-GPU RENDER step: the CPU-only
+# sidecars (the Demucs/Sam/Train venvs AND the -Ocr winget Tesseract add-on) record 'no labeled on-GPU step' in their
+# OnGpu, so they must NOT be told a render is still TODO; the render-gated integrations must be. Pin that discriminator
+# (the exact predicate verify.ps1 uses: OnGpu -notmatch 'no labeled on-GPU step') so an OnGpu edit can't silently flip
+# a label. -Ocr is CPU-only OCR (no GPU, no SwarmUI render) so it carries the sentinel like the venv sidecars do.
+$noRenderFlags = @('Demucs', 'Sam', 'Train', 'Ocr')   # the CPU-only sidecars with no on-GPU render gate
 foreach ($name in $GatedRegistry.Keys) {
     $e = $GatedRegistry[$name]
     $renderGated = $e.OnGpu -notmatch 'no labeled on-GPU step'
     if ($noRenderFlags -contains $e.Flag) {
-        Assert (-not $renderGated) "labeling: -$($e.Flag) is a no-render venv sidecar (OnGpu says 'no labeled on-GPU step') -> its ready PASS must NOT claim a render is on-GPU TODO"
+        Assert (-not $renderGated) "labeling: -$($e.Flag) is a no-render CPU-only sidecar (OnGpu says 'no labeled on-GPU step') -> its ready PASS must NOT claim a render is on-GPU TODO"
     } else {
         Assert ($renderGated) "labeling: -$($e.Flag) is render-gated (OnGpu describes an on-GPU render/author step) -> its ready PASS DOES carry 'live render is on-GPU TODO'"
     }
@@ -200,8 +202,9 @@ if ($sample) {
     Assert ($s -eq 'ready') "status: node + all weights + workflow -> 'ready' (got '$s')"
 }
 
-# a workflow-less sidecar (Nunchaku/Sam/Demucs/Train: Workflow=$null) reaches 'ready' with just node+weights
-$noWf = $GatedRegistry.Values | Where-Object { -not $_.Workflow } | Select-Object -First 1
+# a workflow-less NODE/VENV sidecar (Nunchaku/Sam/Demucs/Train: Workflow=$null) reaches 'ready' with just
+# node+weights. (Exclude the SystemFile shape — its status is the binary-on-disk branch, exercised separately below.)
+$noWf = $GatedRegistry.Values | Where-Object { -not $_.Workflow -and -not $_.SystemFile } | Select-Object -First 1
 Assert ($null -ne $noWf) "a workflow-less sidecar exists (pip-only / no JSON)"
 if ($noWf) {
     $swarm = Join-Path $root "media\SwarmUI"
@@ -210,6 +213,17 @@ if ($noWf) {
     $wps   = $noWf.Files | ForEach-Object { Join-Path $wbase $_ }
     $s = Get-GatedStatus $noWf (New-Exists (@($loc) + $wps))
     Assert ($s -eq 'ready') "status: a Workflow=`$null sidecar is 'ready' on node+weights alone (no JSON gate) (got '$s')"
+}
+
+# the SystemFile shape (-Ocr, a winget system binary): NO NodeDir/VenvRoot/weights/workflow — its status is purely
+# "is the absolute binary on disk?": present -> 'ready', absent -> 'not installed'. Drive both branches GPU-less.
+$sysEntry = $GatedRegistry.Values | Where-Object { $_.SystemFile } | Select-Object -First 1
+Assert ($null -ne $sysEntry) "a SystemFile (winget system-binary) sidecar exists (-Ocr Tesseract)"
+if ($sysEntry) {
+    $sBin = Get-GatedStatus $sysEntry (New-Exists @($sysEntry.SystemFile))
+    Assert ($sBin -eq 'ready') "status: a SystemFile sidecar with the binary on disk -> 'ready' (got '$sBin')"
+    $sNo = Get-GatedStatus $sysEntry (New-Exists @())
+    Assert ($sNo -eq 'not installed') "status: a SystemFile sidecar with the binary absent -> 'not installed' (got '$sNo')"
 }
 
 Write-Host "`nROOTING — each entry's Files resolve against the CORRECT base (VenvRoot->`$root, NodeDir->`$swarm)"
@@ -299,6 +313,11 @@ foreach ($name in $GatedRegistry.Keys) {
     if ($e.NodeDir) {
         $leaf = Split-Path $e.NodeDir -Leaf
         Assert ($txt -match [regex]::Escape($leaf)) "drift: '$name' node dir '$leaf' appears in the  if (`$$($e.Flag)){}  block"
+    }
+    if ($e.SystemFile) {
+        # the winget system-binary shape (-Ocr): its absolute SystemFile must be verified on disk INSIDE the block
+        # (the Test-Path $tess check), so the registry's classifier path can't drift from what setup actually drops.
+        Assert ($txt -match [regex]::Escape($e.SystemFile)) "drift: '$name' system binary '$($e.SystemFile)' is verified in the  if (`$$($e.Flag)){}  block"
     }
     foreach ($w in $e.Files) {
         $wleaf = Split-Path $w -Leaf

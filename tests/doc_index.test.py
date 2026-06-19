@@ -245,6 +245,181 @@ try:
     finally:
         doc_index._extract_pdf = _orig_pdf4
 
+    # --- OCR FALLBACK (-Ocr, scanned/image-only PDFs): _extract_pdf renders+OCRs ONLY when the pypdf text layer
+    #     is ~empty AND the OCR add-on is available. A normal TEXT PDF must NEVER trigger OCR (no cost, no import).
+    #     The whole dispatch is tested with a STUB PdfReader (no real pypdf bytes) + a monkeypatched _ocr_available
+    #     / _ocr_pdf — no MuPDF, no Tesseract, no GPU. (Mirrors the existing _extract_pdf stub discipline above.) ---
+    import types as _types
+
+    class _StubPage:
+        def __init__(self, t): self._t = t
+        def extract_text(self): return self._t
+
+    class _StubReader:
+        # set _StubReader.pages_text before each _extract_pdf call to control the pypdf text layer
+        pages_text = [""]
+        def __init__(self, _stream): self.pages = [_StubPage(t) for t in _StubReader.pages_text]
+
+    _orig_pypdf = sys.modules.get("pypdf")
+    _fake_pypdf = _types.ModuleType("pypdf"); _fake_pypdf.PdfReader = _StubReader
+    sys.modules["pypdf"] = _fake_pypdf
+    _orig_ocr_avail, _orig_ocr_pdf = doc_index._ocr_available, doc_index._ocr_pdf
+    try:
+        # (a) TEXT PDF -> pypdf returns real text -> _extract_pdf returns it and OCR is NEVER consulted.
+        _StubReader.pages_text = ["A wizard reads the spellbook by the river."]
+        _ocr_called = {"avail": False, "pdf": False}
+        doc_index._ocr_available = lambda: (_ocr_called.__setitem__("avail", True), None)[1]
+        doc_index._ocr_pdf = lambda data, deps=None: (_ocr_called.__setitem__("pdf", True), "")[1]
+        txt = doc_index._extract_pdf(b"%PDF-text")
+        check(txt == "A wizard reads the spellbook by the river.",
+              "_extract_pdf returns the pypdf text layer for a TEXT PDF")
+        check(_ocr_called["avail"] is False and _ocr_called["pdf"] is False,
+              "TEXT PDF NEVER consults OCR (no _ocr_available / _ocr_pdf call, no OCR cost)")
+
+        # (b) EMPTY text layer (scanned PDF) + OCR AVAILABLE -> _extract_pdf returns the OCR text -> the pipeline.
+        _StubReader.pages_text = ["   ", ""]    # image-only: blank/whitespace text layer
+        doc_index._ocr_available = lambda: ("FITZ", "PYT", "IMG")        # a non-None deps triple
+        doc_index._ocr_pdf = lambda data, deps=None: "OCR: dragon guards the northern castle."
+        otxt = doc_index._extract_pdf(b"%PDF-scan")
+        check(otxt == "OCR: dragon guards the northern castle.",
+              "scanned PDF + OCR available -> _extract_pdf returns the OCR'd text")
+
+        # (c) EMPTY text layer + OCR ABSENT -> _extract_pdf returns "" (the preserved 0-chunk 'looks scanned' no-op).
+        _StubReader.pages_text = [""]
+        doc_index._ocr_available = lambda: None
+        doc_index._ocr_pdf = lambda data, deps=None: "SHOULD-NOT-BE-USED"
+        atxt = doc_index._extract_pdf(b"%PDF-scan-no-ocr")
+        check(atxt == "", "scanned PDF + OCR ABSENT -> _extract_pdf returns '' (0 chunks + the 'looks scanned' hint)")
+
+        # (d) _ocr_pdf itself: the injectable render+OCR join over fake (fitz, pytesseract, Image) deps — no MuPDF,
+        #     no Tesseract. A fake doc yields two pages; each page's pixmap PNG is OCR'd and the results are joined.
+        #     The fakes model the REAL libs faithfully: a page exposes .rect (PyMuPDF, in points) so the dpi-clamp
+        #     path runs, and Image.open returns a CONTEXT MANAGER (a real PIL.Image is one, so _ocr_pdf can `with` it).
+        class _FakeRect:
+            def __init__(self, w, h): self.width = w; self.height = h
+        class _FakePix:
+            def tobytes(self, _fmt): return b"PNG"
+        class _FakePage:
+            rect = _FakeRect(612, 792)            # US-Letter points (~8.7 MP at 300dpi — under OCR_MAX_PIXELS)
+            def get_pixmap(self, dpi=300): return _FakePix()
+        class _FakeImg:                           # a context-manager image (real PIL.Image supports `with`)
+            def __init__(self, v): self.v = v
+            def __enter__(self): return self.v
+            def __exit__(self, *a): return False
+        class _FakeDoc:
+            def __init__(self, pages): self._pages = pages
+            def __iter__(self): return iter(self._pages)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        class _FakeFitz:
+            opened = {}
+            def open(self, stream=None, filetype=None):
+                _FakeFitz.opened = {"len": len(stream or b""), "filetype": filetype}
+                return _FakeDoc([_FakePage(), _FakePage()])
+        class _FakePyt:
+            seen = []
+            def image_to_string(self, img): _FakePyt.seen.append(img); return f"page{len(_FakePyt.seen)}"
+        class _FakeImage:
+            @staticmethod
+            def open(buf): return _FakeImg(f"img<{buf.getvalue().decode()}>")
+        joined = _orig_ocr_pdf(b"%PDF-2page", deps=(_FakeFitz(), _FakePyt(), _FakeImage))
+        check(joined == "page1\npage2", "_ocr_pdf joins per-page OCR text (render -> PNG -> image_to_string)")
+        check(_FakeFitz.opened.get("filetype") == "pdf", "_ocr_pdf opens the PDF stream with filetype='pdf'")
+
+        # (e) a per-page failure is SWALLOWED so one bad page can't abort OCR of the rest.
+        class _BoomPage:
+            rect = _FakeRect(612, 792)
+            def get_pixmap(self, dpi=300): raise RuntimeError("bad page")
+        class _FakeFitz2:
+            def open(self, stream=None, filetype=None):
+                return _FakeDoc([_BoomPage(), _FakePage()])
+        class _FakePyt2:
+            def image_to_string(self, img): return "good"
+        survived = _orig_ocr_pdf(b"x", deps=(_FakeFitz2(), _FakePyt2(), _FakeImage))
+        check(survived == "good", "_ocr_pdf swallows a per-page failure (one bad page doesn't abort the rest)")
+
+        # (f) _ocr_pdf with no deps and OCR unavailable -> '' (never raises).
+        doc_index._ocr_available = lambda: None
+        check(_orig_ocr_pdf(b"x") == "", "_ocr_pdf returns '' when OCR is unavailable (graceful, never raises)")
+
+        # (g) REVIEW FIX 1 — a per-DOCUMENT failure (fitz.open itself raises, e.g. MuPDF can't OPEN a PDF that
+        #     pypdf read as a blank text layer) must NOT escape _ocr_pdf: OCR is best-effort, so ANY OCR failure
+        #     degrades to "" (the scanned 0-chunk no-op), never a hard error. Today the fitz.open is OUTSIDE the
+        #     per-page try, so its exception would propagate _ocr_pdf -> _extract_pdf -> extract_text's except ->
+        #     the WRONG _ExtractFailed (exit 4 "couldn't read this file") instead of the benign return "".
+        class _FitzOpenBoom:
+            def open(self, stream=None, filetype=None):
+                raise RuntimeError("MuPDF: cannot open broken document")
+        check(_orig_ocr_pdf(b"%PDF-unopenable", deps=(_FitzOpenBoom(), _FakePyt(), _FakeImage)) == "",
+              "_ocr_pdf returns '' when fitz.open itself raises (whole-doc OCR failure degrades, never escapes) [FIX 1]")
+        # ...and end-to-end through _extract_pdf: a scanned PDF whose OCR open() blows up must come back as "" (the
+        # 0-chunk 'looks scanned' no-op), so extract_text does NOT wrap it as _ExtractFailed.
+        _StubReader.pages_text = [""]                       # image-only: pypdf sees a blank text layer
+        doc_index._ocr_available = lambda: (_FitzOpenBoom(), _FakePyt(), _FakeImage)
+        doc_index._ocr_pdf = _orig_ocr_pdf                  # use the REAL _ocr_pdf so the open() boom is exercised
+        threw = None
+        try:
+            etxt = doc_index.extract_text("scan-bad-open.pdf", b"%PDF-image-only-unopenable")
+        except doc_index._ExtractFailed as ef:
+            threw = ef
+        check(threw is None and etxt == "",
+              "a scanned PDF whose OCR open() raises -> extract_text returns '' (0-chunk no-op), NOT _ExtractFailed [FIX 1]")
+
+        # (h) REVIEW FIX 2 — bound the render: a pathological scanned PDF with thousands of pages must not OCR
+        #     unbounded. _ocr_pdf OCRs at most MAX_OCR_PAGES pages (the first N) so peak render memory stays sane.
+        check(getattr(doc_index, "MAX_OCR_PAGES", 0) >= 1, "MAX_OCR_PAGES is a positive page cap")
+        class _CountingPyt:
+            def __init__(self): self.calls = 0
+            def image_to_string(self, img):
+                self.calls += 1
+                return "p"
+        _many = [_FakePage() for _ in range(doc_index.MAX_OCR_PAGES + 25)]   # well over the cap
+        class _FitzMany:
+            def open(self, stream=None, filetype=None): return _FakeDoc(_many)
+        _cpyt = _CountingPyt()
+        capped_txt = _orig_ocr_pdf(b"%PDF-many-pages", deps=(_FitzMany(), _cpyt, _FakeImage))
+        check(_cpyt.calls == doc_index.MAX_OCR_PAGES,
+              f"_ocr_pdf OCRs at most MAX_OCR_PAGES pages ({_cpyt.calls} == {doc_index.MAX_OCR_PAGES}) [FIX 2]")
+        check("truncated" in capped_txt.lower(),
+              "_ocr_pdf notes the truncation when a doc exceeds MAX_OCR_PAGES (the user isn't silently short-changed) [FIX 2]")
+
+        # (i) REVIEW FIX 2 — clamp a pathological MediaBox. A page whose dpi=300 pixmap would blow past OCR_MAX_PIXELS
+        #     but is still renderable at a lower dpi must be CLAMPED (rendered smaller, never the giant bitmap); a
+        #     truly absurd page that overflows the budget even at the floor dpi must be SKIPPED (never allocated). A
+        #     recording page captures the dpi _ocr_pdf actually asks for (None == get_pixmap was never called -> skip).
+        class _RecPage:
+            def __init__(self, w_pt, h_pt): self.rect = _FakeRect(w_pt, h_pt); self.dpi_used = None
+            def get_pixmap(self, dpi=300): self.dpi_used = dpi; return _FakePix()
+        big_page  = _RecPage(3036, 3036)          # ~160 MP at 300dpi (~4x budget) -> clamps to a lower, still-legible dpi
+        norm_page = _RecPage(612, 792)            # US-Letter — under the budget, keeps full dpi=300
+        skip_page = _RecPage(20000, 20000)        # ~7.7 GP at 300dpi, still >budget at the floor dpi -> SKIP (no render)
+        class _FitzClamp:
+            def open(self, stream=None, filetype=None): return _FakeDoc([big_page, norm_page, skip_page])
+        _orig_ocr_pdf(b"%PDF-bigbox", deps=(_FitzClamp(), _FakePyt2(), _FakeImage))
+        check(big_page.dpi_used is not None and big_page.dpi_used < 300,
+              f"_ocr_pdf clamps the render dpi for an oversize MediaBox (got {big_page.dpi_used} < 300) [FIX 2]")
+        check(norm_page.dpi_used == 300, f"_ocr_pdf keeps full dpi=300 for a normal page (got {norm_page.dpi_used}) [FIX 2]")
+        check(skip_page.dpi_used is None,
+              "_ocr_pdf SKIPS a page too large to fit the pixel budget even at the floor dpi (never allocates it) [FIX 2]")
+        # the clamp keeps the rendered page UNDER the pixel budget (the whole point — no giant bitmap is allocated).
+        _clamped_px = (3036 / 72.0 * big_page.dpi_used) ** 2
+        check(_clamped_px <= doc_index.OCR_MAX_PIXELS,
+              f"the clamped render stays within OCR_MAX_PIXELS ({int(_clamped_px)} <= {doc_index.OCR_MAX_PIXELS}) [FIX 2]")
+    finally:
+        doc_index._ocr_available, doc_index._ocr_pdf = _orig_ocr_avail, _orig_ocr_pdf
+        if _orig_pypdf is not None: sys.modules["pypdf"] = _orig_pypdf
+        else: sys.modules.pop("pypdf", None)
+
+    # _ocr_available is defined, callable, and NEVER raises (returns None when the deps/binary are absent in CI).
+    _av = None
+    try:
+        _av = doc_index._ocr_available()
+        _av_threw = False
+    except Exception:
+        _av_threw = True
+    check(not _av_threw and (_av is None or (isinstance(_av, tuple) and len(_av) == 3)),
+          "_ocr_available() never raises -> None (deps absent) or a 3-tuple (deps present)")
+
     # --- FIX 1: a CORRUPT/encrypted/not-really-that-format file (parser INSTALLED but the bytes are bad) raises a
     #     non-_ParserMissing exception inside _extract_pdf/_extract_docx (pypdf PdfReadError, python-docx
     #     PackageNotFoundError, etc.). extract_text must convert THAT into the catchable domain error _ExtractFailed

@@ -1553,7 +1553,7 @@
         const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs/file',{method:'POST',body:fd});
         const j=await r.json().catch(()=>({}));
         if(!r.ok){ status.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to AGENT mode':'upload failed'); return; }
-        if((j.chunks||0)===0){ status.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — looks scanned (OCR not supported)'); }
+        if((j.chunks||0)===0){ status.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — scanned/image PDF with no extractable text (install -Ocr for OCR, or the scan is unreadable)'); }
         else status.textContent='attached '+(j.source||f.name)+' ('+j.chunks+' chunks)';
         await loadKb();
       }catch{ status.textContent='upload request failed'; }
@@ -1751,7 +1751,7 @@
         const r=await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs/file',{method:'POST',body:fd});
         const j=await r.json().catch(()=>({}));
         if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to AGENT mode':'upload failed'); return; }
-        if((j.chunks||0)===0){ if(st) st.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — looks scanned (OCR not supported)'); }
+        if((j.chunks||0)===0){ if(st) st.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — scanned/image PDF with no extractable text (install -Ocr for OCR, or the scan is unreadable)'); }
         else if(st) st.textContent='attached '+(j.source||f.name)+' ('+j.chunks+' chunks)';
         await loadLibDocs(id);
       }catch{ if(st) st.textContent='upload request failed'; }

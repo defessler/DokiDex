@@ -56,16 +56,24 @@ public class DocSearchTests
     [Fact]
     public void BuildIngestBinUvArgs_prepends_run_python_and_the_parser_with_overlay()
     {
-        // The binary path is the ONLY one that adds `--with pypdf --with python-docx` to `uv run`; the overlay
-        // must come BEFORE `python` (uv consumes --with on the `run` verb), and the script subcommand follows.
+        // The binary path is the ONLY one that adds the parser `--with` overlay to `uv run`; the overlay must come
+        // BEFORE `python` (uv consumes --with on the `run` verb), and the script subcommand follows. The overlay
+        // carries BOTH the text-PDF/.docx parsers (pypdf/python-docx) AND the three gated-OCR wheels (pymupdf/
+        // pytesseract/Pillow) so a scanned PDF OCRs on the SAME path; locking the list here pins that the overlay
+        // can't silently lose a dep.
         var uv = DocSearch.BuildIngestBinUvArgs("conv-9", "manual.pdf");
         Assert.Equal("run", uv[0]);
         Assert.Contains("--with", uv);
         Assert.Contains("pypdf", uv);
         Assert.Contains("python-docx", uv);
+        Assert.Contains("pymupdf", uv);       // OCR: renders scanned PDF pages (bundled MuPDF, no poppler/ghostscript)
+        Assert.Contains("pytesseract", uv);   // OCR: drives the gated Tesseract binary
+        Assert.Contains("Pillow", uv);        // OCR: hands the rendered PNG to pytesseract.image_to_string
         var py = uv.ToList().IndexOf("python");
         var withIdx = uv.ToList().IndexOf("--with");
         Assert.True(withIdx >= 0 && withIdx < py, "--with overlay precedes the `python` token");
+        // every --with token sits on the `run` verb, before `python`
+        Assert.All(uv.Select((t, i) => (t, i)).Where(x => x.t == "--with"), x => Assert.True(x.i < py));
         Assert.Equal("doc_ingest_bin", uv[py + 2]);   // python <script> doc_ingest_bin ...
     }
 

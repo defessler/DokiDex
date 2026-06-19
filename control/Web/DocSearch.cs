@@ -106,7 +106,13 @@ public static class DocSearch
         => new[] { Script, "doc_ingest_bin", kbId ?? "", source ?? "" };
 
     // The parser deps the binary path makes available to uv ONLY for doc_ingest_bin (pure-python, lightweight).
-    private static readonly string[] ParserWith = { "--with", "pypdf", "--with", "python-docx" };
+    // pypdf/python-docx cover the text-PDF/.docx path; the three OCR wheels (pymupdf renders pages with bundled
+    // MuPDF — NO poppler/ghostscript; pytesseract drives the gated Tesseract binary; Pillow hands it the PNG) ride
+    // the SAME overlay so a scanned PDF OCRs into the existing chunk->embed pipeline. They are pure-pip wheels uv
+    // resolves+caches once on this path only; when the Tesseract binary is absent doc_index._ocr_available() returns
+    // None and the scanned PDF cleanly degrades to the existing 0-chunk "looks scanned" no-op (no DocSearch change).
+    private static readonly string[] ParserWith =
+        { "--with", "pypdf", "--with", "python-docx", "--with", "pymupdf", "--with", "pytesseract", "--with", "Pillow" };
 
     // PURE: the FULL `uv` argument list for the txt/md TEXT ingest — `run python <script> doc_ingest …`, with NO
     // `--with` overlay so the stdlib fast path never pays dependency resolution. Locked by a test so the zero-dep
