@@ -103,6 +103,44 @@ try {
     Assert ((Get-Item $d4).Length -eq $srcLen)    "resume: final file is the full length"
     Assert ((Get-FileHash $d4).Hash -eq $srcHash) "resume: resumed file is byte-identical to source"
     Assert (-not (Test-Path "$d4.part"))          "resume: .part promoted away"
+
+    Write-Host "`nAnime SDXL pair (-Models full): well-formed HF resolve URLs + non-colliding local names"
+    # Mine the REAL setup.ps1 for every `Get-Model <url> (Join-Path <dir> <file>)` call by AST, so this
+    # tracks the committed source (no string-search drift, no running setup's body). Each call's first
+    # positional arg is the URL; the local filename is the StringConstant arg of the Join-Path sub-expr.
+    $calls = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Get-Model' }, $true)
+    $entries = foreach ($c in $calls) {
+        # CommandElements[0] is the bareword command name 'Get-Model' (also a StringConstant) — skip it; the
+        # URL is the FIRST string arg after it (a plain literal, or an expandable "$base/..." string).
+        $argEls = $c.CommandElements | Select-Object -Skip 1
+        $urlEl  = $argEls | Where-Object { $_ -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst] } | Select-Object -First 1
+        $url    = if ($urlEl -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $urlEl.Value } else { $urlEl.Extent.Text }
+        # the dest is a (Join-Path $dir "<file>") paren-expression; grab its last string constant = the filename
+        $paren = $c.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.ParenExpressionAst] } | Select-Object -First 1
+        $file  = $null
+        if ($paren) { $file = ($paren.FindAll({ param($y) $y -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | Select-Object -Last 1).Value }
+        [pscustomobject]@{ Url = $url; File = $file }
+    }
+    Assert ($entries.Count -ge 10) "setup.ps1 exposes the Get-Model download set ($($entries.Count) entries found)"
+
+    # A canonical HF full-checkpoint resolve URL: https://huggingface.co/<owner>/<repo>/resolve/main/<name>.safetensors
+    $hfResolve = '^https://huggingface\.co/[^/]+/[^/]+/resolve/main/.+\.safetensors$'
+    foreach ($spec in @(
+        @{ Url = 'https://huggingface.co/OnomaAIResearch/Illustrious-XL-v1.0/resolve/main/Illustrious-XL-v1.0.safetensors'; File = 'Illustrious-XL-v1.0.safetensors' },
+        @{ Url = 'https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors';         File = 'Animagine-XL-4.0.safetensors' }
+    )) {
+        $e = $entries | Where-Object { $_.Url -eq $spec.Url } | Select-Object -First 1
+        Assert ($null -ne $e)                       "anime SDXL: $($spec.File) is wired as a Get-Model entry"
+        Assert ($spec.Url -match $hfResolve)        "anime SDXL: $($spec.File) URL is a well-formed HF resolve/main/*.safetensors URL"
+        Assert ($e -and $e.File -eq $spec.File)     "anime SDXL: $($spec.File) saves under the expected stable local filename"
+        # not a do_not_use / refiner / inpaint / component file — the canonical full checkpoint
+        Assert ($spec.Url -notmatch '(?i)do_not_use|refiner|inpaint|/unet/|/vae/|-opt\.safetensors$') "anime SDXL: $($spec.File) targets the canonical full checkpoint (not a component/opt/do_not_use)"
+    }
+    # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
+    $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
+    Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"
 }
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

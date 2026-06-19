@@ -7,7 +7,7 @@
 # Usage:
 #   .\setup.ps1                       core: prereqs + config deploy (LLM/chat/code)
 #   .\setup.ps1 -Media                + SwarmUI/ComfyUI + the verified uncensored models
-#   .\setup.ps1 -Media -Models full   + ~90-100GB quality kit (Wan 2.2 14B/5B, Qwen-Image-Edit, ACE-Step music, LTXV, Foley, 4x upscale, Z-Image Base, Chroma, :8013 rewriter)
+#   .\setup.ps1 -Media -Models full   + ~100-115GB quality kit (Wan 2.2 14B/5B, Qwen-Image-Edit, ACE-Step music, LTXV, Foley, 4x upscale, Z-Image Base, Chroma, Illustrious-XL + Animagine XL anime SDXL, :8013 rewriter)
 #
 # Then:  .\doki.ps1 up        (chat + code)        .\doki.ps1 up media   (image + video)
 param(
@@ -509,6 +509,16 @@ if ($Models -eq "full") {
     # Chroma — uncensored, FLUX-derived stylized complement. Use the *-final STABLE variant
     # (the repo's do_not_use/ files error in ComfyUI with a tensor mismatch).
     Get-Model "https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/Chroma1-HD-fp8mixed-final.safetensors" (Join-Path $diff "Chroma1-HD-fp8mixed-final.safetensors")
+
+    # Anime / illustration pair — open, uncensored SDXL specialists (OpenRAIL++), ~6.94GB each, trivial on
+    # 32GB. Drop into Models\diffusion_models so they auto-appear in SwarmUI's checkpoint picker on install
+    # (and are usable immediately via  doki gen -Model <file>  — the override rides the existing picker, no
+    # recipe/C# change). RENAME to a stable local name (the Animagine repo also ships an *-opt variant; we
+    # take the canonical base checkpoint, NOT -opt). HF-tree-verified single full checkpoints (no split_files).
+    #   - Illustrious-XL v1.0: native 1536px anime SDXL, Danbooru-tag conditioning.
+    #   - Animagine XL 4.0: anime SDXL 1.0 finetune.
+    Get-Model "https://huggingface.co/OnomaAIResearch/Illustrious-XL-v1.0/resolve/main/Illustrious-XL-v1.0.safetensors" (Join-Path $diff "Illustrious-XL-v1.0.safetensors")
+    Get-Model "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors"         (Join-Path $diff "Animagine-XL-4.0.safetensors")
 
     # Upscaler: 4x-UltraSharp (ESRGAN) -> Models\upscale_models. SwarmUI exposes it as the
     # Upscale / Refiner-Upscale step for higher-detail stills and video frames.
