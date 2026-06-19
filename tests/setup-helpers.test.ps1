@@ -128,11 +128,17 @@ try {
         $argEls = $c.CommandElements | Select-Object -Skip 1
         $urlEl  = $argEls | Where-Object { $_ -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $_ -is [System.Management.Automation.Language.ExpandableStringExpressionAst] } | Select-Object -First 1
         $url    = if ($urlEl -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $urlEl.Value } else { $urlEl.Extent.Text }
-        # the dest is a (Join-Path $dir "<file>") paren-expression; grab its last string constant = the filename
+        # the dest is a (Join-Path $dir "<file>") paren-expression; grab its last string constant = the filename,
+        # and the full paren extent text = the unique dir+file destination (so same-filename-different-subdir, e.g.
+        # checkpoints/config.json vs checkpoints/vae/config.json, is NOT a false collision in the dupe-check below).
         $paren = $c.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.ParenExpressionAst] } | Select-Object -First 1
         $file  = $null
-        if ($paren) { $file = ($paren.FindAll({ param($y) $y -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | Select-Object -Last 1).Value }
-        [pscustomobject]@{ Url = $url; File = $file }
+        $dest  = $null
+        if ($paren) {
+            $file = ($paren.FindAll({ param($y) $y -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | Select-Object -Last 1).Value
+            $dest = ($paren.Extent.Text -replace '\s+', ' ')
+        }
+        [pscustomobject]@{ Url = $url; File = $file; Dest = $dest }
     }
     Assert ($entries.Count -ge 10) "setup.ps1 exposes the Get-Model download set ($($entries.Count) entries found)"
 
@@ -398,6 +404,76 @@ try {
     $fp8Adapter = $entries | Where-Object { $_.Url -match '(?i)InfiniteTalk.*fp8|InfiniTetalk.*fp8' }
     Assert ($fp8Adapter.Count -eq 0) "InfiniteTalk: no phantom fp8 adapter URL (Kijai's tree is fp16-only; an fp8 BASE repack is the on-GPU sourcing step)"
 
+    Write-Host "`nLatentSync LIGHT lip-sync (-LatentSync): ShmuelRonen/ComfyUI-LatentSyncWrapper node + the public ByteDance/LatentSync-1.5 weights (`$ls)"
+    # The GATED LIGHT lip-sync (-LatentSync) is the lighter alternative to the shipped ~82GB InfiniteTalk: ByteDance
+    # LatentSync 1.5 fits 8GB VRAM and ~9.5GB on disk (roughly 1/9th of InfiniteTalk). Decision-rule branch: install
+    # URLs verified, but NO authoritative SwarmUI-API workflow JSON is sourceable (the wrapper's example_workflows
+    # are ComfyUI UI-graph exports, not SwarmUI's flat API-prompt CustomWorkflows) -> wire ONLY the gated install +
+    # the kind alias + the decisions.md note; the runnable media-assets\LatentSync.json is the on-GPU authoring step
+    # (Test-Path Warn, identical to the InfiniteTalk/Foley/InstantID copies). Weights ride the PUBLIC
+    # ByteDance/LatentSync-1.5 repo (OpenRAIL++; the 1.6 repo is intermittently gated). Pin: (1) the node is cloned
+    # from ShmuelRonen/ComfyUI-LatentSyncWrapper, (2) a $ls base URL var = the LatentSync-1.5 resolve/main tree, (3)
+    # the core runtime weights (latentsync_unet.pt + stable_syncnet.pt + whisper/tiny.pt) are wired Get-Model
+    # entries with non-colliding local filenames, (4) NO heavy Wan2.1-I2V-14B base is pulled (this is a self-
+    # contained SD-VAE-latent model — that would defeat the whole "LIGHT" point). Sizes/URLs HF-API verified.
+    $lsClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)ShmuelRonen/ComfyUI-LatentSyncWrapper' }, $true)
+    Assert ($lsClone.Count -ge 1) "LatentSync: setup.ps1 clones the ShmuelRonen/ComfyUI-LatentSyncWrapper node (the maintained wrapper running current 1.5/1.6 weights)"
+
+    # the base-URL var, pinned to the verified PUBLIC ByteDance/LatentSync-1.5 resolve/main tree (OpenRAIL++)
+    $lsBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$ls' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $lsBase) "LatentSync: setup.ps1 defines a `$ls ByteDance/LatentSync-1.5 base URL var"
+    $lsUrl = if ($lsBase) { $lsBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($lsUrl -match '^https://huggingface\.co/ByteDance/LatentSync-1\.5/resolve/main$') "LatentSync: `$ls = ByteDance/LatentSync-1.5 resolve/main URL (the PUBLIC OpenRAIL++ repo; 1.6 is intermittently gated)"
+
+    # the core runtime weights — the diffusion UNet, the SyncNet supervision, and the Whisper-tiny audio encoder
+    foreach ($spec in @(
+        @{ File = 'latentsync_unet.pt'; Suffix = '/latentsync_unet.pt';   Label = 'diffusion UNet (5.07GB)' },
+        @{ File = 'stable_syncnet.pt';  Suffix = '/stable_syncnet.pt';     Label = 'SyncNet supervision (1.61GB)' },
+        @{ File = 'tiny.pt';            Suffix = '/whisper/tiny.pt';        Label = 'Whisper-tiny audio encoder (75.6MB)' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File -and $_.Url -match '(?i)\$ls/' } | Select-Object -First 1
+        Assert ($null -ne $e) "LatentSync: the core $($spec.Label) is a Get-Model entry off `$ls"
+        $full = ($e.Url -replace '(?i)\$ls', $lsUrl).Trim('"')
+        Assert ($full -eq ($lsUrl + $spec.Suffix)) "LatentSync: $($spec.File) resolves to the expected LatentSync-1.5 path ($($spec.Suffix))"
+    }
+    # the LatentSync-1.5 repo-ROOT config.json (the model config the wrapper loads from checkpoints/config.json) —
+    # a Get-Model off $ls, distinct from the SD-VAE's own config below.
+    $lsRootCfg = $entries | Where-Object { $_.File -eq 'config.json' -and $_.Url -match '(?i)\$ls/config\.json' } | Select-Object -First 1
+    Assert ($null -ne $lsRootCfg) "LatentSync: the repo-root config.json is a Get-Model off `$ls (checkpoints/config.json, the LatentSync-1.5 model config)"
+
+    # THE SD-VAE — REQUIRED. LatentSync is an SD-VAE-LATENT diffusion model: it encodes/decodes frames through
+    # stabilityai/sd-vae-ft-mse, so it CANNOT run without it. The wrapper README flags it as a REQUIRED manual
+    # download into checkpoints/vae/ (diffusion_pytorch_model.safetensors + config.json). UNGATED (resolve 302s to a
+    # public xet CDN, HEAD-verified). Pin: (1) a $sdvae base var = the sd-vae-ft-mse resolve/main tree (a DISTINCT
+    # name from the PuLID block's pre-existing $vae DIRECTORY var), (2) BOTH the VAE safetensors weight AND its
+    # config.json are Get-Model entries off $sdvae.
+    $vaeBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$sdvae' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $vaeBase) "LatentSync: setup.ps1 defines a `$sdvae stabilityai/sd-vae-ft-mse base URL var (the REQUIRED SD-VAE)"
+    $vaeUrl = if ($vaeBase) { $vaeBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($vaeUrl -match '^https://huggingface\.co/stabilityai/sd-vae-ft-mse/resolve/main$') "LatentSync: `$sdvae = stabilityai/sd-vae-ft-mse resolve/main URL (the SD-VAE LatentSync re-encodes frames through; UNGATED)"
+    foreach ($spec in @(
+        @{ File = 'diffusion_pytorch_model.safetensors'; Suffix = '/diffusion_pytorch_model.safetensors'; Label = 'SD-VAE weights (335MB)' },
+        @{ File = 'config.json';                          Suffix = '/config.json';                          Label = 'SD-VAE config (547B)' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File -and $_.Url -match '(?i)\$sdvae/' } | Select-Object -First 1
+        Assert ($null -ne $e) "LatentSync: the $($spec.Label) is a Get-Model entry off `$sdvae (into checkpoints/vae/)"
+        $full = ($e.Url -replace '(?i)\$sdvae', $vaeUrl).Trim('"')
+        Assert ($full -eq ($vaeUrl + $spec.Suffix)) "LatentSync: $($spec.File) resolves to the expected sd-vae-ft-mse path ($($spec.Suffix))"
+    }
+
+    # LatentSync is a self-contained SD-VAE-latent model — it must NOT drag in the heavy Wan2.1-I2V-14B base
+    # (that ~82GB base belongs ONLY to InfiniteTalk; pulling it here would defeat the entire "LIGHT" purpose).
+    # Its audio encoder is Whisper-tiny, NOT InfiniteTalk's chinese-wav2vec2 — and that base never reuses across.
+    $lsWan = $entries | Where-Object { $_.Url -match '(?i)\$ls/' -and $_.Url -match '(?i)Wan2\.?1|I2V-14B|diffusion_pytorch_model-\d{5}' }
+    Assert ($lsWan.Count -eq 0) "LatentSync: pulls NO Wan2.1-I2V-14B base off `$ls (it is a self-contained SD-VAE-latent model — the ~82GB base is InfiniteTalk-only; this is the LIGHT pick)"
+
     Write-Host "`nNunchaku NVFP4 speed runtime (-Nunchaku): nunchaku-ai wheel-from-URL + ComfyUI-nunchaku node + the two nunchaku svdq NVFP4 weights"
     # The GATED speed sidecar (-Nunchaku) installs the nunchaku NVFP4 RUNTIME (a pip wheel + the ComfyUI-nunchaku
     # node), then under -Models full fetches the two nunchaku svdq NVFP4 VARIANTS: Z-Image-Turbo (nunchaku-ai svdq-fp4
@@ -517,9 +593,12 @@ try {
         $x.Extent.Text -match '(?i)devnen/Chatterbox' }, $true)
     Assert ($devnenClones.Count -eq 1) "TtsSuite: the :8004 Chatterbox server is cloned exactly ONCE (by -Tts) — -TtsSuite adds NO second/alternate Chatterbox path (the coexisting default stays untouched)"
 
-    # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
-    $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
-    Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"
+    # every Get-Model lands a UNIQUE destination (dir + filename) — a true duplicate dest would make one model
+    # silently shadow another. Keyed on the full (Join-Path $dir "<file>") expression, NOT the bare filename, so a
+    # filename reused in a DIFFERENT subdir (e.g. checkpoints/config.json vs checkpoints/vae/config.json, both
+    # required by the LatentSync wrapper) is correctly allowed; only a same-dir same-name collision fails.
+    $dupes = $entries | Where-Object { $_.Dest } | Group-Object Dest | Where-Object { $_.Count -gt 1 }
+    Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same destination (dir + filename)$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"
 }
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

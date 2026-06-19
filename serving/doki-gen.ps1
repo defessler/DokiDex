@@ -9,7 +9,7 @@
 
 # switches -> exactly one kind, with an ambiguity guard (so `gen -Video -Music` fails loudly, not silently).
 function Resolve-GenKind {
-    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$Pulid, [switch]$InfiniteTalk, [switch]$Speak)
+    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$Pulid, [switch]$InfiniteTalk, [switch]$LatentSync, [switch]$Speak)
     $picked = @()
     if ($Video) { $picked += 'video' }
     if ($Music) { $picked += 'music' }
@@ -19,13 +19,17 @@ function Resolve-GenKind {
     if ($FaceId) { $picked += 'faceid' }
     if ($Pulid) { $picked += 'pulid' }
     if ($InfiniteTalk) { $picked += 'infinitetalk' }
+    # -LatentSync = the GATED LIGHT lip-sync (ByteDance LatentSync, ~9.5GB / 8GB VRAM). Unlike InfiniteTalk
+    # (portrait->talking-video on the ~82GB Wan2.1-14B base), this RE-SYNCS an existing clip's mouth to new audio
+    # (video-in), so it requires -Audio only (no portrait -InitImage) — see Get-GenRecipe + the -Audio guard.
+    if ($LatentSync) { $picked += 'latentsync' }
     # -Speak = the GATED TTS-Audio-Suite alternative speech path (15 engines + RVC), run as a ComfyUI custom
     # workflow in the GPU-EXCLUSIVE media group. This does NOT touch the coexisting-with-chat :8004 Chatterbox
     # default (Tts.cs / api-speak), which stays the unconditional everyday readback path — it's a different
     # transport (HTTP server in the LLM group). -Speak is opt-in only and requires `doki up media` + the on-GPU
     # per-engine TtsSuite-<engine> workflow (see docs/decisions.md).
     if ($Speak) { $picked += 'speech' }
-    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -Pulid / -InfiniteTalk / -Speak (got: $($picked -join ', '))" }
+    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -Pulid / -InfiniteTalk / -LatentSync / -Speak (got: $($picked -join ', '))" }
     if ($picked.Count -eq 1) { return $picked[0] }
     return 'image'
 }
@@ -103,7 +107,7 @@ function Resolve-TtsEngine {
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler, [string]$Engine
     )
     $r = switch ($Kind) {
@@ -174,6 +178,17 @@ function Get-GenRecipe {
         # audio-load nodes. GATED: needs the -InfiniteTalk install (node + ~82GB base + adapter + wav2vec2) AND
         # the on-GPU-authored CustomWorkflows\InfiniteTalk.json (the audio body-key is pinned there) — see docs/decisions.md.
         'infinitetalk' { @{ comfyuicustomworkflow = 'InfiniteTalk' } }
+        # LIGHT lip-sync via the LatentSync custom ComfyUI workflow (ByteDance LatentSync 1.5, run through the
+        # ShmuelRonen/ComfyUI-LatentSyncWrapper node) — the LIGHTER alternative to InfiniteTalk (~9.5GB on disk /
+        # 8GB VRAM vs InfiniteTalk's ~82GB base). I/O DIVERGENCE vs InfiniteTalk: LatentSync RE-SYNCS an EXISTING
+        # clip's mouth to new audio (VIDEO-in), it does NOT generate a talking video from a portrait. So it takes
+        # the driving voice via -Audio <wav/mp3> ONLY; the source video rides the workflow's own video-input channel
+        # (NO mandatory portrait -InitImage — that is the InfiniteTalk contract, not this one). Ergonomic alias for
+        # -Workflow LatentSync; the audio rides the same provisional inputaudio body-key InfiniteTalk parks (pinned
+        # on-GPU once the authored workflow names its audio-load node). GATED: needs the -LatentSync install (node +
+        # the ByteDance/LatentSync-1.5 weights) AND the on-GPU-authored CustomWorkflows\LatentSync.json — see
+        # docs/decisions.md.
+        'latentsync' { @{ comfyuicustomworkflow = 'LatentSync' } }
         # GATED TTS-Audio-Suite alternative speech (15 engines + RVC) via a per-ENGINE ComfyUI custom workflow.
         # The chosen engine selects WHICH workflow JSON runs (one per engine, e.g. TtsSuite-IndexTTS2 /
         # TtsSuite-Higgs), so the recipe resolves -Engine -> comfyuicustomworkflow='TtsSuite-<engine>' exactly the
@@ -287,7 +302,7 @@ function Get-GenPromptFields {
 function Get-ModelFamilyOverride {
     param(
         [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image'
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
@@ -357,7 +372,7 @@ function Build-GenBody {
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -449,7 +464,7 @@ function Build-GenBody {
 function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
         [string]$Engine,   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...): picks the TtsSuite-<engine> workflow
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
@@ -472,6 +487,17 @@ function Invoke-Gen {
     # either (mirrors -Edit/-FaceId) rather than POSTing a talking-video workflow with a missing input.
     if ($Kind -eq 'infinitetalk' -and -not $InitImage) { throw "-InfiniteTalk requires -InitImage <portrait>" }
     if ($Kind -eq 'infinitetalk' -and -not $Audio)     { throw "-InfiniteTalk requires -Audio <wav/mp3>" }
+    # LatentSync (LIGHT lip-sync) re-syncs an EXISTING clip's mouth to new audio (video-in), so it needs the
+    # driving voice — fail loudly up front (mirrors the InfiniteTalk -Audio guard). Unlike InfiniteTalk it does
+    # NOT require a portrait -InitImage: the source video rides the workflow's own video-input channel, so -Audio
+    # is the only mandatory input here (the I/O divergence flagged on the latentsync recipe arm).
+    if ($Kind -eq 'latentsync' -and -not $Audio)       { throw "-LatentSync requires -Audio <wav/mp3>" }
+    # LatentSync is audio-driven VIDEO re-sync (it edits an EXISTING clip's mouth to the audio), so the source
+    # video is supplied via the on-GPU workflow's own video-input channel — NOT via -InitImage (an image). Reject
+    # -InitImage loudly rather than silently base64'ing it onto the body and ignoring it, which would mislead a
+    # user into thinking a portrait/still drove the gen (the I/O divergence vs InfiniteTalk, which DOES take a
+    # portrait via -InitImage). Fire up front, before the init-image file-read below.
+    if ($Kind -eq 'latentsync' -and $InitImage)        { throw "-LatentSync is audio-driven video re-sync; the source video is supplied via the on-GPU workflow, not -InitImage" }
     # -Speak (TTS-Audio-Suite) needs TEXT to synthesize — fail loudly up front (mirrors -Edit/-FaceId) rather
     # than POSTing a speech workflow with nothing to speak. The text is the gen idea ($Prompt); a reference voice
     # clip is OPTIONAL (rides -Audio, the zero-shot clone input). $Prompt is already Mandatory, but guard the
@@ -482,14 +508,16 @@ function Invoke-Gen {
     if ($Face -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Face only applies to image/edit/i2v gens (got $Kind)" }
     if ($Realism -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Realism only applies to image/edit/i2v gens (got $Kind)" }
     if ($MaskImage -and $Kind -ne 'edit') { throw "-MaskImage only applies to -Edit gens (got $Kind)" }
-    # -Audio rides ONLY the infinitetalk kind (its driving voice). Without this guard, Build-GenBody injects the
-    # provisional `inputaudio` key whenever -Audio is set, so `doki gen -Video -Audio x.wav` would silently smuggle
-    # a stray audio key into a Wan video body — symmetric with the -MaskImage guard above. Fire BEFORE the audio
-    # file-read so a real clip on the wrong kind is rejected too (not waved through by the existence check).
-    # -Audio rides infinitetalk (driving voice) OR speech (the optional zero-shot reference voice clip for the
-    # TTS-Audio-Suite engines). Any other kind would silently smuggle the provisional `inputaudio` key into a
-    # non-audio body, so reject it loudly (symmetric with -MaskImage). Both audio-consuming kinds are permitted.
-    if ($Audio -and $Kind -notin @('infinitetalk', 'speech')) { throw "-Audio only applies to -InfiniteTalk / -Speak gens (got $Kind)" }
+    # -Audio rides the infinitetalk + latentsync + speech kinds (their driving / reference voice). Without this
+    # guard, Build-GenBody injects the provisional `inputaudio` key whenever -Audio is set, so `doki gen -Video
+    # -Audio x.wav` would silently smuggle a stray audio key into a Wan video body — symmetric with the -MaskImage
+    # guard above. Fire BEFORE the audio file-read so a real clip on the wrong kind is rejected too (not waved
+    # through by the existence check).
+    # -Audio rides infinitetalk (driving voice) OR latentsync (the LIGHT lip-sync's driving voice) OR speech (the
+    # optional zero-shot reference voice clip for the TTS-Audio-Suite engines). Any other kind would silently
+    # smuggle the provisional `inputaudio` key into a non-audio body, so reject it loudly (symmetric with
+    # -MaskImage). All three audio-consuming kinds are permitted.
+    if ($Audio -and $Kind -notin @('infinitetalk', 'latentsync', 'speech')) { throw "-Audio only applies to -InfiniteTalk / -LatentSync / -Speak gens (got $Kind)" }
     $initB64 = $null
     if ($InitImage) {
         if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }

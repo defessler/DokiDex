@@ -24,6 +24,7 @@ Assert ((Resolve-GenKind -Foley) -eq 'foley') "-Foley -> foley"
 Assert ((Resolve-GenKind -FaceId) -eq 'faceid') "-FaceId -> faceid (InstantID face-identity)"
 Assert ((Resolve-GenKind -Pulid) -eq 'pulid') "-Pulid -> pulid (PuLID-Flux face-identity)"
 Assert ((Resolve-GenKind -InfiniteTalk) -eq 'infinitetalk') "-InfiniteTalk -> infinitetalk (audio-driven talking-video)"
+Assert ((Resolve-GenKind -LatentSync) -eq 'latentsync') "-LatentSync -> latentsync (the LIGHT video-in lip re-sync)"
 $ambiguous = $false
 try { Resolve-GenKind -Video -Music | Out-Null } catch { $ambiguous = $true }
 Assert $ambiguous                             "-Video -Music -> throws (ambiguous)"
@@ -36,6 +37,9 @@ Assert $ambiguousPulid                        "-Pulid -FaceId -> throws (ambiguo
 $ambiguous3 = $false
 try { Resolve-GenKind -InfiniteTalk -I2v | Out-Null } catch { $ambiguous3 = $true }
 Assert $ambiguous3                            "-InfiniteTalk -I2v -> throws (ambiguous)"
+$ambiguousLs = $false
+try { Resolve-GenKind -LatentSync -InfiniteTalk | Out-Null } catch { $ambiguousLs = $true }
+Assert $ambiguousLs                           "-LatentSync -InfiniteTalk -> throws (ambiguous; two lip-syncs)"
 
 # --- Get-GenRecipe: the docs/wiki/11-media-recipes.md table, 1:1 ---
 $img = Get-GenRecipe -Kind image
@@ -204,6 +208,45 @@ $audRightKind = $true
 try { Invoke-Gen -Prompt 'a person speaking' -Kind infinitetalk -InitImage $itPortrait2 -Audio $itAudio2 -BodyOnly | Out-Null } catch { $audRightKind = $false }
 Assert $audRightKind                                      "-InfiniteTalk -InitImage -Audio -> does NOT throw the audio kind-guard (infinitetalk legitimately consumes audio)"
 Remove-Item -LiteralPath $itPortrait2, $itAudio2 -Force -ErrorAction SilentlyContinue
+
+# latentsync = the LIGHT lip-sync custom-workflow alias (ByteDance LatentSync, video-in mouth re-sync to audio).
+# Maps to comfyuicustomworkflow=LatentSync. Unlike InfiniteTalk (portrait->talking-video), LatentSync RE-SYNCS an
+# existing clip's mouth to new audio — so it requires -Audio only (the visual input rides the workflow's video
+# channel), not a mandatory -InitImage portrait.
+$ls = Get-GenRecipe -Kind latentsync
+Assert ($ls.comfyuicustomworkflow -eq 'LatentSync') "latentsync -> LatentSync custom workflow (the LIGHT video-in lip re-sync alias)"
+
+# --- Invoke-Gen: -LatentSync REQUIRES -Audio <clip> up front (mirrors the InfiniteTalk -Audio guard) but does
+# NOT require a portrait -InitImage (it re-syncs an existing video, not a portrait->video gen). The audio guard
+# must fire loudly BEFORE any SwarmUI contact; the positive path uses a real temp file + -BodyOnly (no /API call).
+$lsNoAudio = $false; $lsErr = $null
+try { Invoke-Gen -Prompt 'a person speaking' -Kind latentsync | Out-Null } catch { $lsNoAudio = $true; $lsErr = "$($_.Exception.Message)" }
+Assert $lsNoAudio                                         "-LatentSync with NO -Audio -> throws (the driving voice is mandatory)"
+Assert ($lsErr -match 'requires\s+-Audio')               "-LatentSync missing -Audio -> the error names 'requires -Audio'"
+$lsAudio = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-ls-aud-$([guid]::NewGuid().ToString('N')).wav"
+Set-Content -LiteralPath $lsAudio -Value 'not-a-real-wav-just-bytes' -NoNewline
+$lsOk = $true
+try { $lsb = Invoke-Gen -Prompt 'a person speaking' -Kind latentsync -Audio $lsAudio -BodyOnly } catch { $lsOk = $false }
+Assert $lsOk                                              "-LatentSync WITH -Audio -> does NOT throw (audio supplied; no portrait required)"
+$lsbBody = $null; try { $lsbBody = $lsb | ConvertFrom-Json } catch {}
+Assert ($lsbBody -and $lsbBody.comfyuicustomworkflow -eq 'LatentSync') "-LatentSync -BodyOnly -> body carries comfyuicustomworkflow=LatentSync"
+Assert ($lsbBody -and $lsbBody.inputaudio)                "-LatentSync -BodyOnly -> body carries the driving audio (provisional inputaudio key; pinned on-GPU)"
+Remove-Item -LiteralPath $lsAudio -Force -ErrorAction SilentlyContinue
+
+# --- Invoke-Gen: -LatentSync REJECTS -InitImage. LatentSync is audio-driven VIDEO re-sync — it edits an EXISTING
+# clip's mouth to the audio; the source video is supplied via the on-GPU workflow's own video-input channel, NOT
+# the init-image channel. Before this guard, -InitImage was silently base64'd and ignored for latentsync (a stray
+# initimage key on the body), misleading a user into thinking a portrait drove the gen. The guard must fire loudly
+# up front, BEFORE any SwarmUI contact, and must NOT block the legit -Audio-only path (already proven above).
+$lsInitReject = $false; $lsInitErr = $null
+$lsRejImg = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-ls-img-$([guid]::NewGuid().ToString('N')).png"
+$lsRejAud = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-ls-rej-$([guid]::NewGuid().ToString('N')).wav"
+Set-Content -LiteralPath $lsRejImg -Value 'not-a-real-image-just-bytes' -NoNewline
+Set-Content -LiteralPath $lsRejAud -Value 'not-a-real-wav-just-bytes'   -NoNewline
+try { Invoke-Gen -Prompt 'a person speaking' -Kind latentsync -InitImage $lsRejImg -Audio $lsRejAud -BodyOnly | Out-Null } catch { $lsInitReject = $true; $lsInitErr = "$($_.Exception.Message)" }
+Assert $lsInitReject                                      "-LatentSync -InitImage -> throws (LatentSync is video-in re-sync; the source video is NOT supplied via -InitImage)"
+Assert ($lsInitErr -match '(?i)audio-driven video re-sync') "-LatentSync -InitImage -> the error explains it is audio-driven video re-sync (the source video rides the on-GPU workflow, not -InitImage)"
+Remove-Item -LiteralPath $lsRejImg, $lsRejAud -Force -ErrorAction SilentlyContinue
 
 # --- Resolve-GenKind: -Speak -> the GATED TTS-Audio-Suite speech kind ('speech'), with the ambiguity guard ---
 Assert ((Resolve-GenKind -Speak) -eq 'speech') "-Speak -> speech (the gated TTS-Audio-Suite alternative speech path)"

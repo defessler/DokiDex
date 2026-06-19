@@ -20,6 +20,7 @@ param(
     [switch]$FaceId,    # optional sidecar: InstantID face-identity reference (SDXL — reuses the anime Illustrious/Animagine base, no FLUX needed)
     [switch]$Pulid,     # optional sidecar: PuLID-Flux face-identity (FLUX.1-dev) — pulls a NON-GATED ~17GB FLUX fp8 base (Kijai unet + t5xxl/clip_l/ae) + the balazik PuLID-Flux node (Alpha/stale); SHARES InstantID's antelopev2
     [switch]$InfiniteTalk,  # optional sidecar: audio-driven talking-video via MeiGen InfiniteTalk on the Wan2.1-I2V-14B base — NOTE pulls an ~82GB Wan2.1 base NOT otherwise on disk
+    [switch]$LatentSync,    # optional sidecar: the LIGHT lip-sync — ByteDance LatentSync 1.5 (video-in mouth re-sync to -Audio), ~9.5GB on disk / 8GB VRAM (fits 32GB with huge headroom; OpenRAIL++ weights / Apache code) — the LIGHTER alternative to the ~82GB InfiniteTalk (a DIFFERENT job: re-sync vs portrait->video, so ADDITIVE not a replacement)
     [switch]$TtsSuite,  # optional sidecar: TTS-Audio-Suite ComfyUI node (15 TTS engines + RVC). A GATED ALTERNATIVE to the standalone :8004 Chatterbox server (which stays the coexisting-with-chat default, untouched) — this one runs in the GPU-exclusive media group. Engines AUTO-DOWNLOAD their own weights on first use (nothing pre-fetched); the runtime workflow is the on-GPU authoring step.
     [switch]$Nunchaku,  # optional sidecar: Nunchaku NVFP4 speed runtime (wheel + ComfyUI-nunchaku node) — ~3x faster on Blackwell/RTX-50xx for the Z-Image-Turbo (the default base) + Qwen-Image NVFP4 svdq variants. +Models full fetches them. (FLUX.2 Klein NVFP4 is BFL-native FP4, fetched under -Models full, not here.)
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
@@ -812,6 +813,103 @@ if ($InfiniteTalk) {
     else { Warn "media-assets\InfiniteTalk.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
 
     Ok "InfiniteTalk ready -> node + weights installed (~82GB Wan2.1-I2V-14B base + adapter + wav2vec2). On-GPU LABELED: author the workflow JSON, confirm the 32GB fit (fp8 base + block-swap), source the fp8 repack, and pin the audio body-key. Run via  doki gen -InfiniteTalk -InitImage <portrait> -Audio <clip> '<prompt>'  once authored."
+}
+
+# 5h-quater. LatentSync — the LIGHT lip-sync (GATED sidecar, -LatentSync). The LIGHTER alternative to InfiniteTalk
+#     (5h-ter): ByteDance LatentSync 1.5 fits 8GB VRAM / ~9.5GB on disk — roughly 1/9th of InfiniteTalk's ~82GB —
+#     and is commercially licensed (weights OpenRAIL++, code Apache-2.0). The maintained ComfyUI integration is
+#     ShmuelRonen/ComfyUI-LatentSyncWrapper (951 stars, active through Sept 2025, tracks upstream 1.5->1.6). This
+#     mirrors the Foley/InstantID/InfiniteTalk install EXACTLY (node clone + comfy-python pip + Get-Model weights +
+#     Test-Path workflow-copy-or-Warn), with TWO honest divergences flagged here:
+#       (1) I/O DIVERGENCE — LatentSync is a VIDEO-to-video lip RE-SYNC (it edits an existing clip's mouth to new
+#           audio), NOT a portrait->talking-video generator like InfiniteTalk. So `doki gen -LatentSync -Audio
+#           <clip>` requires the driving voice ONLY; the source video rides the workflow's own video-input channel
+#           (no mandatory portrait -InitImage). It is ADDITIVE — it does NOT obsolete InfiniteTalk (different job).
+#       (2) NO SHARING with InfiniteTalk — LatentSync's audio encoder is Whisper-tiny (whisper/tiny.pt, 75.6MB), a
+#           DIFFERENT model than InfiniteTalk's chinese-wav2vec2; and it uses s3fd/2DFAN4 for face detect/landmarks,
+#           NOT antelopev2. It is a self-contained SD-VAE-latent model with ZERO Wan dependency — the ~9.8GB is
+#           all-new but TINY, and there is no meaningful re-download to avoid.
+#     WEIGHTS ride the PUBLIC ByteDance/LatentSync-1.5 repo (OpenRAIL++). The 1.6 repo is intermittently gated/
+#     private per the wrapper README, so 1.5 is the safe default (fits 8GB, leaves max 32GB headroom). The model is
+#     an SD-VAE-latent diffusion model, so it CANNOT run without the SD-VAE (stabilityai/sd-vae-ft-mse) — the wrapper
+#     README flags it as a REQUIRED manual download into checkpoints/vae/, so we fetch it (+ the repo-root config.json)
+#     alongside the core runtime + the auxiliaries. The wrapper also lazy-pulls some weights on first run.
+#     WORKFLOW IS NOT SHIPPED: the wrapper's example_workflows/ are ComfyUI UI-GRAPH exports (top-level
+#     id/nodes/links/groups), NOT SwarmUI's flat API-prompt CustomWorkflows format — identical to the InfiniteTalk/
+#     PuLID/TtsSuite blocker. So the runnable media-assets\LatentSync.json is the ON-GPU authoring step (load the
+#     UI-graph live -> convert to API-prompt -> rewire the checkpoint/whisper/syncnet paths -> wire SwarmUI's
+#     video-input + audio-load injection points -> validate a render; see docs/decisions.md). Until then this
+#     installs node+weights only and Warns the workflow is absent (same Test-Path posture as Foley/InstantID/
+#     InfiniteTalk). Cite: github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper ; huggingface.co/ByteDance/LatentSync-1.5.
+if ($LatentSync) {
+    Info "LatentSync LIGHT lip-sync (ShmuelRonen/ComfyUI-LatentSyncWrapper) — ByteDance LatentSync 1.5, ~9.8GB / 8GB VRAM (the LIGHTER alternative to the ~82GB InfiniteTalk; video-in re-sync, not portrait->video)"
+    Ensure-WinGet "Git.Git" "git"
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        # 1) the node (ShmuelRonen's LatentSyncWrapper — the maintained wrapper running current 1.5/1.6 weights).
+        $lsNode = Join-Path $nodes "ComfyUI-LatentSyncWrapper"
+        if (-not (Test-Path $lsNode)) { Info "installing LatentSyncWrapper node ..."; Git-Clone https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper $lsNode } else { Ok "LatentSyncWrapper node present" }
+        # 2) its python deps (same 3-candidate comfy-python probe Foley/InstantID/InfiniteTalk use, with the
+        #    $cpy/else Warn graceful fallback).
+        $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
+            ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+        $lsReq = Join-Path $lsNode "requirements.txt"
+        if ($cpy -and (Test-Path $lsReq)) { Info "installing LatentSyncWrapper python deps ..."; & $cpy -m pip install -r $lsReq | Out-Null; Ok "LatentSyncWrapper deps installed" }
+        else { Warn "LatentSyncWrapper deps: run  <comfy-python> -m pip install -r `"$lsReq`"  manually" }
+
+        # 3) the weights — the PUBLIC ByteDance/LatentSync-1.5 tree (OpenRAIL++) + the wrapper's REQUIRED SD-VAE. The
+        #    wrapper README documents an EXACT checkpoints tree under the node's own dir: checkpoints/{latentsync_unet.pt,
+        #    stable_syncnet.pt, config.json}, checkpoints/whisper/tiny.pt, checkpoints/vae/{diffusion_pytorch_model.safetensors,
+        #    config.json}, and checkpoints/auxiliary/ — so vae/, whisper/, auxiliary/ are all siblings directly under
+        #    checkpoints/ (README-verified, not the ComfyUI models tree). The one path the README does NOT enumerate is
+        #    the CONTENTS of checkpoints/auxiliary/ (it shows the folder bare): the 8 aux filenames + that exact relative
+        #    layout are taken from the LatentSync-1.5 repo's own auxiliary/ tree and are the labeled on-GPU confirm here
+        #    (auxiliary/ filenames vs whatever the node's first-run actually reads) — NOT the checkpoints-root layout,
+        #    which IS documented.
+        $ckptDir = Join-Path $lsNode "checkpoints";          New-Item -ItemType Directory -Force $ckptDir | Out-Null
+        $whDir   = Join-Path $ckptDir "whisper";             New-Item -ItemType Directory -Force $whDir   | Out-Null
+        $vaeDir  = Join-Path $ckptDir "vae";                 New-Item -ItemType Directory -Force $vaeDir  | Out-Null
+        $auxDir  = Join-Path $ckptDir "auxiliary";           New-Item -ItemType Directory -Force $auxDir  | Out-Null
+        $ls = "https://huggingface.co/ByteDance/LatentSync-1.5/resolve/main"
+        # 3A) CORE RUNTIME (~6.8GB) — the diffusion UNet + SyncNet supervision + the Whisper-tiny audio encoder + the
+        #     repo-root config.json (the LatentSync model config the wrapper loads from checkpoints/config.json).
+        Get-Model "$ls/latentsync_unet.pt"  (Join-Path $ckptDir "latentsync_unet.pt")   # 5.07 GB (the diffusion UNet)
+        Get-Model "$ls/stable_syncnet.pt"   (Join-Path $ckptDir "stable_syncnet.pt")    # 1.61 GB (SyncNet supervision)
+        Get-Model "$ls/whisper/tiny.pt"     (Join-Path $whDir   "tiny.pt")              # 75.6 MB (Whisper-tiny audio encoder)
+        Get-Model "$ls/config.json"         (Join-Path $ckptDir "config.json")          # 32 B  (the LatentSync-1.5 model config, checkpoints/config.json)
+        # 3B) THE SD-VAE (~335MB) — REQUIRED. LatentSync is an SD-VAE-LATENT diffusion model: it encodes/decodes
+        #     frames through stabilityai/sd-vae-ft-mse, so it CANNOT run without this. The wrapper README flags it as
+        #     a manual download into checkpoints/vae/ (diffusion_pytorch_model.safetensors + config.json). UNGATED
+        #     (resolve 302s to a public xet CDN, HEAD-verified).
+        $sdvae = "https://huggingface.co/stabilityai/sd-vae-ft-mse/resolve/main"
+        Get-Model "$sdvae/diffusion_pytorch_model.safetensors" (Join-Path $vaeDir "diffusion_pytorch_model.safetensors")  # 335 MB (the SD-VAE weights)
+        Get-Model "$sdvae/config.json"                         (Join-Path $vaeDir "config.json")                         # 547 B (the SD-VAE config)
+        # 3C) AUXILIARY face/quality weights (~3GB) — the EXHAUSTIVE 8-file set from the LatentSync-1.5 auxiliary/ tree
+        #     (the wrapper may also lazy-pull on first run). s3fd/sfd = face detect, 2DFAN4 = landmarks, vit_g/koniq/
+        #     vgg16 = quality scoring, syncnet_v2/i3d = sync/temporal.
+        Get-Model "$ls/auxiliary/vit_g_hybrid_pt_1200e_ssv2_ft.pth" (Join-Path $auxDir "vit_g_hybrid_pt_1200e_ssv2_ft.pth")  # 2.02 GB
+        Get-Model "$ls/auxiliary/vgg16-397923af.pth"                (Join-Path $auxDir "vgg16-397923af.pth")                 # 0.55 GB
+        Get-Model "$ls/auxiliary/s3fd-619a316812.pth"               (Join-Path $auxDir "s3fd-619a316812.pth")                # 0.09 GB (face detect)
+        Get-Model "$ls/auxiliary/sfd_face.pth"                      (Join-Path $auxDir "sfd_face.pth")                       # 0.09 GB
+        # 2DFAN4 is INTENTIONALLY left as a .zip — the face-alignment lib consumes the .zip directly; do NOT Expand-Archive it.
+        Get-Model "$ls/auxiliary/2DFAN4-cd938726ad.zip"             (Join-Path $auxDir "2DFAN4-cd938726ad.zip")              # 0.10 GB (landmarks; kept zipped)
+        Get-Model "$ls/auxiliary/koniq_pretrained.pkl"              (Join-Path $auxDir "koniq_pretrained.pkl")               # 0.11 GB
+        Get-Model "$ls/auxiliary/syncnet_v2.model"                  (Join-Path $auxDir "syncnet_v2.model")                   # 0.05 GB
+        Get-Model "$ls/auxiliary/i3d_torchscript.pt"                (Join-Path $auxDir "i3d_torchscript.pt")                 # 0.05 GB
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -LatentSync after it installs" }
+
+    # 4) workflow registration — GATED on the JSON existing. No authoritative SwarmUI-API LatentSync.json is
+    #    sourceable (the wrapper's example_workflows are UI-graphs) — it is the on-GPU authoring step (see the
+    #    header comment + docs/decisions.md). Until media-assets\LatentSync.json is authored + validated on a live
+    #    GPU, copy nothing and Warn (same Test-Path posture as Foley/InstantID/InfiniteTalk). Once committed it
+    #    rides the existing  doki gen -LatentSync -Audio <clip>  hook (comfyuicustomworkflow=LatentSync), no
+    #    C#/recipe change.
+    $lsWf  = Join-Path $root "media-assets\LatentSync.json"
+    $lsCwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\LatentSync.json"
+    if (Test-Path $lsWf) { New-Item -ItemType Directory -Force (Split-Path $lsCwf) | Out-Null; Copy-Item $lsWf $lsCwf -Force; Ok "LatentSync workflow installed" }
+    else { Warn "media-assets\LatentSync.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
+
+    Ok "LatentSync ready -> node + weights installed (~9.8GB ByteDance LatentSync 1.5 incl. the required SD-VAE; fits 8GB VRAM). On-GPU LABELED: author the workflow JSON, confirm node-load, wire the video-input channel, and pin the audio body-key. Run via  doki gen -LatentSync -Audio <clip> '<prompt>'  once authored."
 }
 
 # 5h-quinquies. PuLID-Flux face-identity (GATED sidecar, -Pulid) — FLUX-based face-ID, the alternative InstantID

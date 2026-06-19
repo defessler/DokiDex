@@ -298,6 +298,56 @@ does), so the placement is left as-is and the routing is flagged as a labeled on
 **Every existing path is byte-for-byte unchanged** (the `infinitetalk` kind/recipe + the additive `-Audio` plumbing
 are purely additive; no default/URL/catalog row changed).
 
+**Update — LatentSync SHIPPED as the LIGHT lip-sync (`-LatentSync`), INSTALL-WIRING ONLY (workflow JSON deferred
+to on-GPU authoring).** Mirrors the InfiniteTalk posture exactly, as the LIGHTER alternative to the shipped ~82GB
+InfiniteTalk. **The pick is LatentSync (ByteDance), NOT MuseTalk** — the obvious "lightest on paper" hypothesis
+(MuseTalk, ~4-6GB, MIT) does NOT survive node-maturity verification: both MuseTalk ComfyUI nodes
+(`chaojie/ComfyUI-MuseTalk`, `AIFSH/ComfyUI-MuseTalk_FSH`) are abandoned since mid-2024 and predate MuseTalk 1.5
+(they only run 1.0-era weights), and one face-parse weight is Google-Drive-gated — both install-maturity blockers.
+**LatentSync is the ONLY light candidate with a maintained node running the model's current release.**
+**Ranking (32GB single-user box; license + node maturity gating, not just VRAM):** (1) **LatentSync** — WIRED.
+8GB VRAM (1.5) / ~18-20GB (1.6@512), best lip-sync fidelity here (latent-diffusion + SyncNet supervision); weights
+**OpenRAIL++**, code **Apache-2.0** (commercially usable); node `ShmuelRonen/ComfyUI-LatentSyncWrapper` (951 stars,
+pushed 2025-09-04, tracks 1.5->1.6) — **genuinely maintained**. (2) MuseTalk — lightest on paper but DEAD node
+(see above). (3) EchoMimicV2 — Apache-2.0, ~16GB, more body-motion than crisp lip-sync, node less proven. (4)
+Hallo2 — heavy/slow (90-120min/10min clip), immature node. (5) Sonic — **DISQUALIFIED** (CC BY-NC-SA, non-
+commercial). (6) Float — **DISQUALIFIED** (CC BY-NC-ND + no ComfyUI node).
+**Node:** `ShmuelRonen/ComfyUI-LatentSyncWrapper`, pip'd via the same 3-candidate comfy-python probe Foley/InstantID/
+InfiniteTalk use (graceful Warn fallback). **Weights** ride the **PUBLIC** `ByteDance/LatentSync-1.5` repo
+(OpenRAIL++; the 1.6 repo is intermittently gated/private per the wrapper README, so 1.5 is the safe default —
+fits 8GB, leaves max 32GB headroom). Core runtime ~6.8GB (`latentsync_unet.pt` 5.07GB + `stable_syncnet.pt` 1.61GB
++ `whisper/tiny.pt` 75.6MB + the repo-root `config.json`) **+ the REQUIRED SD-VAE** (`stabilityai/sd-vae-ft-mse`
+`diffusion_pytorch_model.safetensors` 335MB + `config.json`, into `checkpoints/vae/` per the wrapper README — LatentSync
+is an SD-VAE-LATENT model and CANNOT run without it) + ~3GB auxiliary face/quality weights
+(vit_g/vgg16/s3fd/sfd/2DFAN4/koniq/syncnet_v2/i3d) into `checkpoints/auxiliary/` (the wrapper also lazy-pulls some on
+first run). **TOTAL ~9.8GB — roughly 1/9th of InfiniteTalk's ~82GB.** All sizes + the sd-vae-ft-mse resolve URL
+HF-verified (the VAE resolve 302s to a public xet CDN — ungated).
+**Decision-rule branch taken: install URLs verified, but NO authoritative SwarmUI-API workflow JSON is sourceable
+-> wire ONLY the gated install + the `latentsync` kind alias + this note; do NOT commit a blind workflow JSON.**
+The wrapper's `example_workflows/` are ComfyUI **UI-graph** exports (top-level `id`/`nodes`/`links`/`groups`), NOT
+SwarmUI's flat API-prompt `CustomWorkflows` format — identical to the InfiniteTalk/PuLID/TtsSuite blocker. So the
+runnable `media-assets\LatentSync.json` is the **on-GPU authoring step** (load the UI-graph live -> convert to
+API-prompt -> rewire checkpoint/whisper/syncnet paths -> wire SwarmUI's video-input + audio-load injection points
+-> validate a render), and until then the `-LatentSync` block installs node+weights and the workflow copy is a
+`Test-Path` Warn (identical to the Foley/InstantID/InfiniteTalk copies). Cite:
+`github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper` ; `huggingface.co/ByteDance/LatentSync-1.5`.
+**Ergonomics + the ONE I/O divergence vs InfiniteTalk:** a new `latentsync` kind (`doki gen -LatentSync`) ->
+`comfyuicustomworkflow=LatentSync`, reusing the InfiniteTalk `-Audio` plumbing **verbatim** (just `latentsync` added
+to the `-Audio` kind-allowlist; the provisional `inputaudio` body-key flows through unchanged, pinned on-GPU once
+`LatentSync.json` names its audio-load node). **LatentSync is VIDEO-in re-sync** — it edits an EXISTING clip's mouth
+to new audio, it does NOT generate a talking video from a portrait. So unlike InfiniteTalk it requires **`-Audio`
+only** (the source video rides the workflow's own video-input channel; **no mandatory portrait `-InitImage`**). It
+is **ADDITIVE, not a replacement** — InfiniteTalk (portrait->video generation) and LatentSync (video-in re-sync) are
+**different jobs**; both stay.
+**NO sharing with InfiniteTalk (honest):** LatentSync's audio encoder is **Whisper-tiny** (not InfiniteTalk's
+chinese-wav2vec2), it uses **s3fd/2DFAN4** for face detect/landmarks (not antelopev2), and it is a self-contained
+**SD-VAE-latent** model with **zero Wan dependency** — the ~9.8GB is all-new but TINY; there is no meaningful
+re-download to avoid. **Every existing path is byte-for-byte unchanged** — the `-InfiniteTalk` block + the `-Audio`
+plumbing are untouched; the `latentsync` kind/recipe + the install block are purely additive (no default/URL/catalog
+row changed). **FEASIBILITY:** 8GB (1.5) fits 32GB with huge headroom (vs InfiniteTalk OOMing at native), but the
+runnable workflow + node-load + a live render are the labeled on-GPU confirms — install-only at rest, same posture
+as InfiniteTalk.
+
 **Update — Nunchaku NVFP4 speed runtime SHIPPED as a gated `-Nunchaku` install + the verified NVFP4 model
 variants (moved off the gated-follow-ups list above).** Nunchaku is **NOT a model** — it is a **SPEED RUNTIME**
 (the `nunchaku-ai/nunchaku` pip wheel + the `ComfyUI-nunchaku` node; the org is **nunchaku-ai** — the old
