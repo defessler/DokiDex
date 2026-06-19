@@ -593,6 +593,58 @@ try {
         $x.Extent.Text -match '(?i)devnen/Chatterbox' }, $true)
     Assert ($devnenClones.Count -eq 1) "TtsSuite: the :8004 Chatterbox server is cloned exactly ONCE (by -Tts) — -TtsSuite adds NO second/alternate Chatterbox path (the coexisting default stays untouched)"
 
+    Write-Host "`nKokoro fast/light TTS (-Kokoro): remsky/Kokoro-FastAPI node clone — a GATED, ADDITIVE :8006 alternative that does NOT touch the :8004 Chatterbox default"
+    # The census DEFER-on-the-default outcome wired the ONE worthwhile gated alternative: Kokoro-82M (Apache-2.0,
+    # 82M, <2GB VRAM, CPU-capable, RTF ~0.03) behind remsky/Kokoro-FastAPI — a mature OpenAI-compatible
+    # /v1/audio/speech server. It has NO voice cloning (fixed preset voices), so it can NEVER be the default for a
+    # custom-voice assistant; it ships strictly as a snappy, near-zero-GPU-contention narration toggle. It mirrors
+    # the -Tts Chatterbox block EXACTLY: own venv, loopback-bound, additive — NEW port :8006 (not :8004 Chatterbox
+    # / :8005 STT). Pin: (1) the server is git-cloned from the VERIFIED remsky/Kokoro-FastAPI repo into kokoro\,
+    # (2) the -Kokoro block does NOT touch the devnen Chatterbox clone / :8004 bind, and (3) the install lives in a
+    # dedicated  if ($Kokoro) { ... }  block guarded by its own venv sentinel (resumable, like -Tts).
+    $kClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)remsky/Kokoro-FastAPI' }, $true)
+    Assert ($kClone.Count -ge 1) "Kokoro: setup.ps1 clones the remsky/Kokoro-FastAPI server (the mature OpenAI /v1/audio/speech Kokoro-82M server)"
+
+    $kokoroIf = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.IfStatementAst] -and
+        $x.Clauses[0].Item1.Extent.Text -match '^\s*\$Kokoro\s*$' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $kokoroIf) "Kokoro: setup.ps1 has an  if (`$Kokoro) { ... }  install block (gated by its own switch)"
+    $kokoroText = if ($kokoroIf) { $kokoroIf.Extent.Text } else { '' }
+    # additive + loopback + the dedicated :8006 port (not the :8004 Chatterbox or :8005 STT default)
+    Assert ($kokoroText -match '8006') "Kokoro: the gated server binds the NEW :8006 port (additive; not the :8004 Chatterbox / :8005 STT default)"
+    Assert ($kokoroText -match '(?i)127\.0\.0\.1') "Kokoro: the gated server is loopback-bound (127.0.0.1 — matches every sibling DokiDex server)"
+    Assert ($kokoroText -notmatch '(?i)8004') "Kokoro: the -Kokoro block never references :8004 (the coexisting Chatterbox default stays untouched)"
+    Assert ($kokoroText -notmatch '(?i)devnen/Chatterbox') "Kokoro: the -Kokoro block does NOT clone/edit the devnen Chatterbox server (additive alternative, never a replacement)"
+    # the -Kokoro switch exists as a real param (so the block is reachable + gated)
+    $kokoroParam = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.ParameterAst] -and
+        $x.Name.VariablePath.UserPath -eq 'Kokoro' }, $true)
+    Assert ($kokoroParam.Count -ge 1) "Kokoro: setup.ps1 declares a -Kokoro switch parameter"
+    # the install is resumable behind a venv .deps-ok sentinel (same discipline as -Tts)
+    Assert ($kokoroText -match '(?i)\.deps-ok') "Kokoro: the venv install is gated by a .deps-ok sentinel (resumable, like -Tts)"
+    # install-time WEIGHT pre-fetch: Kokoro-FastAPI does NOT lazy-download on first request (unlike Chatterbox's
+    # voice model), so the -Kokoro block must run the repo's own download_model.py at install. Pin: (1) it invokes
+    # docker\scripts\download_model.py, (2) into the api\src\models\v1_0 --output dir the launcher's MODEL_DIR reads
+    # (model_dir=src\models -> api\src\models, loader appends the v1_0/ prefix from pytorch_kokoro_v1_file), (3) it is
+    # idempotent (Test-Path skip on the .pth) and (4) Warn-on-failure (a download hiccup must not abort the block).
+    Assert ($kokoroText -match '(?i)docker\\scripts\\download_model\.py') "Kokoro: the block runs the repo's docker\scripts\download_model.py to pre-fetch the Kokoro-82M weights at install (no lazy first-request download)"
+    Assert ($kokoroText -match '(?i)api\\src\\models\\v1_0') "Kokoro: the weights download into api\src\models\v1_0 (the dir the launcher's MODEL_DIR=src\models + the v1_0/ filename prefix resolve to)"
+    Assert ($kokoroText -match '(?i)--output') "Kokoro: download_model.py is passed --output (the required arg; the script has no default output dir)"
+    Assert ($kokoroText -match '(?i)kokoro-v1_0\.pth') "Kokoro: the download is idempotent — guarded on the kokoro-v1_0.pth weight existing (skip on re-run)"
+    Assert ($kokoroText -match '(?i)Warn\b.*(?i)(download|weight)') "Kokoro: a weight-download failure WARNS (does not abort the -Kokoro block — the venv is already provisioned; the weight is retryable)"
+
+    # CONTRACT GUARD (whole-file): -Kokoro must NOT add a second devnen/Chatterbox clone — :8004 stays cloned
+    # exactly once (by -Tts). (The -TtsSuite block already asserts the same; re-pin here so wiring Kokoro can't
+    # regress it.)
+    $devnenAll = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)devnen/Chatterbox' }, $true)
+    Assert ($devnenAll.Count -eq 1) "Kokoro: the :8004 Chatterbox server is still cloned exactly ONCE (by -Tts) — -Kokoro adds no second/alternate Chatterbox path"
+
     # every Get-Model lands a UNIQUE destination (dir + filename) — a true duplicate dest would make one model
     # silently shadow another. Keyed on the full (Join-Path $dir "<file>") expression, NOT the bare filename, so a
     # filename reused in a DIFFERENT subdir (e.g. checkpoints/config.json vs checkpoints/vae/config.json, both

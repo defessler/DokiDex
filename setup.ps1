@@ -22,6 +22,7 @@ param(
     [switch]$InfiniteTalk,  # optional sidecar: audio-driven talking-video via MeiGen InfiniteTalk on the Wan2.1-I2V-14B base — NOTE pulls an ~82GB Wan2.1 base NOT otherwise on disk
     [switch]$LatentSync,    # optional sidecar: the LIGHT lip-sync — ByteDance LatentSync 1.5 (video-in mouth re-sync to -Audio), ~9.5GB on disk / 8GB VRAM (fits 32GB with huge headroom; OpenRAIL++ weights / Apache code) — the LIGHTER alternative to the ~82GB InfiniteTalk (a DIFFERENT job: re-sync vs portrait->video, so ADDITIVE not a replacement)
     [switch]$TtsSuite,  # optional sidecar: TTS-Audio-Suite ComfyUI node (15 TTS engines + RVC). A GATED ALTERNATIVE to the standalone :8004 Chatterbox server (which stays the coexisting-with-chat default, untouched) — this one runs in the GPU-exclusive media group. Engines AUTO-DOWNLOAD their own weights on first use (nothing pre-fetched); the runtime workflow is the on-GPU authoring step.
+    [switch]$Kokoro,    # optional sidecar: Kokoro-82M (hexgrad, Apache-2.0) via remsky/Kokoro-FastAPI — a GATED, ADDITIVE fast/light TTS alternative on :8006 (own venv, loopback-bound). Snappy, CPU-capable, <2GB VRAM, near-zero GPU contention — but NO voice cloning (fixed preset voices), so it is a narration TOGGLE, never the default. Does NOT touch the coexisting-with-chat :8004 Chatterbox default.
     [switch]$Nunchaku,  # optional sidecar: Nunchaku NVFP4 speed runtime (wheel + ComfyUI-nunchaku node) — ~3x faster on Blackwell/RTX-50xx for the Z-Image-Turbo (the default base) + Qwen-Image NVFP4 svdq variants. +Models full fetches them. (FLUX.2 Klein NVFP4 is BFL-native FP4, fetched under -Models full, not here.)
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
     [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
@@ -206,6 +207,77 @@ if ($Tts) {
         if (Test-Path $fp) { (Get-Content $fp) -replace 'self\.watermarker\.apply_watermark\(wav, sample_rate=self\.sr\)', 'wav  # watermark stripped (DokiDex: uncensored)' | Set-Content $fp }
     }
     Ok "TTS ready -> :8004 (OpenAI /v1/audio/speech + voice cloning). First '.\doki.ps1 up' downloads the voice model."
+}
+
+# ---- Kokoro: GATED fast/light TTS alternative (Kokoro-82M via remsky/Kokoro-FastAPI) — additive, NOT a replacement ----
+# The census DEFER-on-the-default outcome (docs/decisions.md) keeps Chatterbox :8004 the byte-for-byte default and
+# wires the ONE worthwhile gated alternative: Kokoro-82M (hexgrad, Apache-2.0 — https://huggingface.co/hexgrad/Kokoro-82M)
+# behind remsky/Kokoro-FastAPI (https://github.com/remsky/Kokoro-FastAPI), a mature OpenAI-compatible
+# /v1/audio/speech server. <2GB VRAM, CPU-capable, RTF ~0.03 -> snappy narration with near-zero GPU contention, so
+# it ALSO coexists in agent mode. It has NO voice cloning (54 fixed preset voices), so it can NEVER be the
+# custom-voice default — strictly a toggle. ADDITIVE: own venv, loopback-bound, NEW port :8006 (not :8004
+# Chatterbox / :8005 STT). This block NEVER touches the devnen Chatterbox clone or its :8004 bind.
+if ($Kokoro) {
+    Info "Kokoro stack (fast/light Apache-2.0 TTS via remsky/Kokoro-FastAPI — gated alternative; NO cloning)"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { Ensure-WinGet "Python.Python.3.10" "python" }
+    Ensure-WinGet "Git.Git" "git"
+    # Kokoro phonemizes via espeak-ng; the launcher points PHONEMIZER_ESPEAK_LIBRARY at libespeak-ng.dll, so the
+    # DLL must be on disk or synthesis fails. Install it here (same Ensure-WinGet discipline as python/git). The MSI
+    # drops it at C:\Program Files\eSpeak NG\libespeak-ng.dll (an absolute path the launcher reads), so verify by
+    # DLL-on-disk rather than a PATH command (the wix PATH entry may not refresh mid-session -> a false throw).
+    Ensure-WinGet "eSpeak-NG.eSpeak-NG" $null
+    if (-not (Test-Path "C:\Program Files\eSpeak NG\libespeak-ng.dll")) {
+        Warn "espeak-ng DLL not found at C:\Program Files\eSpeak NG\libespeak-ng.dll — Kokoro phonemization will fail until eSpeak-NG is installed."
+    }
+    $kRoot = Join-Path $root "kokoro\Kokoro-FastAPI"
+    if (-not (Test-Path (Join-Path $kRoot ".git"))) { Info "cloning Kokoro-FastAPI ..."; Git-Clone https://github.com/remsky/Kokoro-FastAPI $kRoot } else { Ok "Kokoro-FastAPI cloned" }
+    $kpy = Join-Path $kRoot ".venv\Scripts\python.exe"
+    $kok = Join-Path $kRoot ".venv\.deps-ok"   # sentinel: written only after ALL deps succeed (resumable, like -Tts)
+    if (-not (Test-Path $kok)) {
+        Info "creating venv + installing Kokoro-FastAPI + cu128 torch + deps ..."
+        if (-not (Test-Path $kpy)) { python -m venv (Join-Path $kRoot ".venv") }   # reuse a partial venv; pip resumes
+        & $kpy -m pip install --upgrade pip | Out-Null
+        # cu128 torch first so the project deps can't pull a CPU/older wheel and downgrade it (same discipline as -Tts).
+        Pip $kpy install torch --index-url https://download.pytorch.org/whl/cu128
+        # Install the package + its GPU deps via the repo's cu128 extra. Notes (plain pip, NOT uv):
+        #   - Use [gpu-cu128] NOT [gpu]: the [gpu] extra pins torch==2.8.0+cu126 (a DIFFERENT local version than the
+        #     cu128 wheel installed above, so plain pip would try to re-resolve it and fail). [gpu-cu128] pins
+        #     2.8.0+cu128, which the already-installed wheel satisfies.
+        #   - The editable-extras spec is "<dir>[extra]" with the suffix on the dir (NO "\." Join-Path separator,
+        #     which would yield a bogus ...\Kokoro-FastAPI\.[gpu-cu128] path segment).
+        #   - The repo declares its torch index in [tool.uv.sources], which plain pip IGNORES — so pass the cu128
+        #     index explicitly so pip can resolve the +cu128 local-version pin.
+        Pip $kpy install -e "$kRoot[gpu-cu128]" --extra-index-url https://download.pytorch.org/whl/cu128
+        # Fetch the Kokoro-82M weights NOW (install-time), not on first request. Kokoro-FastAPI ships an explicit
+        # model-download step — `docker/scripts/download_model.py --output api/src/models/v1_0` (confirmed against the
+        # upstream repo README + the script's argparse: it pulls kokoro-v1_0.pth + config.json from the v0.1.4 release
+        # into the --output dir). The server's loader resolves the weight via settings.model_dir +
+        # pytorch_kokoro_v1_file = "v1_0/kokoro-v1_0.pth" (api/src/core/{config,model_config}.py), so the launcher's
+        # MODEL_DIR=src\models (-> <repo>\api\src\models, the loader appends v1_0\) reads EXACTLY this --output dir.
+        # IDEMPOTENT: skip if the .pth already exists (resumable re-runs). WARN-on-failure: a download hiccup must not
+        # abort the whole -Kokoro block (the venv is already provisioned; the weight is retryable on the next run).
+        $kModelDir = Join-Path $kRoot "api\src\models\v1_0"
+        $kWeight   = Join-Path $kModelDir "kokoro-v1_0.pth"
+        if (-not (Test-Path $kWeight)) {
+            Info "downloading Kokoro-82M weights -> api\src\models\v1_0 ..."
+            try { & $kpy (Join-Path $kRoot "docker\scripts\download_model.py") --output $kModelDir; if ($LASTEXITCODE -ne 0) { throw "download_model.py exited $LASTEXITCODE" } }
+            catch { Warn "Kokoro weight download failed ($($_.Exception.Message)) — re-run setup.ps1 -Kokoro, or manually:  & `"$kpy`" `"$kRoot\docker\scripts\download_model.py`" --output `"$kModelDir`"" }
+        } else { Ok "Kokoro-82M weights present" }
+        New-Item -ItemType File -Force $kok | Out-Null   # all deps verified — safe to skip next run
+    } else { Ok "Kokoro venv present" }
+    # Loopback-bind on the NEW :8006 port so it's additive AND never LAN-exposed (every sibling DokiDex server is
+    # 127.0.0.1). The bind is set by uvicorn's `--host 127.0.0.1 --port 8006` CLI flags in start-kokoro.ps1 (uvicorn
+    # binds from its own argv, NOT from Kokoro-FastAPI's .env) — the .env HOST/PORT below is only a fallback for a
+    # bare manual `python -m uvicorn` run that doesn't pass the flags, so pin it to loopback/:8006 too.
+    $kEnv = Join-Path $kRoot ".env"
+    if (-not (Test-Path $kEnv)) { Set-Content $kEnv "HOST=127.0.0.1`nPORT=8006" }
+    # ON-GPU LABELED: the URLs/extras below are upstream-sourced (pyproject version = "0.6.0-rc1", the [gpu-cu128]
+    # extra pinning torch==2.8.0+cu128, the cu128 index, docker/scripts/download_model.py -> api/src/models/v1_0 — all
+    # confirmed against the remsky/Kokoro-FastAPI repo), but the live stack is a first-run-on-GPU confirm: (1) the
+    # cu128 torch + .[gpu-cu128] resolve cleanly under plain pip, (2) download_model.py lands kokoro-v1_0.pth where
+    # the launcher's MODEL_DIR reads, (3) espeak-ng phonemization loads via PHONEMIZER_ESPEAK_LIBRARY, and (4)
+    # /v1/audio/speech actually synthesizes on the GPU.
+    Ok "Kokoro ready -> :8006 (OpenAI /v1/audio/speech, fixed preset voices, NO cloning). Weights are downloaded NOW by setup.ps1 -Kokoro (install-time); first '.\doki.ps1 up' just starts the already-provisioned server."
 }
 
 # ---- Demucs: standalone audio stem separation (vocals/drums/bass/other) — optional, model-free DSP ----

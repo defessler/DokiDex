@@ -1,7 +1,7 @@
 # tests/verify-gated.test.ps1 — the `doki verify -Gated` gated-integration registry + pure status logic.
 #
-# `doki verify -Gated` extends verify.ps1 to report, for EVERY gated integration (the 9 setup.ps1 -Flag
-# sidecars: -Sam/-Demucs/-Train/-FaceId/-InfiniteTalk/-LatentSync/-Pulid/-Nunchaku/-TtsSuite), what is
+# `doki verify -Gated` extends verify.ps1 to report, for EVERY gated integration (the 10 setup.ps1 -Flag
+# sidecars: -Sam/-Demucs/-Train/-FaceId/-InfiniteTalk/-LatentSync/-Pulid/-Nunchaku/-TtsSuite/-Kokoro), what is
 # checkable WITHOUT a GPU — the node clone dir + the weight files on disk — and PRINTS the on-GPU TODO that
 # decisions.md records. Multi-GB weights are gitignored + ABSENT in CI, so the checks must DEGRADE to
 # 'not installed', NEVER fail the harness; the live node-load/render stays SKIP-by-default.
@@ -89,7 +89,7 @@ function Get-MinedGatedFlags {
 
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $setup).Path, [ref]$null, [ref]$null)
 $gatedFlags = Get-MinedGatedFlags -Ast $ast -AllowList $AlwaysOnFlags
-Assert ($gatedFlags.Count -eq 9) "setup.ps1 source-derives EXACTLY the 9 gated -Flag install blocks ($($gatedFlags.Count) found: $(($gatedFlags | Sort-Object) -join ', '))"
+Assert ($gatedFlags.Count -eq 10) "setup.ps1 source-derives EXACTLY the 10 gated -Flag install blocks ($($gatedFlags.Count) found: $(($gatedFlags | Sort-Object) -join ', '))"
 # the always-on installers must be EXCLUDED (they're the default-verify stack, not gated sidecars)
 foreach ($a in @('Tts', 'Stt', 'Vision', 'LlmCandidates', 'Managed', 'Media')) {
     Assert ($gatedFlags -notcontains $a) "coverage: always-on -$a is NOT mined as a gated sidecar (correctly excluded from the gated set)"

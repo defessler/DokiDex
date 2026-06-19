@@ -1,5 +1,74 @@
 # Decision log
 
+## 2026-06-19 — Coexist-with-chat standalone TTS census → **DEFER on the default** (Chatterbox stays) + wire the **ONE** gated `-Kokoro` alternative
+
+**Question.** Is a *different* standalone TTS a better **default** for the coexist-with-chat speech path — the
+:8004 Chatterbox server in the **llm group** that comes up WITH the coder (the chat `/api/speak` → :8004 path,
+voice readback in agent mode with no media GPU-switch)? Requirements: (1) coexist with the chat LLM (small VRAM,
+OpenAI-compatible server in the agent profile), (2) custom assistant voice = **zero-shot cloning**, (3)
+uncensored, (4) clean license, (5) a real server you don't have to build. (This is **not** the already-shipped
+`-TtsSuite` 15-engine ComfyUI node — that's the gated media-group extra-engines path.)
+
+**Census (cited).** Chatterbox (Resemble AI) via devnen/Chatterbox-TTS-Server — MIT, ~4GB, zero-shot cloning,
+uncensored (Perth watermark stripped at install), mature OpenAI `/v1/audio/speech` + cloning + Web UI, knobs
+already wired into `control/Web/Tts.cs`. Kokoro-82M (hexgrad, Apache-2.0) via remsky/Kokoro-FastAPI — tiny
+(<2GB / CPU-capable / RTF ~0.03), mature OpenAI server, but **NO cloning** (54 fixed preset voices).
+Fish-Speech/OpenAudio-S1 — top-tier quality + cloning, but **Research/Non-commercial weight license** (a real
+downgrade from MIT) + heavier SGLang server. XTTSv2 — CPML non-commercial + Coqui defunct (hard no). Orpheus —
+Apache but 3B (worst coexistence), cloning/streaming bugs open upstream, community-only OpenAI server. Piper —
+tiny/MIT but no cloning. Parler — no zero-shot cloning, weak server story.
+
+**Verdict — DECISION RULE branch taken: DEFER on the default, but wire the ONE worthwhile gated alternative.**
+Chatterbox is the **only** option that wins all five requirements at once, so it stays the **byte-for-byte
+default** (`Tts.cs` Base=:8004, the agent-profile `tts` entry in both `doki.ps1` and `ServiceRegistry.cs`,
+group=llm/vramGB=4, the loopback-bind + watermark-strip, the chat `/api/speak` path — all untouched). The one
+genuinely worthwhile move is a **gated, additive Kokoro** alternative on the axis that actually differs for a
+single-user box — **footprint**: <2GB / CPU-capable / near-zero GPU contention for snappy generic narration when
+the GPU is busy with the coder. It loses cloning entirely, so it can **never** be the custom-voice default —
+strictly a toggle.
+
+**What shipped (additive only — mirrors the `-TtsSuite` gated posture):**
+- `setup.ps1 -Kokoro`: clones remsky/Kokoro-FastAPI into `kokoro\`, own cu128 venv (`.deps-ok` sentinel,
+  resumable), loopback-bound on the **new :8006** (not :8004 Chatterbox / :8005 STT). Never touches the devnen
+  Chatterbox clone or its :8004 bind. Install-time it also **pre-fetches the Kokoro-82M weights** via the repo's
+  own `docker/scripts/download_model.py --output api/src/models/v1_0` (pulls `kokoro-v1_0.pth` + `config.json`),
+  guarded idempotent (skip if the `.pth` exists) + Warn-on-failure — so first `up` just starts an already-
+  provisioned server (it does NOT lazy-download on first request, unlike Chatterbox's voice model). The launcher's
+  `MODEL_DIR=src\models` resolves to `<repo>\api\src\models` and the loader appends the `v1_0\` prefix from
+  `pytorch_kokoro_v1_file = "v1_0/kokoro-v1_0.pth"`, so it reads exactly the download's `--output` dir.
+- `serving/start-kokoro.ps1`: clones start-tts.ps1's shape (`-Detach`/`-PidFile`/`-LogFile`), uvicorn on
+  127.0.0.1:8006.
+- A new `kokoro` service in **both** `doki.ps1` `$Services` and `ServiceRegistry.cs` (group=llm, vramGB=2,
+  health `/health`, ui `/web`, `requires` the kokoro venv python). **NOT** added to any default profile — it's
+  skipped cleanly until `-Kokoro` installs it (exactly how `-TtsSuite` stays gated).
+- `Tts.cs`: an optional `Engine` field on `SpeakRequest` (`ResolveBase`/`ModelFor` pure routers) — `"kokoro"` →
+  :8006 + drops the expressive knobs; null/blank/`"chatterbox"`/unknown → the :8004 Chatterbox default. The chat
+  `/api/speak` path passes no engine, so it stays Chatterbox byte-for-byte. Graceful degradation preserved (the
+  error message now names the resolved port).
+
+**Sources.** Chatterbox MIT — github.com/resemble-ai/chatterbox ; server — github.com/devnen/Chatterbox-TTS-Server.
+Kokoro-82M Apache-2.0 — huggingface.co/hexgrad/Kokoro-82M ; server — github.com/remsky/Kokoro-FastAPI
+(in-tree `pyproject` `version = "0.6.0-rc1"` on the cloned default branch; latest published git tag/release is
+v0.5.0). **Pin the `[gpu-cu128]` extra, NOT `[gpu]`** — confirmed against that `pyproject.toml`: `[gpu]` pins
+`torch==2.8.0+cu126` (Blackwell-wrong) while `[gpu-cu128]` pins `torch==2.8.0+cu128`, which the cu128 wheel
+installed first satisfies; the repo declares its torch index only in `[tool.uv.sources]` (plain pip ignores it),
+so setup passes the `download.pytorch.org/whl/cu128` index explicitly. (Recorded so the cu126 mistake isn't re-
+introduced.) The weight pre-fetch path `docker/scripts/download_model.py --output api/src/models/v1_0` is the
+repo's documented model-download step (README + the script's argparse: `--output` required, no default).
+Fish weights Research/Non-commercial — github.com/fishaudio/fish-speech.
+
+**On-GPU / LABELED confirms (render-unverified at rest — no GPU in CI):** the repo URL + the `[gpu-cu128]` extra +
+the cu128 index + the `download_model.py`→`api/src/models/v1_0` step are upstream-sourced (above), but the live
+stack is a first-run-on-GPU confirm: (1) the cu128 torch + `.[gpu-cu128]` editable-extras resolve under plain pip,
+(2) `download_model.py` lands `kokoro-v1_0.pth` where the launcher's `MODEL_DIR` reads, (3) espeak-ng
+phonemization loads via `PHONEMIZER_ESPEAK_LIBRARY`, and (4) `/v1/audio/speech` actually synthesizes on the GPU.
+
+**When to revisit.** If a future model wins ALL five requirements AND beats Chatterbox on quality with a clean
+permissive license + a drop-in OpenAI server, reconsider the default. Fish/OpenAudio is the only candidate worth
+a future gated *max-quality* alt — hold until its weight license is no longer Research/Non-commercial. Tests:
+`tests/setup-helpers.test.ps1` AST-pins the `-Kokoro` block; `ControlPlaneTests` pins the `kokoro` service
+sync; `TtsTests` pins the engine routing (Chatterbox stays default).
+
 ## 2026-06-19 — TRUE real-time (StreamDiffusion/LCM) follow-up to the shipped live canvas → **DEFER** (evaluated, not built)
 
 The v0.11 **F2** ask was a *true* multi-fps (~30 fps) real-time canvas, the StreamDiffusion/LCM

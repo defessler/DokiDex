@@ -103,6 +103,14 @@ $GatedRegistry = [ordered]@{
         OnGpu    = 'Author per-engine TtsSuite-<engine>.json (e.g. IndexTTS2/Higgs) from the UI-graphs; CONFIRM SwarmUI''s image/video-centric CustomWorkflow runner can host a pure-TTS node returning a WAV at all (may need an audio-output mapping that is not OOTB); pin the auto-download paths + per-engine text/voice injection node names.'
     }
 
+    'Kokoro fast/light TTS (-Kokoro)' = @{
+        Flag     = 'Kokoro'
+        VenvRoot = 'kokoro\Kokoro-FastAPI\.venv'   # standalone OpenAI-compatible server (remsky/Kokoro-FastAPI)
+        Files    = @()   # the Kokoro-82M weights auto-download on first `.\doki.ps1 up` (nothing pre-fetched, like -TtsSuite)
+        Workflow = $null # no SwarmUI JSON — Kokoro is a standalone :8006 server, not a ComfyUI node
+        OnGpu    = 'Confirm the remsky/Kokoro-FastAPI server boots on :8006 (uvicorn api.src.main:app) and a /v1/audio/speech synth returns a WAV; the Kokoro-82M weights auto-download on first .\doki.ps1 up.'
+    }
+
     'Demucs (-Demucs)' = @{
         Flag     = 'Demucs'
         VenvRoot = 'audio-tools\demucs\.venv'

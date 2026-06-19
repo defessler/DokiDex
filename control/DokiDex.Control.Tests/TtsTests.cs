@@ -77,4 +77,38 @@ public class TtsTests : IDisposable
         Assert.Equal("unchanged", Tts.ApplyLexicon("unchanged", null));
         Assert.Equal("unchanged", Tts.ApplyLexicon("unchanged", new[] { new LexRule("  ", "x") }));
     }
+
+    // --- engine routing (the gated Kokoro :8006 alternative; Chatterbox :8004 stays the DEFAULT) ---
+    // The chat /api/speak path passes no engine, so it MUST resolve to the coexisting-with-chat Chatterbox
+    // default byte-for-byte. Only an explicit "kokoro" engine points the OpenAI body at the :8006 server.
+    [Fact]
+    public void Engine_default_or_null_or_blank_routes_to_Chatterbox_8004()
+    {
+        Assert.Equal("http://127.0.0.1:8004", Tts.ResolveBase(null));
+        Assert.Equal("http://127.0.0.1:8004", Tts.ResolveBase(""));
+        Assert.Equal("http://127.0.0.1:8004", Tts.ResolveBase("   "));
+        Assert.Equal("http://127.0.0.1:8004", Tts.ResolveBase("chatterbox"));
+    }
+
+    [Fact]
+    public void Engine_kokoro_routes_to_the_gated_Kokoro_8006_server_case_insensitively()
+    {
+        Assert.Equal("http://127.0.0.1:8006", Tts.ResolveBase("kokoro"));
+        Assert.Equal("http://127.0.0.1:8006", Tts.ResolveBase("Kokoro"));
+        Assert.Equal("http://127.0.0.1:8006", Tts.ResolveBase("  KOKORO  "));
+    }
+
+    [Fact]
+    public void Unknown_engine_falls_back_to_the_Chatterbox_default()
+        => Assert.Equal("http://127.0.0.1:8004", Tts.ResolveBase("nonsense"));
+
+    // Kokoro has fixed preset voices and ignores Chatterbox's expressive knobs; the model name in the
+    // OpenAI body must follow the engine so the right server accepts it.
+    [Fact]
+    public void Engine_model_name_follows_the_engine()
+    {
+        Assert.Equal("chatterbox", Tts.ModelFor(null));
+        Assert.Equal("chatterbox", Tts.ModelFor("chatterbox"));
+        Assert.Equal("kokoro", Tts.ModelFor("kokoro"));
+    }
 }

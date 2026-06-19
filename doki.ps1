@@ -53,6 +53,11 @@ $Services = [ordered]@{
     # Uncensored TTS (:8004) — OpenAI-compatible /v1/audio/speech + voice cloning. ~4GB, group=llm
     # so it coexists with the coder in agent mode. 'requires' skips it cleanly when not installed.
     "tts"        = @{ script = (Join-Path $serving "start-tts.ps1");     health = "http://127.0.0.1:8004/";         group = "llm";   desc = "speech/TTS    :8004"; port = 8004; ui = "http://127.0.0.1:8004/"; vramGB = 4; requires = (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\python.exe") }
+    # GATED fast/light TTS alternative (Kokoro-82M via remsky/Kokoro-FastAPI) — Apache-2.0, <2GB VRAM, CPU-capable,
+    # NO cloning. ADDITIVE on :8006, group=llm so it ALSO coexists with the coder. NOT in any default profile —
+    # 'requires' skips it cleanly until -Kokoro installs it; expose it only when its venv python exists. The :8004
+    # Chatterbox server stays the coexisting-with-chat DEFAULT, untouched.
+    "kokoro"     = @{ script = (Join-Path $serving "start-kokoro.ps1");  health = "http://127.0.0.1:8006/health";   group = "llm";   desc = "Kokoro TTS   :8006"; port = 8006; ui = "http://127.0.0.1:8006/web"; vramGB = 2; requires = (Join-Path $root "kokoro\Kokoro-FastAPI\.venv\Scripts\python.exe") }
     # Fully-local speech-to-text (:8005) — Parakeet via onnx-asr, OpenAI /v1/audio/transcriptions.
     # CPU EP by default (~no VRAM), so group=llm to coexist with the coder in agent mode.
     "stt"        = @{ script = (Join-Path $serving "start-stt.ps1");     health = "http://127.0.0.1:8005/health";   group = "llm";   desc = "speech-to-text :8005"; port = 8005; ui = $null; vramGB = 1; requires = (Join-Path $root "stt\.venv\Scripts\python.exe") }

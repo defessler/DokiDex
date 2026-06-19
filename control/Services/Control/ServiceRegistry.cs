@@ -18,6 +18,10 @@ public static class ServiceRegistry
         new ServiceDef("fim", "llm", "autocomplete  :8012", 8012, null, 4, "http://127.0.0.1:8012/health", "start-fim.ps1", null),
         new ServiceDef("embed", "llm", "code embeddings :8090", 8090, null, 0, "http://127.0.0.1:8090/health", "start-embed.ps1", @"models\nomic-embed-text-v1.5.f16.gguf"),
         new ServiceDef("tts", "llm", "speech/TTS    :8004", 8004, "http://127.0.0.1:8004/", 4, "http://127.0.0.1:8004/", "start-tts.ps1", @"tts\Chatterbox-TTS-Server\.venv\Scripts\python.exe"),
+        // GATED fast/light TTS alternative (Kokoro-82M via remsky/Kokoro-FastAPI) — Apache-2.0, <2GB VRAM, NO
+        // cloning. Additive on :8006, group=llm so it coexists. NOT in any default profile; RequiresRel skips it
+        // cleanly until -Kokoro installs it. The :8004 Chatterbox server stays the coexisting-with-chat DEFAULT.
+        new ServiceDef("kokoro", "llm", "Kokoro TTS   :8006", 8006, "http://127.0.0.1:8006/web", 2, "http://127.0.0.1:8006/health", "start-kokoro.ps1", @"kokoro\Kokoro-FastAPI\.venv\Scripts\python.exe"),
         new ServiceDef("stt", "llm", "speech-to-text :8005", 8005, null, 1, "http://127.0.0.1:8005/health", "start-stt.ps1", @"stt\.venv\Scripts\python.exe"),
         new ServiceDef("media", "media", "image+video   :7801", 7801, "http://127.0.0.1:7801/", 18, "http://127.0.0.1:7801/", "start-media.ps1", null),
         new ServiceDef("prompt-rewriter", "media", "prompt rewriter :8013", 8013, null, 3, "http://127.0.0.1:8013/health", "start-prompt-rewriter.ps1", @"models\Qwen2.5-3B-Instruct-Q5_K_M.gguf"),
