@@ -24,6 +24,10 @@ public sealed record KbCreateRequest(string? Name);
 // POST /api/chats/{id}/kb body: the named KB id to attach (a kb-* id); "" / null detaches back to per-conversation.
 public sealed record ChatKbRequest(string? KbId);
 
+// PUT /api/kbs/default body: the named KB id to make the GLOBAL default new conversations auto-attach to; "" /
+// null clears the default (back to the no-default state — fresh threads stay byte-for-byte no-KB).
+public sealed record DefaultKbRequest(string? KbId);
+
 // Named-KB registry — file-based under <home>/kbs/<id>.json, a direct clone of ChatStore's id-keyed variant
 // (server-generated id, SafeName-guarded Load/Delete, graceful try/catch). List orders by Name (the display order).
 public static class KbStore

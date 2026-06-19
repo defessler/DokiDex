@@ -355,6 +355,7 @@
           <div class="row" style="align-items:center;gap:8px">
             <input id="newKbName" class="kin" style="width:220px" placeholder="library name (e.g. Product Docs)">
             <button class="ghost" onclick="createKb()">+ Create library</button>
+            <label class="ghost" style="cursor:pointer">Import .ddkb<input type="file" accept=".ddkb,.json,application/json" style="display:none" onchange="importKb(this)"></label>
             <span class="hint" id="newKbHint"></span>
           </div>
           <div id="kbLibList"></div>
@@ -1394,6 +1395,24 @@
       if(!_chatKbId) return null;
       return (_kbLibraries||[]).find(k=>k.id===_chatKbId) || null;
     }
+    // FIX 1 (default-KB orphan/wrong-pill): after a FRESH send the server may have auto-attached the GLOBAL default
+    // KB (Chat.ApplyDefaultKb), but only renderThread (a reload) ever set _chatKbId — so the panel still showed the
+    // "private to this chat" box+pill, and a subsequent private-doc attach was orphaned (the /chats/{id}/docs guard
+    // sees conv.KbId already = the default and never re-points it). The send/stream response now CARRIES conv.kbId;
+    // refresh _chatKbId from it (default null = no KB) and re-render the scope so the UI reflects the attached
+    // default library (hides the private-doc box, shows "library: <name>") exactly as an explicit named attach. A
+    // named-id kbId we don't yet know about triggers a library reload so its pill name resolves. No-op when the id
+    // is unchanged, so the no-default / per-conversation / explicit-named paths stay byte-for-byte.
+    function applyFreshKbId(kbId){
+      const next = kbId || null;
+      if(next === _chatKbId){ renderKbScope(); return; }
+      _chatKbId = next;
+      // A named library id we don't have cached yet (e.g. the default set in another session) — reload so its name
+      // resolves for the pill; loadKbLibraries() calls renderKbScope() itself. The private scope (id === conv.id)
+      // and null never need the library list, so they render immediately.
+      if(next && !(_kbLibraries||[]).some(k=>k.id===next)){ loadKbLibraries(); }
+      else { renderKbScope(); }
+    }
     // Reflect the attached-doc count on the panel: the cyan "RAG ON" flag + the doc list. No-doc threads look exactly
     // as before (flag hidden, empty list). Mirrors the chat-mode lock reconcilers — single source of truth for UI.
     function renderKb(){
@@ -1501,11 +1520,41 @@
     //   POST /api/chats/{id}/kb {kbId}  -> attach the open conversation to a named library ("" detaches to private).
     // The library's doc-management mirrors the per-conversation box verbatim, just scoped to a kb-* id. ====
     let _kbLibraries=[];
+    let _kbDefault=null;   // the GLOBAL default KB id (new conversations auto-attach to it); null = no default.
     // Load the named libraries; fills BOTH the attach picker (in the chat panel) and the management list.
     async function loadKbLibraries(){
       try{ const list=await (await fetch('/api/kbs')).json(); _kbLibraries=Array.isArray(list)?list:[]; }
       catch{ _kbLibraries=[]; }
+      try{ const d=await (await fetch('/api/kbs/default')).json(); _kbDefault=(d&&d.kbId)||null; }
+      catch{ _kbDefault=null; }
       renderKbAttachPicker(); renderKbLibraries(); renderKbScope();
+    }
+    // PUT /api/kbs/default to set (or clear with "") the GLOBAL default KB every NEW conversation auto-attaches to.
+    // No client change is needed on the chat side — the server applies the default at first-send (Chat.ApplyDefaultKb).
+    async function setDefaultKb(id){
+      try{
+        const r=await fetch('/api/kbs/default',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({kbId:id||''})});
+        if(!r.ok){ document.getElementById('newKbHint').textContent='could not change default library'; return; }
+        _kbDefault=id||null;
+        document.getElementById('newKbHint').textContent = id ? 'default library set — new chats use it' : 'default library cleared';
+        renderKbLibraries();
+      }catch{ document.getElementById('newKbHint').textContent='default request failed'; }
+    }
+    // Export a library to a portable .ddkb file (a JSON envelope of its chunks + reused vecs) via a download link.
+    function exportKb(id){ window.location.href='/api/kbs/'+encodeURIComponent(id)+'/export'; }
+    // Import a .ddkb / .json envelope as a NEW library (a fresh server id; never overwrites an existing scope).
+    async function importKb(input){
+      const f=input.files&&input.files[0]; if(!f) return; input.value='';
+      const h=document.getElementById('newKbHint'); h.textContent='importing '+f.name+'…';
+      const fd=new FormData(); fd.append('file', f, f.name);
+      try{
+        const r=await fetch('/api/kbs/import',{method:'POST',body:fd});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ h.textContent=(j&&j.error)||(r.status===413?'import file too large':'import failed'); return; }
+        // FIX 4: a cross-model import succeeds but won't retrieve until re-embedded — surface the server's warning.
+        h.textContent='imported '+esc(j.name||f.name)+' ('+(j.chunks||0)+' chunks)'+(j.warning?(' — '+esc(j.warning)):'');
+        await loadKbLibraries();
+      }catch{ h.textContent='import request failed'; }
     }
     // Fill the chat-panel "Knowledge base" picker: the private option + every named library. Selection is reconciled
     // to the thread's current kbId by renderKbScope.
@@ -1569,6 +1618,13 @@
         const idb=document.createElement('span'); idb.className='libid'; idb.textContent=k.id;
         sum.appendChild(nm); sum.appendChild(idb);
         if(_chatKbId===k.id){ const a=document.createElement('span'); a.className='libattached'; a.textContent='attached'; sum.appendChild(a); }
+        if(_kbDefault===k.id){ const d=document.createElement('span'); d.className='libattached'; d.style.background='#5b4'; d.textContent='default'; sum.appendChild(d); }
+        // "Set as default" toggle: the default KB auto-attaches to every NEW conversation (server-applied on first send).
+        const defb=document.createElement('button'); defb.className='xbtn'; defb.textContent=(_kbDefault===k.id)?'clear default':'set default';
+        defb.onclick=(e)=>{ e.preventDefault(); setDefaultKb(_kbDefault===k.id?'':k.id); };
+        sum.appendChild(defb);
+        const exp=document.createElement('button'); exp.className='xbtn'; exp.textContent='export'; exp.onclick=(e)=>{ e.preventDefault(); exportKb(k.id); };
+        sum.appendChild(exp);
         const del=document.createElement('button'); del.className='xbtn'; del.textContent='delete'; del.onclick=(e)=>{ e.preventDefault(); deleteKb(k.id, k.name); };
         sum.appendChild(del);
         det.appendChild(sum);
@@ -1900,7 +1956,7 @@
       const bub=appendBubble('assistant', j.text);
       renderToolSteps(bub, j.steps);   // backend emits only `steps`
       hint.textContent='';
-      if(fresh){ loadThreads(); loadKb(); }
+      if(fresh){ applyFreshKbId(j.kbId); loadThreads(); loadKb(); }   // FIX 1: refresh the scope if the default KB was auto-attached
     }
     // Non-streaming POST /api/chat — kept as the P2 transport fallback (real 503 contract).
     async function sendChatOnce(text,fresh,image){
@@ -1911,7 +1967,7 @@
       const j=await r.json();
       if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
       _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
-      if(fresh){ loadThreads(); loadKb(); }
+      if(fresh){ applyFreshKbId(j.kbId); loadThreads(); loadKb(); }   // FIX 1: refresh the scope if the default KB was auto-attached
     }
     async function sendChat(){
       const inp=document.getElementById('chatInput'), hint=document.getElementById('chatHint');
@@ -1925,7 +1981,7 @@
       // Pn.1: tools ON → NON-streaming agent loop (tools only work non-streaming). Everything else is unchanged.
       if(_chatTools){ try{ await sendChatTools(text,fresh,image); }catch{ hint.textContent='request failed'; } return; }
       // P2 streaming: append an empty assistant bubble, read SSE frames off res.body, append each token live.
-      const bub=appendBubble('assistant',''); let acc='', got=false;
+      const bub=appendBubble('assistant',''); let acc='', got=false, metaKbId=null;   // metaKbId: the conv.kbId the leading meta frame carries (FIX 1)
       try{
         const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
@@ -1939,7 +1995,7 @@
             else if(ln.startsWith('data:')) data+=(data?'\n':'')+ln.slice(5).replace(/^ /,''); });
           if(ev==='error'){ bub.classList.add('err'); (bub._text||bub).textContent=data||'LLM not reachable — start agent mode first'; errored=true; hint.textContent=''; }
           else if(ev==='done'){ done=true; }
-          else if(ev==='meta'){ try{ const m=JSON.parse(data); if(m&&m.conversation) _chatConv=m.conversation; }catch{} }
+          else if(ev==='meta'){ try{ const m=JSON.parse(data); if(m&&m.conversation) _chatConv=m.conversation; if(m&&'kbId' in m) metaKbId=m.kbId||null; }catch{} }
           else if(data){ try{ const t=JSON.parse(data).t; if(typeof t==='string'){ got=true; acc+=t; (bub._text||bub).textContent+=t; log.scrollTop=log.scrollHeight; } }catch{} }
         };
         // Drain every COMPLETE '\n\n'-terminated frame currently buffered (leaves any partial tail in buf).
@@ -1956,11 +2012,11 @@
         if(errored){ return; }
         if(!got){ bub.remove(); await sendChatOnce(text,fresh,image); return; }   // empty stream → fall back to the one-shot path
         _chatMsgs.push({role:'assistant',content:acc}); hint.textContent='';
-        if(fresh){ loadThreads(); loadKb(); }
+        if(fresh){ applyFreshKbId(metaKbId); loadThreads(); loadKb(); }   // FIX 1: refresh the scope if the default KB was auto-attached
       }catch{
         // streaming transport threw: fall back to the non-streaming POST if no token landed, else surface a hint.
         if(!got){ bub.remove(); try{ await sendChatOnce(text,fresh,image); }catch{ hint.textContent='request failed'; } }
-        else { _chatMsgs.push({role:'assistant',content:acc}); hint.textContent=''; if(fresh){ loadThreads(); loadKb(); } }
+        else { _chatMsgs.push({role:'assistant',content:acc}); hint.textContent=''; if(fresh){ applyFreshKbId(metaKbId); loadThreads(); loadKb(); } }   // FIX 1: refresh the scope if the default KB was auto-attached
       }
     }
     function svcCard(s){

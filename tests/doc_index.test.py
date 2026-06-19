@@ -443,6 +443,197 @@ try:
         doc_index.ingest_doc = _orig_ingest_cli
     check(c1 == 1, f"CLI doc_ingest_bin: non-blank text but 0 stored chunks (embed down) -> exit 1 (got {c1})")
 
+    # --- PORTABILITY: doc_export / doc_import (the v0.16 KB library export/import follow-up). Option A: export the
+    #     stored doc_chunks ROWS (source, ord, content, vec) as a portable self-describing JSON envelope, import
+    #     inserts them under a FRESH kb_id with NO embed call (the vecs come from the file). This is a ROUND-TRIP:
+    #     export a stub-built KB -> import under a new id -> the SAME sources/chunks are searchable, scoped to the
+    #     new id, with no cross-KB leak — all WITHOUT the embed server (vecs are reused, not re-embedded). ---
+
+    # build a small source KB with the stub embedder, then export it.
+    doc_index.ingest_doc("kbEXP", "lore.txt", "Dragons rule the north and guard the castle.", embed_fn=stub_embed)
+    doc_index.ingest_doc("kbEXP", "geo.txt", "The ocean lies to the south past the forest.", embed_fn=stub_embed)
+    exp_count = doc_index.count("kbEXP")
+    env = doc_index.export_kb("kbEXP")
+    check(env.get("format") == "dokidex-kb", "export envelope is self-describing (format=dokidex-kb)")
+    check(env.get("version") == 1, "export envelope stamps a version")
+    check(isinstance(env.get("chunks"), list) and len(env["chunks"]) == exp_count,
+          f"export carries every stored chunk ({len(env.get('chunks', []))} == {exp_count})")
+    check("kb_id" not in env, "export DELIBERATELY omits kb_id (import always mints a fresh one)")
+    ch0 = env["chunks"][0]
+    check(all(k in ch0 for k in ("source", "ord", "content", "vec")), "each exported chunk carries source/ord/content/vec")
+    check(isinstance(ch0["vec"], list) and all(isinstance(x, (int, float)) for x in ch0["vec"]),
+          "the vec is a plain float array (human-inspectable, not an endian-locked BLOB)")
+    check(env.get("embed_dim") == len(ch0["vec"]), "embed_dim is stamped and matches the vec length")
+
+    # export of an unknown/empty kb is a benign empty envelope (mirrors delete's no-op), exit 0 path.
+    empty_env = doc_index.export_kb("kbNEVER_EXPORT")
+    check(empty_env.get("chunks") == [], "export of an unknown kb_id is an empty (benign) envelope, not an error")
+
+    # import under a FRESH kb_id: NO embed call (assert by passing a poisoned embed_fn that would raise if used).
+    def _explode_embed(texts):
+        raise AssertionError("import must NOT call embed — the vecs come from the file")
+    n_imp = doc_index.import_kb("kbIMP", env, embed_fn=_explode_embed)
+    check(n_imp == exp_count, f"import inserts every chunk under the fresh id ({n_imp} == {exp_count})")
+    check(doc_index.count("kbIMP") == exp_count, "the imported kb has exactly the exported chunk count")
+    check(doc_index.count("kbEXP") == exp_count, "import does NOT disturb the source kb")
+
+    # the imported chunks are SEARCHABLE with the same ranking (vecs reused) — and scoped to the new id only.
+    ihits = doc_index.search("kbIMP", "dragon castle north", k=1, embed_fn=stub_embed)
+    check(ihits and ihits[0]["source"] == "lore.txt", "imported chunks are retrievable (top hit lore.txt)")
+    imp_srcs = sorted({h["source"] for h in doc_index.search("kbIMP", "north south ocean", k=10, embed_fn=stub_embed)})
+    check(imp_srcs == ["geo.txt", "lore.txt"], f"import preserves both sources (got {imp_srcs})")
+    # no cross-KB leak: searching the imported id never returns rows tagged to the source id and vice-versa is moot
+    # (distinct kb_id WHERE clause); prove the import did not write under the source id.
+    check(doc_index.count("kbEXP") == exp_count and doc_index.count("kbIMP") == exp_count,
+          "export+import are two disjoint kb_id scopes (no cross-KB contamination)")
+
+    # --- import VALIDATION / BOUNDING: a forged/malformed envelope must be REJECTED with a clear error, never crash
+    #     the DB. import_kb raises a catchable _ImportRejected (the library never exits); the CLI doc_import handler
+    #     maps it to {"error":…} + a DISTINCT exit code (6). ---
+    bad_format = {"format": "not-dokidex", "version": 1, "chunks": []}
+    threw = None
+    try:
+        doc_index.import_kb("kbBADFMT", bad_format, embed_fn=_explode_embed)
+    except doc_index._ImportRejected as ir:
+        threw = ir
+    check(isinstance(threw, doc_index._ImportRejected), "import rejects an envelope with the wrong format (catchable error)")
+    check(doc_index.count("kbBADFMT") == 0, "a rejected import writes ZERO rows")
+
+    bad_ver = {"format": "dokidex-kb", "version": 999, "chunks": []}
+    threw = None
+    try:
+        doc_index.import_kb("kbBADVER", bad_ver, embed_fn=_explode_embed)
+    except doc_index._ImportRejected as ir:
+        threw = ir
+    check(isinstance(threw, doc_index._ImportRejected), "import rejects an unknown envelope version")
+
+    # over the chunk ceiling -> rejected (a forged file can't blow up the DB).
+    check(doc_index.MAX_IMPORT_CHUNKS >= 1, "MAX_IMPORT_CHUNKS is a positive ceiling")
+    too_many = {"format": "dokidex-kb", "version": 1,
+                "chunks": [{"source": "x.txt", "ord": i, "content": "c", "vec": [1.0]}
+                           for i in range(doc_index.MAX_IMPORT_CHUNKS + 1)]}
+    threw = None
+    try:
+        doc_index.import_kb("kbTOOMANY", too_many, embed_fn=_explode_embed)
+    except doc_index._ImportRejected as ir:
+        threw = ir
+    check(isinstance(threw, doc_index._ImportRejected), "import rejects an envelope over MAX_IMPORT_CHUNKS")
+    check(doc_index.count("kbTOOMANY") == 0, "an over-ceiling import writes ZERO rows")
+
+    # ragged / non-numeric / missing-vec rows are SKIPPED, not fatal — a few bad rows degrade cleanly. A
+    # traversal-shaped source is NEUTRALIZED to its safe basename (mirrors the C# Path.GetFileName guard), never
+    # skipped — so no '../..' path lands in the DB.
+    mixed = {"format": "dokidex-kb", "version": 1, "chunks": [
+        {"source": "ok.txt", "ord": 0, "content": "good chunk", "vec": [1.0, 2.0]},
+        {"source": "ok.txt", "ord": 1, "content": "another good", "vec": [3.0, 4.0]},
+        {"source": "ragged.txt", "ord": 0, "content": "bad vec", "vec": [1.0, "NOTNUM"]},  # non-numeric -> skip
+        {"source": "novec.txt", "ord": 0, "content": "no vec"},  # missing vec -> skip
+        {"source": "weird@name!.txt", "ord": 0, "content": "bad stem", "vec": [1.0, 2.0]},  # illegal stem -> skip
+    ]}
+    n_mixed = doc_index.import_kb("kbMIXED", mixed, embed_fn=_explode_embed)
+    check(n_mixed == 2, f"import keeps the valid rows and skips the bad ones ({n_mixed} == 2)")
+    check(doc_index.count("kbMIXED") == 2, "only the 2 valid rows are stored")
+    msrcs = sorted({h["source"] for h in doc_index.search_vec("kbMIXED", [1.0, 2.0], k=10)})
+    check(msrcs == ["ok.txt"], f"the ragged/illegal sources never land in the DB (got {msrcs})")
+
+    # a traversal-shaped source is reduced to its safe basename (no '../..' or separators ever reach the DB).
+    trav = {"format": "dokidex-kb", "version": 1, "chunks": [
+        {"source": "../../etc/passwd", "ord": 0, "content": "neutralized", "vec": [1.0, 2.0]},
+    ]}
+    doc_index.import_kb("kbTRAV", trav, embed_fn=_explode_embed)
+    tsrcs = [h["source"] for h in doc_index.search_vec("kbTRAV", [1.0, 2.0], k=10)]
+    check(tsrcs == ["passwd"], f"a traversal source is neutralized to its basename, never stored as a path (got {tsrcs})")
+    check(all("/" not in s and "\\" not in s and ".." not in s for s in tsrcs),
+          "no path separators or '..' ever land in a stored source")
+
+    # an over-long content is clamped to MAX_DOC_CHARS (a forged huge chunk can't bloat the DB).
+    longc = {"format": "dokidex-kb", "version": 1, "chunks": [
+        {"source": "long.txt", "ord": 0, "content": "z" * (doc_index.MAX_DOC_CHARS + 5000), "vec": [1.0]},
+    ]}
+    doc_index.import_kb("kbLONG", longc, embed_fn=_explode_embed)
+    stored_len = max(len(h["content"]) for h in doc_index.search_vec("kbLONG", [1.0], k=1))
+    check(stored_len <= doc_index.MAX_DOC_CHARS, f"an over-long imported chunk is clamped to MAX_DOC_CHARS ({stored_len})")
+
+    # --- FIX 2: the export envelope must CARRY the KB display name so a round-trip restores it (the C# import reads
+    #     envelope["name"] -> KbStore.NewKb(name)). export_kb takes the display name and stamps it; a None/blank name
+    #     omits the key (back-compat with an unnamed export). ---
+    named_env = doc_index.export_kb("kbEXP", "My Project Docs")
+    check(named_env.get("name") == "My Project Docs", "export_kb stamps the supplied display name into the envelope")
+    unnamed_env = doc_index.export_kb("kbEXP")
+    check("name" not in unnamed_env, "export_kb with no name omits the 'name' key (back-compat)")
+    blank_env = doc_index.export_kb("kbEXP", "   ")
+    check("name" not in blank_env, "export_kb with a blank name omits the 'name' key (no empty label)")
+
+    # --- FIX 4: import must WARN (never silently zero-hit) when the envelope's embed_dim differs from the current
+    #     embedding dim. _dim_warning is the PURE comparison seam (stubbed dims, no embed server): a clear warning
+    #     string on a real mismatch, None when they match / either side is unknown (can't compare -> don't cry wolf). ---
+    w = doc_index._dim_warning(768, 1024)
+    check(isinstance(w, str) and "768" in w and "1024" in w and "re-embed" in w.lower(),
+          "a dim mismatch yields a clear warning naming both dims + the re-embed hint")
+    check(doc_index._dim_warning(768, 768) is None, "matching dims -> no warning")
+    check(doc_index._dim_warning(0, 768) is None, "an unknown envelope dim (0) -> no warning (can't compare)")
+    check(doc_index._dim_warning(768, None) is None, "an unknown current dim (None) -> no warning (can't compare)")
+    check(doc_index._dim_warning(768, 0) is None, "a zero current dim (no rows to probe) -> no warning")
+
+    # current-dim probe: when other rows already exist on this machine, _current_embed_dim returns their dim WITHOUT
+    # an embed call (cheap, crash-proof when the embed server is down). An empty DB scope -> 0 (unknown).
+    cur_dim = doc_index._current_embed_dim(exclude_kb="kbEXP")
+    check(cur_dim == len(ch0["vec"]), f"_current_embed_dim probes an existing row's dim with no embed call ({cur_dim})")
+
+    # --- FIX 5(c): _safe_source aligns its length cap with the C# RecipeStore.SafeName rule (FULL basename <= 64,
+    #     not just the stem). A 64-char-stem name whose full basename exceeds 64 is now rejected (it would be by the
+    #     C# ingest guard); a name within 64 still passes. ---
+    over_basename = "z" * 61 + ".txt"   # full basename = 65 chars (> 64) though the stem is 61
+    check(doc_index._safe_source(over_basename) is None, "_safe_source rejects a basename over 64 chars (full-name cap, matches RecipeStore.SafeName)")
+    ok_basename = "z" * 60 + ".txt"     # full basename = 64 chars (== cap)
+    check(doc_index._safe_source(ok_basename) == ok_basename, "_safe_source accepts a basename at the 64-char cap")
+
+    # --- CLI doc_export / doc_import round-trip (the C# DocSearch sidecar path). doc_export prints the envelope to
+    #     STDOUT; doc_import reads it from STDIN, inserts under the argv kb id, prints {"chunks":N}. ---
+    doc_index.ingest_doc("kbCLIEXP", "a.txt", "A wizard casts a spell by the river.", embed_fn=stub_embed)
+    cE, jE = _run_cli(["doc_index.py", "doc_export", "kbCLIEXP"], b"")
+    check(cE == 0, f"CLI doc_export -> exit 0 (got {cE})")
+    check(isinstance(jE, dict) and jE.get("format") == "dokidex-kb" and len(jE.get("chunks", [])) >= 1,
+          "CLI doc_export prints the envelope JSON to stdout")
+
+    # feed that envelope back through doc_import under a fresh id (STDIN), assert {"chunks":N} + the rows landed.
+    import json as _json2
+    cI, jI = _run_cli(["doc_index.py", "doc_import", "kbCLIIMP"], _json2.dumps(jE).encode("utf-8"))
+    check(cI == 0, f"CLI doc_import -> exit 0 (got {cI})")
+    check(isinstance(jI, dict) and jI.get("chunks", 0) == len(jE["chunks"]),
+          f"CLI doc_import prints {{\"chunks\":N}} (got {jI})")
+    check(doc_index.count("kbCLIIMP") == len(jE["chunks"]), "CLI doc_import landed the rows under the fresh id")
+
+    # FIX 2 (CLI): doc_export takes an OPTIONAL display-name argv (doc_export KB NAME) and stamps it into the
+    # envelope, so the C# export can pass the KbRecord.Name through with no extra round-trip.
+    cEN, jEN = _run_cli(["doc_index.py", "doc_export", "kbCLIEXP", "Wizard Lore"], b"")
+    check(cEN == 0 and isinstance(jEN, dict) and jEN.get("name") == "Wizard Lore",
+          f"CLI doc_export KB NAME stamps the display name into the envelope (got {jEN.get('name') if isinstance(jEN, dict) else jEN!r})")
+
+    # FIX 4 (CLI): a doc_import whose envelope embed_dim differs from the existing on-disk dim surfaces a WARNING in
+    # the response (never silently zero-hits). Build an envelope with a deliberately wrong dim; existing kbCLIEXP rows
+    # supply the current dim via the no-embed probe. The import still SUCCEEDS (rows land) but flags the mismatch.
+    wrong_dim_env = {"format": "dokidex-kb", "version": 1, "embed_dim": 3,
+                     "chunks": [{"source": "x.txt", "ord": 0, "content": "c", "vec": [1.0, 2.0, 3.0]}]}
+    cW, jW = _run_cli(["doc_index.py", "doc_import", "kbCLIWARN"], _json2.dumps(wrong_dim_env).encode("utf-8"))
+    check(cW == 0, f"CLI doc_import with a dim mismatch still succeeds (exit 0, got {cW})")
+    check(isinstance(jW, dict) and jW.get("chunks", 0) == 1, "the mismatched rows still import (graceful, not a hard fail)")
+    check(isinstance(jW, dict) and isinstance(jW.get("warning"), str) and "re-embed" in jW["warning"].lower(),
+          f"CLI doc_import surfaces a dim-mismatch warning (got {jW.get('warning') if isinstance(jW, dict) else jW!r})")
+
+    # a MATCHING-dim import prints NO warning key (no false alarm).
+    match_dim_env = doc_index.export_kb("kbCLIEXP")   # same stub dim as the existing rows
+    cM, jM = _run_cli(["doc_index.py", "doc_import", "kbCLIMATCH"], _json2.dumps(match_dim_env).encode("utf-8"))
+    check(cM == 0 and isinstance(jM, dict) and "warning" not in jM, "a matching-dim import prints no warning key")
+
+    # CLI doc_import of a malformed envelope -> the distinct error exit code 6 + a printed {"error":…}.
+    cBad, jBad = _run_cli(["doc_index.py", "doc_import", "kbCLIBAD"], b"{not valid json")
+    check(cBad == 6, f"CLI doc_import of malformed JSON -> exit 6 (got {cBad})")
+    check(isinstance(jBad, dict) and "error" in jBad, "CLI doc_import error exit prints {\"error\":…}")
+    cBad2, _ = _run_cli(["doc_index.py", "doc_import", "kbCLIBAD2"],
+                        _json2.dumps({"format": "nope", "version": 1, "chunks": []}).encode("utf-8"))
+    check(cBad2 == 6, f"CLI doc_import of a wrong-format envelope -> exit 6 (got {cBad2})")
+
 except Exception as e:
     import traceback
     traceback.print_exc()

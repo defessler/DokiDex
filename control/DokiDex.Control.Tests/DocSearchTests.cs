@@ -117,6 +117,20 @@ public class DocSearchTests
         Assert.True(DocSearch.MaxUploadBytes < 30L * 1024 * 1024, "stays well under Kestrel's 30MB default so the cap actually bites");
     }
 
+    [Fact]
+    public void MaxKbImportBytes_is_a_KB_sized_cap_far_above_a_single_doc_upload()
+    {
+        // FIX 3: a .ddkb export of even ~150 chunks (each ~9-13KB of JSON-serialized 768-float vec) far exceeds the
+        // single-doc MaxUploadBytes (~1.56MB), so re-importing the app's OWN output used to 413. The import cap must
+        // be a KB-sized ceiling — a KB is MANY docs, not one — but still bounded so a forged file can't OOM the host.
+        Assert.True(DocSearch.MaxKbImportBytes > DocSearch.MaxUploadBytes,
+            "a KB import is many docs — its cap must exceed the single-doc upload cap");
+        // headroom for a realistic library: hundreds of docs × hundreds of chunks of fat float vecs.
+        Assert.True(DocSearch.MaxKbImportBytes >= 32L * 1024 * 1024, "at least ~32MB so a real KB round-trips");
+        // still bounded (not unbounded) so a forged envelope can't force an arbitrary-size buffer.
+        Assert.True(DocSearch.MaxKbImportBytes <= 256L * 1024 * 1024, "still a hard ceiling (forged files can't OOM the host)");
+    }
+
     // ---- binary-ingest exit-code -> message mapping (FIX 1 + FIX 5): a PURE seam so each exit code surfaces the
     //      RIGHT user-facing message without spawning uv/python. doc_ingest_bin's exits: 0 = ok (chunks may be 0
     //      for a scanned PDF), 3 = parsers couldn't load, 4 = corrupt/encrypted/wrong-format file, 5 = extracted
@@ -227,6 +241,24 @@ public class DocSearchTests
     public void ParseError_returns_null_on_missing_or_malformed_input(string json)
         => Assert.Null(DocSearch.ParseError(json));
 
+    // ---- ParseWarning (FIX 4): the pure {"warning":…}-extracting seam doc_import prints alongside {"chunks":N} on a
+    //      cross-model import. A valid object yields the advisory string; non-JSON / a non-string / a missing key
+    //      yields null (a same-model import prints no warning). Pure, so locked here with no process. ----
+    [Fact]
+    public void ParseWarning_reads_a_valid_warning_object_into_its_string()
+    {
+        Assert.Equal("dim mismatch", DocSearch.ParseWarning("{\"chunks\":5,\"warning\":\"dim mismatch\"}"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not json")]
+    [InlineData("{\"chunks\":5}")]
+    [InlineData("{\"warning\":123}")]
+    public void ParseWarning_returns_null_when_absent_or_malformed(string json)
+        => Assert.Null(DocSearch.ParseWarning(json));
+
     [Fact]
     public void BuildSourcesArgs_and_BuildRemoveArgs_are_pure_argv()
     {
@@ -247,6 +279,65 @@ public class DocSearchTests
         Assert.EndsWith("doc_index.py", d[0]);
         Assert.Equal("doc_delete", d[1]);
         Assert.Equal("conv-1", d[2]);
+    }
+
+    // ---- KB export/import (the v0.16 portability follow-up): doc_export prints the portable envelope to STDOUT
+    //      (no stdin); doc_import reads the envelope from STDIN and inserts under a FRESH kb id. Both stay on the
+    //      plain `uv run python` path (NOT doc_ingest_bin), so NO `--with` overlay. The builders are pure. ----
+
+    [Fact]
+    public void BuildExportArgs_is_pure_script_doc_export_kb_argv()
+    {
+        var a = DocSearch.BuildExportArgs("kb-123");
+        Assert.EndsWith("doc_index.py", a[0]);
+        Assert.Equal("doc_export", a[1]);
+        Assert.Equal("kb-123", a[2]);
+    }
+
+    [Fact]
+    public void BuildExportArgs_carries_the_display_name_as_the_4th_argv_for_the_round_trip()
+    {
+        // FIX 2: the KB display NAME is passed to doc_export (argv[3]) so export_kb stamps envelope["name"] and a
+        // re-import restores the exact name (instead of renaming the KB to the upload filename stem).
+        var a = DocSearch.BuildExportArgs("kb-123", "My Project Docs");
+        Assert.Equal("doc_export", a[1]);
+        Assert.Equal("kb-123", a[2]);
+        Assert.Equal("My Project Docs", a[3]);
+    }
+
+    [Fact]
+    public void BuildExportArgs_omits_the_name_argv_when_none_is_supplied()
+    {
+        // Back-compat: no name => the 3-arg form (doc_export KB), unchanged from the v0.16 export.
+        var a = DocSearch.BuildExportArgs("kb-123");
+        Assert.Equal(3, a.Count);
+    }
+
+    [Fact]
+    public void BuildImportArgs_is_pure_script_doc_import_kb_argv()
+    {
+        var a = DocSearch.BuildImportArgs("kb-fresh-9");
+        Assert.EndsWith("doc_index.py", a[0]);
+        Assert.Equal("doc_import", a[1]);
+        Assert.Equal("kb-fresh-9", a[2]);
+    }
+
+    [Fact]
+    public void Export_and_import_stay_on_the_zero_dep_uv_path_no_parser_with_overlay()
+    {
+        // INVARIANT: export/import are stdlib-only (they move rows + reuse stored vecs — no PDF/docx parsing), so
+        // they must NEVER carry the `--with pypdf --with python-docx` overlay that only doc_ingest_bin gets.
+        var ex = DocSearch.BuildExportUvArgs("kb-1");
+        Assert.Equal("run", ex[0]);
+        Assert.DoesNotContain("--with", ex);
+        var pyE = ex.ToList().IndexOf("python");
+        Assert.Equal("doc_export", ex[pyE + 2]);
+
+        var im = DocSearch.BuildImportUvArgs("kb-1");
+        Assert.Equal("run", im[0]);
+        Assert.DoesNotContain("--with", im);
+        var pyI = im.ToList().IndexOf("python");
+        Assert.Equal("doc_import", im[pyI + 2]);
     }
 
     // ---- ingest size cap (FIX 1): a doc whose text exceeds MaxDocChars is rejected with a CLEAR message BEFORE

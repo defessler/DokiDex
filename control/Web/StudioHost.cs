@@ -305,10 +305,13 @@ public static class StudioHost
                 : await Chat.SendAsync(body, LlmTiers.Resolve(body.Tier), ct);
             if (!r.Ok)
                 return Results.Json(new { error = r.Message }, statusCode: 503);   // canonical "start agent mode first"
-            // Only the tools path carries steps; the plain send omits the field entirely (no "steps":null noise).
+            // kbId carries the conversation's effective attached KB so the SPA can refresh _chatKbId after a FRESH
+            // send that auto-attached the GLOBAL default KB (FIX 1) — without an extra round-trip. Null when no KB
+            // is attached (the no-default / no-KB path: the SPA reads null and keeps the private-doc box). Only the
+            // tools path carries steps; the plain send omits that field entirely (no "steps":null noise).
             return r.Steps is { Count: > 0 }
-                ? Results.Json(new { conversation = r.ConversationId, text = r.Text, steps = r.Steps })
-                : Results.Json(new { conversation = r.ConversationId, text = r.Text });
+                ? Results.Json(new { conversation = r.ConversationId, text = r.Text, kbId = r.KbId, steps = r.Steps })
+                : Results.Json(new { conversation = r.ConversationId, text = r.Text, kbId = r.KbId });
         });
 
         // ---- persona chat (P2, streaming): the streaming twin of POST /api/chat over SSE on the POST response ----
@@ -329,8 +332,10 @@ public static class StudioHost
             {
                 if (ev.IsMeta)
                 {
-                    // Leading meta frame: hand the conversation id to the SPA before any token arrives.
-                    var meta = JsonSerializer.Serialize(new { conversation = ev.ConversationId ?? "" });
+                    // Leading meta frame: hand the conversation id to the SPA before any token arrives, AND its
+                    // effective kbId so a FRESH send that auto-attached the default KB lets the SPA refresh
+                    // _chatKbId + renderKbScope (FIX 1) with no extra fetch. kbId is null when no KB is attached.
+                    var meta = JsonSerializer.Serialize(new { conversation = ev.ConversationId ?? "", kbId = ev.KbId });
                     await ctx.Response.WriteAsync($"event: meta\ndata: {meta}\n\n", ct);
                     await ctx.Response.Body.FlushAsync(ct);
                     continue;
@@ -552,8 +557,102 @@ public static class StudioHost
         {
             if (KbStore.Load(id) is null) return Results.NotFound();
             if (!KbStore.Delete(id)) return Results.NotFound();
+            // Belt-and-suspenders: if THIS KB was the global default, clear the default so it's immediately
+            // consistent on disk (DefaultKbStore.Get() also resolve-validates a dangling id to null, so the SPA is
+            // correct either way — but clear-on-delete avoids a stale _default.json naming a gone library).
+            try { if (string.Equals(DefaultKbStore.Get(), id, System.StringComparison.Ordinal)) DefaultKbStore.Set(null); } catch { }
             try { await DocSearch.DeleteAsync(id, ct); } catch { /* never fail the delete on a chunk-cleanup hiccup */ }
             return Results.Ok();
+        });
+
+        // ---- DEFAULT/GLOBAL KB (the v0.16 follow-up): a single named KB every NEW conversation auto-attaches to.
+        // Stored as a tiny global settings entry (DefaultKbStore -> kbs/_default.json), applied server-side at the
+        // first-send NewConversation site (Chat.ApplyDefaultKb) — so new chats need NO client change. ----
+        api.MapGet("/kbs/default", () => Results.Json(new { kbId = DefaultKbStore.Get() }));
+        api.MapPut("/kbs/default", (DefaultKbRequest body) =>
+        {
+            var kbId = (body?.KbId ?? "").Trim();
+            if (kbId.Length == 0) { DefaultKbStore.Set(null); return Results.Ok(); }   // "" / null clears
+            if (KbStore.Load(kbId) is null) return Results.NotFound();                 // must name a real KB
+            return DefaultKbStore.Set(kbId) ? Results.Ok() : Results.BadRequest(new { error = "could not set default KB" });
+        });
+
+        // ---- EXPORT / IMPORT a named KB (the v0.16 portability follow-up). Export streams the portable .ddkb
+        // envelope (the kb-scoped doc_chunks rows + their reusable vecs) for download; import mints a FRESH KB
+        // record + inserts the rows under its id with NO embed call (the vecs come from the file). ----
+        api.MapGet("/kbs/{id}/export", async (string id, CancellationToken ct) =>
+        {
+            var rec = KbStore.Load(id);
+            if (rec is null) return Results.NotFound();
+            // Pass the KB display name so the envelope carries it and a re-import restores the exact name (FIX 2).
+            var r = await DocSearch.ExportAsync(id, ct, rec.Name);
+            // FIX 5(a): export needs NO embed server (the vecs are read straight from the DB), so a failure is a
+            // server-side error, NOT the embed-down 503 — return 500 so the status code isn't misleading.
+            if (!r.Ok || r.Json is null) return Results.Json(new { error = r.Message ?? "export failed" }, statusCode: 500);
+            // Download as <name>.ddkb (a self-describing JSON envelope; the SafeName-clean record name is the stem).
+            var stem = RecipeStore.SafeName(rec.Name) ?? rec.Id;
+            var bytes = System.Text.Encoding.UTF8.GetBytes(r.Json);
+            return Results.File(bytes, "application/json", $"{stem}.ddkb");
+        });
+
+        api.MapPost("/kbs/import", async (HttpRequest req, CancellationToken ct) =>
+        {
+            // FIX 3: a .ddkb is a WHOLE KB (many docs × fat float vecs), not a single doc — so the import gates use
+            // the KB-sized MaxKbImportBytes (~64MB), not the single-doc MaxUploadBytes (~1.56MB) the file-attach
+            // endpoints use. Without this, re-importing the app's OWN export of even ~150 chunks 413'd. The python
+            // MAX_IMPORT_CHUNKS row backstop still bounds the actual insert, so a forged file can't fan out the DB.
+            if (req.ContentLength is long clen && clen > DocSearch.MaxKbImportBytes)
+                return Results.Json(new { error = $"import file too large ({clen} bytes)." }, statusCode: 413);
+            if (!req.HasFormContentType) return Results.BadRequest(new { error = "expected multipart/form-data" });
+
+            IFormCollection form;
+            try
+            {
+                form = await req.ReadFormAsync(
+                    new FormOptions { MultipartBodyLengthLimit = DocSearch.MaxKbImportBytes }, ct);
+            }
+            catch (System.IO.InvalidDataException)
+            {
+                return Results.Json(new { error = $"import file too large (max {DocSearch.MaxKbImportBytes} bytes)." }, statusCode: 413);
+            }
+            var file = form.Files["file"];
+            if (file is null || file.Length == 0) return Results.BadRequest(new { error = "no file uploaded" });
+
+            string json;
+            using (var ms = new MemoryStream())
+            {
+                await file.CopyToAsync(ms, ct);
+                if (ms.Length > DocSearch.MaxKbImportBytes)
+                    return Results.Json(new { error = $"import file too large ({ms.Length} bytes)." }, statusCode: 413);
+                json = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+            }
+
+            // The display name comes from the envelope (falling back to the upload filename), then a FRESH server id
+            // is minted — so an import can never collide with / overwrite an existing scope (kb_id is always fresh).
+            string name = "";
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("name", out var nm) && nm.ValueKind == JsonValueKind.String)
+                    name = (nm.GetString() ?? "").Trim();
+            }
+            catch { return Results.Json(new { error = "malformed import file (not valid JSON)." }, statusCode: 422); }
+            if (name.Length == 0) name = System.IO.Path.GetFileNameWithoutExtension(file.FileName ?? "imported KB").Trim();
+            if (name.Length == 0) name = "imported KB";
+
+            var rec = KbStore.NewKb(name);
+            if (!KbStore.Save(rec)) return Results.BadRequest(new { error = "could not create the imported KB" });
+
+            var r = await DocSearch.ImportAsync(rec.Id, json, ct);
+            if (!r.Ok)
+            {
+                KbStore.Delete(rec.Id);   // roll back the empty record on a rejected/failed import
+                return Results.Json(new { error = r.Message ?? "import failed" }, statusCode: 422);
+            }
+            // warning is the cross-model dim-mismatch advisory (FIX 4): the KB imported, but won't retrieve until
+            // re-embedded under the current model — surfaced so the user isn't left with a silent zero-hit library.
+            return Results.Json(new { id = rec.Id, name = rec.Name, chunks = r.Chunks, warning = r.Warning });
         });
 
         // KB doc management — the /chats/{id}/docs bodies with kbId = the KB id. KbStore.Load is the 404-guard.

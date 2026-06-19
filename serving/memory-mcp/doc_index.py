@@ -54,6 +54,18 @@ CHUNK_OVERLAP = 200
 MAX_DOC_CHARS = 200_000
 MAX_CHUNKS = 200
 
+# Portability (the v0.16 KB export/import follow-up): a generous CEILING on the number of chunks a single
+# imported envelope may insert, so a FORGED .ddkb file can't fan out into an unbounded number of DB rows. Well
+# above MAX_CHUNKS=200 (the per-SOURCE cap) since a KB has many sources — a few hundred docs at 200 chunks each
+# still fits comfortably under this. The envelope format/version is checked first; this is the size backstop.
+MAX_IMPORT_CHUNKS = 50_000
+
+# The self-describing export envelope's format tag + the only version this build can import. A mismatch on
+# either is REJECTED (a clear error, never a partial insert) — so an export from a future format can't silently
+# corrupt the DB by being read under the wrong schema assumptions.
+EXPORT_FORMAT = "dokidex-kb"
+EXPORT_VERSION = 1
+
 
 # --- chunking (pure) ------------------------------------------------------------------------------------
 def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP, max_chunks=MAX_CHUNKS):
@@ -290,6 +302,157 @@ def delete(kb_id):
         c.close()
 
 
+# --- portability: export / import a KB (the v0.16 KB-library follow-up) ---------------------------------
+# Option A (the Source recommendation): export the stored doc_chunks ROWS (source, ord, content, vec) as a
+# portable self-describing JSON envelope; import inserts them under a FRESH kb_id with NO embed call. The
+# embeddings ARE already stored per-row (vec BLOB), so this is lossless AND needs no embed server up at import
+# time. The `content` is the OVERLAPPING chunk window (not recoverable full source text) — that's exactly why we
+# carry the vecs rather than re-ingesting concatenated chunks (which would re-embed duplicated overlap and
+# silently corrupt scoring). kb_id is DELIBERATELY omitted from the envelope so an import can't collide with /
+# overwrite an existing scope — import always mints a fresh id (supplied by the caller).
+class _ImportRejected(Exception):
+    """A FORGED / malformed import envelope (wrong format tag, unknown version, over the chunk ceiling). Raised
+    by import_kb BEFORE any DB write (so a rejected import leaves ZERO rows). The library never exits; the CLI
+    doc_import handler is the single place that maps this to a printed {"error":…} + a DISTINCT exit code (6),
+    which the C# DocSearch maps to a clear 400/422 — never the embed-down 503."""
+
+
+def _safe_source(source):
+    """A SafeName-equivalent guard on one imported chunk's `source` basename, mirroring the C# RecipeStore.SafeName
+    rule the ingest endpoints use (letters/digits/space/-/_ only, no '..', stem <= 64 chars). Returns the safe
+    basename (with its original extension preserved) or None for an unsafe/empty source — the import then SKIPS
+    that row rather than letting a traversal-shaped `source` ('../../etc/passwd') land in the DB."""
+    if not isinstance(source, str):
+        return None
+    base = os.path.basename(source.strip())
+    if not base or ".." in base:
+        return None
+    # Cap the FULL basename at 64 chars to match the C# RecipeStore.SafeName rule the ingest endpoints enforce
+    # (SafeName rejects name.Length > 64 — the whole name, not just the stem); FIX 5(c).
+    if len(base) > 64:
+        return None
+    stem, ext = os.path.splitext(base)
+    if not stem:
+        return None
+    if not all(c.isalnum() or c in " -_" for c in stem):
+        return None
+    return base
+
+
+def export_kb(kb_id, name=None):
+    """Export one kb_id's chunks as a self-describing JSON envelope (dict). Each vec is _unpack'd back to a plain
+    float LIST so the file is human-inspectable and not endian/struct-locked; embed_dim is stamped (from the first
+    chunk) so an import can warn on a dim mismatch. kb_id is OMITTED — import always mints a fresh one. The KB display
+    `name` is CARRIED (when supplied) so a round-trip restores the exact name (the C# import reads envelope["name"]
+    -> KbStore.NewKb(name)); a None/blank name omits the key (back-compat with an unnamed export). An unknown / empty
+    kb yields an envelope with chunks=[] (benign, mirrors delete's no-op)."""
+    c = _conn()
+    try:
+        rows = c.execute("SELECT source,ord,content,vec FROM doc_chunks WHERE kb_id=? ORDER BY source,ord",
+                         (kb_id,)).fetchall()
+    finally:
+        c.close()
+    chunks = [{"source": r[0], "ord": r[1], "content": r[2], "vec": _unpack(r[3])} for r in rows]
+    env = {
+        "format": EXPORT_FORMAT,
+        "version": EXPORT_VERSION,
+        "embed_model": os.environ.get("EMBED_MODEL", "embed"),
+        "embed_dim": len(chunks[0]["vec"]) if chunks else 0,
+        "exported": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "chunks": chunks,
+    }
+    # Carry the display name so an import reproduces the exact KB name (FIX 2). A blank/None name is omitted so an
+    # unnamed export stays byte-compatible with the v0.16 envelope (the import then falls back to the filename stem).
+    if isinstance(name, str) and name.strip():
+        env["name"] = name.strip()
+    return env
+
+
+def _dim_warning(envelope_dim, current_dim):
+    """PURE dim-mismatch decision (no DB / no embed call, unit-tested with stubbed dims): a CLEAR warning string when
+    the imported envelope's embed_dim differs from the current embedding dim, else None. Returns None (no false alarm)
+    whenever EITHER side is unknown — an envelope_dim of 0 (an empty/legacy export) or a current_dim of 0/None (no
+    rows to probe AND the embed server is unreachable). The warning is surfaced (not fatal): a cross-model KB still
+    imports, but its rows won't retrieve (search_vec skips dim-mismatched vectors) until re-embedded under the
+    current model — so a SILENT zero-hit becomes a visible, actionable message."""
+    try:
+        ed = int(envelope_dim or 0)
+        cd = int(current_dim or 0)
+    except (TypeError, ValueError):
+        return None
+    if ed <= 0 or cd <= 0 or ed == cd:
+        return None
+    return (f"imported under a different embedding dim ({ed}) than the current model ({cd}) — "
+            f"this KB won't retrieve until it is re-embedded under the current model.")
+
+
+def _current_embed_dim(exclude_kb=None):
+    """The current on-disk embedding dimension, probed CHEAPLY with NO embed call: the vec length of any existing
+    doc_chunks row (optionally excluding the just-imported kb_id so the import's own rows don't self-satisfy the
+    probe). Returns 0 when the DB has no other rows to learn the dim from — the caller then treats the current dim as
+    unknown and emits no warning (it never blocks, never spawns the embed server). This keeps the dim check working
+    offline; a from-empty DB simply can't compare (and a same-model re-import is the common case anyway)."""
+    c = _conn()
+    try:
+        if exclude_kb is None:
+            row = c.execute("SELECT vec FROM doc_chunks LIMIT 1").fetchone()
+        else:
+            row = c.execute("SELECT vec FROM doc_chunks WHERE kb_id<>? LIMIT 1", (exclude_kb,)).fetchone()
+    finally:
+        c.close()
+    return len(_unpack(row[0])) if row else 0
+
+
+def import_kb(kb_id, envelope, embed_fn=embed):
+    """Insert an exported envelope's chunks under the (fresh, caller-supplied) kb_id. NO embed call — the vecs
+    come from the file (so import works with the embed server DOWN); embed_fn is accepted only for signature
+    symmetry and is NEVER invoked. VALIDATES + BOUNDS so a forged file can't blow up the DB:
+      • wrong format tag / unknown version / over MAX_IMPORT_CHUNKS -> raise _ImportRejected (ZERO rows written);
+      • per-row: SafeName-guard the `source` basename, require a numeric vec list, clamp `content` to MAX_DOC_CHARS
+        — any row that fails is SKIPPED (the rest still import), so a few bad rows degrade cleanly.
+    Returns the number of rows actually inserted. Reuses the EXACT INSERT shape of ingest_doc."""
+    if not isinstance(envelope, dict) or envelope.get("format") != EXPORT_FORMAT:
+        raise _ImportRejected("not a DokiDex KB export (missing or wrong 'format').")
+    if envelope.get("version") != EXPORT_VERSION:
+        raise _ImportRejected(f"unsupported export version {envelope.get('version')!r} (this build imports v{EXPORT_VERSION}).")
+    chunks = envelope.get("chunks")
+    if not isinstance(chunks, list):
+        raise _ImportRejected("malformed export: 'chunks' is not a list.")
+    if len(chunks) > MAX_IMPORT_CHUNKS:
+        raise _ImportRejected(f"export too large ({len(chunks)} chunks) — over the {MAX_IMPORT_CHUNKS} import ceiling.")
+    c = _conn()
+    n = 0
+    try:
+        # SAFE only because the caller ALWAYS supplies a FRESHLY-minted kb_id: the HTTP import path (StudioHost
+        # /kbs/import) calls KbStore.NewKb -> a brand-new server id BEFORE this insert, so this DELETE can only ever
+        # clear rows under that not-yet-used scope (never an existing KB's). A direct CLI call must likewise pass a
+        # fresh id; reusing an existing kb_id here would wipe it (the FIX 5(b) caveat). (FIX 5)
+        c.execute("DELETE FROM doc_chunks WHERE kb_id=?", (kb_id,))   # always-fresh id: start clean
+        for ch in chunks:
+            if not isinstance(ch, dict):
+                continue
+            src = _safe_source(ch.get("source"))
+            if src is None:
+                continue
+            vec = ch.get("vec")
+            if not isinstance(vec, list) or not vec or not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vec):
+                continue
+            content = ch.get("content")
+            if not isinstance(content, str):
+                continue
+            content = content[:MAX_DOC_CHARS]   # clamp a forged huge chunk so it can't bloat the DB
+            ordinal = ch.get("ord")
+            if not isinstance(ordinal, int) or isinstance(ordinal, bool):
+                ordinal = 0
+            c.execute("INSERT INTO doc_chunks(kb_id,source,ord,content,vec,ts) VALUES(?,?,?,?,?,?)",
+                      (kb_id, src, ordinal, content, _pack([float(x) for x in vec]), time.time()))
+            n += 1
+        c.commit()
+    finally:
+        c.close()
+    return n
+
+
 # --- retrieval (pure cosine, kb-scoped) -----------------------------------------------------------------
 def search_vec(kb_id, query_vec, k=5):
     """Brute-force cosine nearest neighbours over the kb_id-scoped chunks, top-K. Returns [] for a degenerate
@@ -393,7 +556,40 @@ def _cli(argv):
         kb = argv[2] if len(argv) > 2 else ""
         print(json.dumps({"removed": delete(kb)}))
         return 0
-    print("usage: doc_index.py {doc_ingest KB SOURCE <stdin| doc_ingest_bin KB SOURCE <stdin| doc_search KB Q [K] | doc_sources KB | doc_remove KB SOURCE | doc_delete KB}")
+    if cmd == "doc_export":
+        # Print the portable self-describing envelope (the stored rows + their reusable vecs) to STDOUT. An
+        # unknown/empty kb yields an empty-chunks envelope (benign, exit 0 — mirrors delete's no-op). An OPTIONAL
+        # 4th argv is the KB display NAME, stamped into the envelope so a round-trip restores it (FIX 2).
+        kb = argv[2] if len(argv) > 2 else ""
+        name = argv[3] if len(argv) > 3 else None
+        print(json.dumps(export_kb(kb, name)))
+        return 0
+    if cmd == "doc_import":
+        # Read the envelope from STDIN, insert under the (fresh, argv-supplied) kb id with NO embed call; print
+        # {"chunks":N}. A malformed/forged envelope -> {"error":…} + the DISTINCT exit code 6 (the C# side maps it
+        # to a clear 400/422, NEVER the embed-down 503). Same error-mapping style as the binary path's 3/4/5.
+        kb = argv[2] if len(argv) > 2 else ""
+        raw = sys.stdin.read()
+        try:
+            envelope = json.loads(raw)
+        except Exception:
+            print(json.dumps({"error": "malformed import file (not valid JSON)."})); return 6
+        # Probe the current on-disk dim BEFORE the insert (excluding this fresh kb so its own rows don't satisfy the
+        # probe), so a cross-model import surfaces a WARNING instead of silently zero-hitting (FIX 4). No embed call;
+        # an empty DB -> unknown -> no warning. The import still SUCCEEDS (graceful) — the warning is advisory.
+        env_dim = envelope.get("embed_dim") if isinstance(envelope, dict) else 0
+        cur_dim = _current_embed_dim(exclude_kb=kb)
+        try:
+            n = import_kb(kb, envelope)
+        except _ImportRejected as e:
+            print(json.dumps({"error": str(e)})); return 6
+        out = {"chunks": n}
+        warning = _dim_warning(env_dim, cur_dim)
+        if warning:
+            out["warning"] = warning
+        print(json.dumps(out))
+        return 0
+    print("usage: doc_index.py {doc_ingest KB SOURCE <stdin| doc_ingest_bin KB SOURCE <stdin| doc_search KB Q [K] | doc_sources KB | doc_remove KB SOURCE | doc_delete KB | doc_export KB [NAME] | doc_import KB <stdin}")
     return 2
 
 

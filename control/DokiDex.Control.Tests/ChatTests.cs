@@ -111,4 +111,43 @@ public class ChatTests
         Assert.Equal(LlmTiers.Quality, Chat.VisionModel(imageDataUrl, LlmTiers.Quality));
         Assert.Null(Chat.VisionModel(imageDataUrl, null));
     }
+
+    // ---- FIX 1 (default-KB orphan/wrong-pill): the send + stream responses must CARRY the conversation's effective
+    //      KbId so the SPA can refresh _chatKbId after a fresh send that auto-attached the GLOBAL default KB (and
+    //      thus hide the private-doc box + show the right pill). These lock the wire contract the SPA reads; the
+    //      SPA refresh itself is verified by the build+embed. ----
+
+    [Fact]
+    public void Result_carries_an_optional_KbId_defaulting_to_null_for_the_no_kb_path()
+    {
+        // The no-KB / no-default path: a Result built without a KbId reports null, so the SPA reads null and keeps
+        // the "private to this chat" box — byte-for-byte with the pre-FIX behavior (the field is purely additive).
+        var noKb = new Chat.Result(true, "conv-1", "hi", null);
+        Assert.Null(noKb.KbId);
+
+        // A fresh send that auto-attached the default library reports that kb-* id, so the SPA snaps to the library
+        // scope (hides the private-doc box, shows "library: <name>") exactly as an explicit named attach.
+        var withKb = new Chat.Result(true, "conv-1", "hi", null, KbId: "kb-20260618-aaaa");
+        Assert.Equal("kb-20260618-aaaa", withKb.KbId);
+    }
+
+    [Fact]
+    public void StreamEvent_Meta_carries_the_conversation_id_and_an_optional_kbId()
+    {
+        // The leading stream meta frame hands the SPA the conversation id AND its effective kbId up front (before any
+        // token), so a fresh streamed send can refresh _chatKbId from the meta (FIX 1). kbId defaults to null.
+        var metaNoKb = Chat.StreamEvent.Meta("conv-9");
+        Assert.True(metaNoKb.IsMeta);
+        Assert.Equal("conv-9", metaNoKb.ConversationId);
+        Assert.Null(metaNoKb.KbId);
+
+        var metaWithKb = Chat.StreamEvent.Meta("conv-9", "kb-20260618-bbbb");
+        Assert.Equal("kb-20260618-bbbb", metaWithKb.KbId);
+
+        // A token event is unchanged: not meta, carries the delta, no kbId.
+        var tok = Chat.StreamEvent.Token("hello");
+        Assert.False(tok.IsMeta);
+        Assert.Equal("hello", tok.Delta);
+        Assert.Null(tok.KbId);
+    }
 }

@@ -39,8 +39,14 @@ public static class Chat
 
     // Steps defaults to empty so the existing SendAsync callers/tests are unaffected; AgentAsync fills it with
     // the tool calls taken (each: the tool name + a short preview of its result) for an optional SPA trace.
+    // KbId (default null) carries the conversation's EFFECTIVE attached KB after the turn — the v0.16 default-KB
+    // follow-up: a FRESH thread may have just auto-attached the GLOBAL default KB (ApplyDefaultKb), but the SPA only
+    // learns the thread's kbId from renderThread (a reload). Surfacing it on the send response lets the SPA refresh
+    // _chatKbId after a fresh send with NO extra round-trip, so renderKbScope hides the private-doc box + shows the
+    // correct "library: <name>" pill (the FIX-1 orphan/wrong-pill regression). Null when no KB is attached (the
+    // no-default / no-KB path is byte-for-byte: the SPA reads null and keeps the "private to this chat" box).
     public sealed record Result(bool Ok, string ConversationId, string Text, string? Message,
-        IReadOnlyList<ToolStep>? Steps = null);
+        IReadOnlyList<ToolStep>? Steps = null, string? KbId = null);
 
     // One executed tool hop in the agent loop (for an optional SPA "tools taken" trace): the tool name, the raw
     // arguments JSON the model supplied, and the tool result text fed back as the role:"tool" turn.
@@ -62,12 +68,14 @@ public static class Chat
     private const double ToolTemperature = 0.3;
 
     // One streamed event from StreamAsync. The FIRST event is always a Meta carrying the conversation id (so the
-    // SPA can capture it before any token arrives); every subsequent event is a Delta carrying one token chunk.
-    //   Meta(conversationId): IsMeta=true,  ConversationId set, Delta=null
-    //   Token(delta):         IsMeta=false, Delta set
-    public sealed record StreamEvent(bool IsMeta, string? ConversationId, string? Delta)
+    // SPA can capture it before any token arrives) AND the conversation's effective KbId (so the SPA can refresh
+    // _chatKbId on a fresh send — the FIX-1 default-KB orphan/wrong-pill fix, mirroring Result.KbId); every
+    // subsequent event is a Delta carrying one token chunk.
+    //   Meta(conversationId, kbId): IsMeta=true,  ConversationId set, KbId set-or-null, Delta=null
+    //   Token(delta):               IsMeta=false, Delta set
+    public sealed record StreamEvent(bool IsMeta, string? ConversationId, string? Delta, string? KbId = null)
     {
-        public static StreamEvent Meta(string id) => new(true, id, null);
+        public static StreamEvent Meta(string id, string? kbId = null) => new(true, id, null, kbId);
         public static StreamEvent Token(string delta) => new(false, null, delta);
     }
 
@@ -78,9 +86,11 @@ public static class Chat
 
         var card = Persona.Load(body!.Persona);   // null name / unknown => built-in default persona
 
-        // Load the existing thread, or start a new one (server-generated id => no client path => no traversal).
+        // Load the existing thread, or start a new one (server-generated id => no client path => no traversal). A
+        // freshly-created thread picks up the global DEFAULT KB (ApplyDefaultKb) so project docs ride in every new
+        // chat; with no default set this is a no-op (KbId stays null) and the no-KB path is byte-for-byte.
         var conv = ChatStore.Load(body.Conversation)
-                   ?? ChatStore.NewConversation(body.Persona, card?.Lorebook);
+                   ?? ApplyDefaultKb(ChatStore.NewConversation(body.Persona, card?.Lorebook));
 
         // Prior turns: the persisted transcript, or a stateless caller's supplied Messages when there's none.
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
@@ -117,7 +127,9 @@ public static class Chat
         conv = conv with { Messages = appended };
         ChatStore.Save(conv);   // graceful: a save failure does not fail the reply the user already has
 
-        return new Result(true, conv.Id, reply, null);
+        // Carry conv.KbId so a FRESH send that auto-attached the default KB lets the SPA refresh _chatKbId with no
+        // extra round-trip (FIX 1); null when no KB is attached (the no-default path is byte-for-byte for the SPA).
+        return new Result(true, conv.Id, reply, null, KbId: conv.KbId);
     }
 
     // PURE loop-termination decision (no GPU/disk): take another hop only when the model requested at least one
@@ -172,8 +184,9 @@ public static class Chat
 
         var card = Persona.Load(body!.Persona);   // null name / unknown => built-in default persona
 
+        // A freshly-created thread picks up the global DEFAULT KB (no-op when none is set — byte-for-byte no-KB).
         var conv = ChatStore.Load(body.Conversation)
-                   ?? ChatStore.NewConversation(body.Persona, card?.Lorebook);
+                   ?? ApplyDefaultKb(ChatStore.NewConversation(body.Persona, card?.Lorebook));
 
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
         var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
@@ -249,7 +262,8 @@ public static class Chat
         conv = conv with { Messages = appended };
         ChatStore.Save(conv);   // graceful: a save failure does not fail the reply the user already has
 
-        return new Result(true, conv.Id, reply, null, steps);
+        // Same FIX-1 KbId surface as SendAsync (the tools path also runs through ApplyDefaultKb on a fresh thread).
+        return new Result(true, conv.Id, reply, null, steps, KbId: conv.KbId);
     }
 
     // STREAMING send (P2): the streaming twin of SendAsync. Loads the card + conversation (reusing SelectHistory
@@ -271,8 +285,9 @@ public static class Chat
 
         var card = Persona.Load(body!.Persona);   // null name / unknown => built-in default persona
 
+        // A freshly-created thread picks up the global DEFAULT KB (no-op when none is set — byte-for-byte no-KB).
         var conv = ChatStore.Load(body.Conversation)
-                   ?? ChatStore.NewConversation(body.Persona, card?.Lorebook);
+                   ?? ApplyDefaultKb(ChatStore.NewConversation(body.Persona, card?.Lorebook));
 
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
         var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
@@ -288,8 +303,9 @@ public static class Chat
 
         var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs);
 
-        // Hand the conversation id to the endpoint up front (so the SPA can capture it before any token).
-        yield return StreamEvent.Meta(conv.Id);
+        // Hand the conversation id AND its effective KbId to the endpoint up front (so the SPA can capture the id
+        // before any token AND refresh _chatKbId for a fresh send that auto-attached the default KB — FIX 1).
+        yield return StreamEvent.Meta(conv.Id, conv.KbId);
 
         var temperature = 0.8;
         var maxTokens = 1024;
@@ -373,6 +389,20 @@ public static class Chat
     // null on any failure: a down :8090 embed server, a missing index, a sidecar error, or a timeout all yield
     // "no context injected" and plain chat proceeds unchanged — the SAME contract as code_search. Internal so the
     // no-KB short-circuit is unit-testable with no process.
+    // PURE default-KB pickup (the v0.16 DEFAULT/GLOBAL KB follow-up): applied to a FRESHLY-created thread only —
+    // the right-hand side of `ChatStore.Load(...) ?? ApplyDefaultKb(ChatStore.NewConversation(...))` at the three
+    // send sites. When a global default is set (DefaultKbStore.Get() is non-null) a NEW thread auto-attaches to it
+    // so the project docs ride in every fresh chat; when NO default is set, `fresh` is returned UNCHANGED (KbId
+    // stays the record default null), so RetrieveDocs(null) short-circuits exactly as today — the no-default path
+    // is byte-for-byte. A LOADED existing thread is NEVER passed here, so it is never re-pointed. Extracted (like
+    // ResolveDetachKbId) so the "default applies to new only, null-default is a no-op" rule is unit-tested with no
+    // live model. An already-attached `fresh` (KbId set) is left intact — the default never clobbers an explicit
+    // choice.
+    public static Conversation ApplyDefaultKb(Conversation fresh)
+        => string.IsNullOrWhiteSpace(fresh.KbId) && DefaultKbStore.Get() is { } d
+            ? fresh with { KbId = d }
+            : fresh;
+
     internal static async Task<IReadOnlyList<DocChunk>?> RetrieveDocs(string? kbId, string userMessage, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(kbId) || string.IsNullOrWhiteSpace(userMessage)) return null;

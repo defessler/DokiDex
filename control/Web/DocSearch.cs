@@ -52,6 +52,15 @@ public static class DocSearch
     // comfortably covers the framing for a single small file part without letting a multi-MB body through.
     public const long MaxUploadBytes = MaxDocBytes + 64 * 1024;
 
+    // KB-IMPORT ceiling for POST /kbs/import (.ddkb envelope) — DELIBERATELY far larger than MaxUploadBytes (FIX 3).
+    // A single-doc upload is bounded to ~1.56MB, but a KB EXPORT is MANY docs: each chunk serializes a 768-float vec
+    // as JSON (~9-13KB), so even ~150 chunks blows past 1.56MB and re-importing the app's OWN export used to 413.
+    // 64MB comfortably round-trips a real library (hundreds of docs × hundreds of chunks of fat float vecs) while
+    // staying a HARD ceiling — a forged envelope still can't force an arbitrary-size buffer (the python
+    // MAX_IMPORT_CHUNKS row backstop bounds the insert independently). Applied to /kbs/import's Content-Length 413,
+    // its ReadFormAsync MultipartBodyLengthLimit, AND the post-copy length re-check (the three import gates).
+    public const long MaxKbImportBytes = 64L * 1024 * 1024;
+
     private static string Script => Path.Combine(RepoPaths.Root, "serving", "memory-mcp", "doc_index.py");
 
     public static bool Installed => File.Exists(Script);
@@ -136,6 +145,25 @@ public static class DocSearch
     public static IReadOnlyList<string> BuildDeleteArgs(string kbId)
         => new[] { Script, "doc_delete", kbId ?? "" };
 
+    // Pure: the argv for `uv run python doc_index.py doc_export KB [NAME]` — prints the portable JSON envelope (the
+    // kb-scoped rows + their reusable vecs) to STDOUT. No stdin; the caller captures stdout. Stdlib-only path. The
+    // optional display NAME is appended as argv[3] so export_kb stamps envelope["name"] and a re-import restores the
+    // exact KB name (FIX 2); a null/blank name omits the arg (the back-compat 3-arg form, an unnamed export).
+    public static IReadOnlyList<string> BuildExportArgs(string kbId, string? name = null)
+        => string.IsNullOrWhiteSpace(name)
+            ? new[] { Script, "doc_export", kbId ?? "" }
+            : new[] { Script, "doc_export", kbId ?? "", name };
+
+    // Pure: the argv for `uv run python doc_index.py doc_import KB` — the export envelope JSON is piped via STDIN;
+    // the rows are inserted under the (fresh) KB id with NO embed call. Prints {"chunks":N}. Stdlib-only path.
+    public static IReadOnlyList<string> BuildImportArgs(string kbId)
+        => new[] { Script, "doc_import", kbId ?? "" };
+
+    // PURE: the full `uv run python …` arg lists for export/import — both stay on the zero-dep stdlib path (NO
+    // `--with` overlay; UvArgs gates the overlay on doc_ingest_bin only), locked by a test so that can't regress.
+    public static IReadOnlyList<string> BuildExportUvArgs(string kbId, string? name = null) => UvArgs(BuildExportArgs(kbId, name));
+    public static IReadOnlyList<string> BuildImportUvArgs(string kbId) => UvArgs(BuildImportArgs(kbId));
+
     public sealed record Result(bool Ok, IReadOnlyList<(string source, int ord, string content, double score)> Rows, string? Message);
 
     // Retrieve the top-K KB chunks for one turn, mapped to DocChunks for ChatPrompt injection. ANY failure
@@ -175,7 +203,11 @@ public static class DocSearch
         catch (Exception ex) { KillTree(p); return new Result(false, Array.Empty<(string, int, string, double)>(), $"doc search error: {ex.Message}"); }
     }
 
-    public sealed record IngestResult(bool Ok, int Chunks, string? Message);
+    // Warning (default null) is the OPTIONAL advisory the IMPORT path carries (FIX 4): a CROSS-MODEL .ddkb imports
+    // successfully (Ok=true, rows land) but its vectors won't retrieve until re-embedded under the current model, so
+    // the endpoint surfaces this clear "imported under a different embedding dim N vs M" note rather than letting the
+    // KB silently zero-hit. Null on every ingest path and on a same-model import — purely additive, back-compat.
+    public sealed record IngestResult(bool Ok, int Chunks, string? Message, string? Warning = null);
 
     // Ingest one document's TEXT under (kbId, source): chunk + embed via :8090 + store. The text is piped via
     // STDIN (no temp file, no shell-arg length limit, no escaping). A down embed server / missing python =>
@@ -338,6 +370,76 @@ public static class DocSearch
         catch { KillTree(p); return false; }
     }
 
+    public sealed record ExportResult(bool Ok, string? Json, string? Message);
+
+    // EXPORT a whole KB to the portable JSON envelope (the kb-scoped rows + their reusable vecs) — the v0.16
+    // KB-library portability follow-up. Captures doc_export's stdout. NO embed server needed (the vecs are read
+    // straight from the DB). Degrades gracefully (Ok=false + a clear message) on a missing sidecar / error /
+    // timeout, mirroring SourcesAsync's spawn+30s+exit-code pattern.
+    public static async Task<ExportResult> ExportAsync(string kbId, CancellationToken ct, string? name = null)
+    {
+        if (!Installed) return new ExportResult(false, null, "knowledge base unavailable — doc_index.py is missing.");
+        if (string.IsNullOrWhiteSpace(kbId)) return new ExportResult(false, null, "missing KB id");
+        using Process? p = StartOrNull(BuildExportArgs(kbId, name), out _);
+        try
+        {
+            if (p is null) return new ExportResult(false, null, "could not start uv/python");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+            var outTask = p.StandardOutput.ReadToEndAsync(ct);
+            var errTask = p.StandardError.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+            var stdout = await outTask.ConfigureAwait(false);
+            await errTask.ConfigureAwait(false);
+            if (p.ExitCode != 0) return new ExportResult(false, null, "export failed");
+            return new ExportResult(true, stdout, "done");
+        }
+        catch (OperationCanceledException) { KillTree(p); return new ExportResult(false, null, "export cancelled / timed out"); }
+        catch (Exception ex) { KillTree(p); return new ExportResult(false, null, $"export error: {ex.Message}"); }
+    }
+
+    // IMPORT an export envelope under a FRESH kb id: the JSON is piped via STDIN to doc_import, which validates +
+    // bounds it and inserts the rows with NO embed call (the vecs come from the file — so import works with the
+    // embed server DOWN). A malformed/forged envelope -> doc_import exits 6 with a printed {"error":…}, mapped here
+    // to Ok=false + that clear message (NEVER the embed-down 503). Returns the chunk count on success. Mirrors
+    // IngestAsync's stdin-pipe + 30s + KillTree pattern.
+    public static async Task<IngestResult> ImportAsync(string newKbId, string envelopeJson, CancellationToken ct)
+    {
+        if (!Installed) return new IngestResult(false, 0, "knowledge base unavailable — doc_index.py is missing.");
+        if (string.IsNullOrWhiteSpace(newKbId)) return new IngestResult(false, 0, "missing KB id");
+        using Process? p = StartOrNull(BuildImportArgs(newKbId), out var redirectStdin);
+        try
+        {
+            if (p is null) return new IngestResult(false, 0, "could not start uv/python");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            if (redirectStdin)
+            {
+                await p.StandardInput.WriteAsync((envelopeJson ?? "").AsMemory(), ct).ConfigureAwait(false);
+                p.StandardInput.Close();   // EOF so doc_import's sys.stdin.read() returns
+            }
+
+            var outTask = p.StandardOutput.ReadToEndAsync(ct);
+            var errTask = p.StandardError.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+            var stdout = await outTask.ConfigureAwait(false);
+            await errTask.ConfigureAwait(false);
+
+            // doc_import exit 6 = a forged/malformed envelope: surface its clear {"error":…} (a 400/422 on the
+            // endpoint), NOT the embed-down 503. Any other non-zero is a generic failure. Exit 0 -> {"chunks":N}.
+            if (p.ExitCode == 6)
+                return new IngestResult(false, 0, ParseError(stdout) ?? "invalid import file.");
+            if (p.ExitCode != 0)
+                return new IngestResult(false, 0, "import failed");
+            // Success: carry any cross-model dim-mismatch advisory the python attached (FIX 4) so the endpoint can
+            // surface it ("imported under a different embedding dim …") rather than the KB silently zero-hitting.
+            return new IngestResult(true, ParseChunks(stdout), "done", ParseWarning(stdout));
+        }
+        catch (OperationCanceledException) { KillTree(p); return new IngestResult(false, 0, "import cancelled / timed out"); }
+        catch (Exception ex) { KillTree(p); return new IngestResult(false, 0, $"import error: {ex.Message}"); }
+    }
+
     // `uv run [--with pypdf --with python-docx] python <script> ...` — uv resolves the project python; doc_index.py
     // is stdlib-only EXCEPT the doc_ingest_bin path, which adds the `--with` parser overlay (resolved+cached by uv
     // the first time, free thereafter) so the txt/md/search/list/remove paths stay zero-dep. redirectStdin is true
@@ -345,7 +447,7 @@ public static class DocSearch
     private static Process? StartOrNull(IReadOnlyList<string> args, out bool redirectStdin)
     {
         var sub = args.Count > 1 ? args[1] : "";
-        redirectStdin = sub is "doc_ingest" or "doc_ingest_bin";
+        redirectStdin = sub is "doc_ingest" or "doc_ingest_bin" or "doc_import";
         var psi = new ProcessStartInfo("uv")
         {
             UseShellExecute = false,
@@ -374,6 +476,22 @@ public static class DocSearch
                 return e.GetString();
         }
         catch { /* not JSON — fall through to the caller's default message */ }
+        return null;
+    }
+
+    // PURE: pull the {"warning":…} string doc_import prints alongside {"chunks":N} on a cross-model import (FIX 4);
+    // null if absent / not a string / not JSON. The same shape as ParseError, just a non-fatal advisory key.
+    public static string? ParseWarning(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("warning", out var w) && w.ValueKind == JsonValueKind.String)
+                return w.GetString();
+        }
+        catch { /* not JSON — no advisory */ }
         return null;
     }
 
