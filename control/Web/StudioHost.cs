@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using DokiDex.Control.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -299,6 +300,46 @@ public static class StudioHost
             return r.Ok
                 ? Results.Json(new { conversation = r.ConversationId, text = r.Text })
                 : Results.Json(new { error = r.Message }, statusCode: 503);   // canonical "start agent mode first"
+        });
+
+        // ---- persona chat (P2, streaming): the streaming twin of POST /api/chat over SSE on the POST response ----
+        // body (the SPA reads res.body.getReader(); no EventSource, no SignalR client). Once the headers flush
+        // (HTTP 200) we CANNOT return a 503, so the LLM-down case is surfaced as an in-band 'event: error' frame
+        // with the canonical "start agent mode first" string; the non-streaming /api/chat above keeps the real 503
+        // (it is the P2 fallback). Each token delta is JSON-wrapped ('data: {"t":...}') so newlines/quotes in a
+        // token survive SSE framing; the SPA JSON.parses each data frame. Bounded by ctx.RequestAborted.
+        api.MapPost("/chat/stream", async (ChatRequest body, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+
+            var ct = ctx.RequestAborted;
+            var any = false;
+            await foreach (var ev in Chat.StreamAsync(body, LlmTiers.Resolve(body.Tier), ct))
+            {
+                if (ev.IsMeta)
+                {
+                    // Leading meta frame: hand the conversation id to the SPA before any token arrives.
+                    var meta = JsonSerializer.Serialize(new { conversation = ev.ConversationId ?? "" });
+                    await ctx.Response.WriteAsync($"event: meta\ndata: {meta}\n\n", ct);
+                    await ctx.Response.Body.FlushAsync(ct);
+                    continue;
+                }
+                if (ev.Delta is { Length: > 0 })
+                {
+                    any = true;
+                    await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { t = ev.Delta })}\n\n", ct);
+                    await ctx.Response.Body.FlushAsync(ct);
+                }
+            }
+
+            // Zero deltas (LLM down / no model loaded) — can't 503 after headers; emit the canonical in-band error.
+            if (!any)
+                await ctx.Response.WriteAsync(
+                    "event: error\ndata: LLM not reachable at :8080 — start agent mode first\n\n", ct);
+
+            await ctx.Response.WriteAsync("event: done\ndata: end\n\n", ct);
         });
 
         // ---- persona character cards (the GPTs analog, local + uncensored) — clone of /api/references ----

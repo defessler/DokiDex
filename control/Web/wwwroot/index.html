@@ -1284,21 +1284,62 @@
       renderChatGuard();   // clear the stale MEDIA banner immediately, don't wait for the next pollStatus tick
       return ok;
     }
+    // Non-streaming POST /api/chat — kept as the P2 transport fallback (real 503 contract).
+    async function sendChatOnce(text,fresh){
+      const hint=document.getElementById('chatHint');
+      const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
+          message:text, tier:document.getElementById('chatTier').value})});
+      const j=await r.json();
+      if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
+      _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
+      if(fresh) loadThreads();
+    }
     async function sendChat(){
       const inp=document.getElementById('chatInput'), hint=document.getElementById('chatHint');
+      const log=document.getElementById('chatLog');
       const text=inp.value.trim(); if(!text) return;
       if(!await ensureLlm()){ hint.textContent='chat needs AGENT mode'; return; }
       appendBubble('user',text); _chatMsgs.push({role:'user',content:text}); inp.value=''; hint.textContent='thinking…';
+      const fresh = !_chatConv;
+      // P2 streaming: append an empty assistant bubble, read SSE frames off res.body, append each token live.
+      const bub=appendBubble('assistant',''); let acc='', got=false;
       try{
-        const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+        const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
             message:text, tier:document.getElementById('chatTier').value})});
-        const j=await r.json();
-        if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
-        const fresh = !_chatConv;
-        _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
+        if(!res.ok || !res.body){ bub.remove(); await sendChatOnce(text,fresh); return; }   // transport failure before any token → fall back
+        const reader=res.body.getReader(), dec=new TextDecoder(); let buf='', errored=false, done=false;
+        // Parse ONE SSE frame (an event/data block). Appends a token via textContent (never innerHTML).
+        const handleFrame=frame=>{
+          let ev='', data='';
+          frame.split('\n').forEach(ln=>{ if(ln.startsWith('event:')) ev=ln.slice(6).trim();
+            else if(ln.startsWith('data:')) data+=(data?'\n':'')+ln.slice(5).replace(/^ /,''); });
+          if(ev==='error'){ bub.classList.add('err'); bub.textContent=data||'LLM not reachable — start agent mode first'; errored=true; hint.textContent=''; }
+          else if(ev==='done'){ done=true; }
+          else if(ev==='meta'){ try{ const m=JSON.parse(data); if(m&&m.conversation) _chatConv=m.conversation; }catch{} }
+          else if(data){ try{ const t=JSON.parse(data).t; if(typeof t==='string'){ got=true; acc+=t; bub.textContent+=t; log.scrollTop=log.scrollHeight; } }catch{} }
+        };
+        // Drain every COMPLETE '\n\n'-terminated frame currently buffered (leaves any partial tail in buf).
+        const drain=()=>{ let nl; while((nl=buf.indexOf('\n\n'))>=0){ const frame=buf.slice(0,nl); buf=buf.slice(nl+2); handleFrame(frame); } };
+        while(!done){
+          const {value,done:fin}=await reader.read(); if(fin) break;
+          buf+=dec.decode(value,{stream:true});
+          drain();
+        }
+        // Stream closed WITHOUT a trailing 'done' (server cancel mid-flush / llama-swap dropped the socket): the
+        // final chunk may have left one COMPLETE 'data: {"t":...}' frame in buf — drain it so that last token still
+        // lands in the bubble and the accumulated reply, instead of being silently dropped.
+        if(!done){ buf+=dec.decode(); drain(); }
+        if(errored){ return; }
+        if(!got){ bub.remove(); await sendChatOnce(text,fresh); return; }   // empty stream → fall back to the one-shot path
+        _chatMsgs.push({role:'assistant',content:acc}); hint.textContent='';
         if(fresh) loadThreads();
-      }catch{ hint.textContent='request failed'; }
+      }catch{
+        // streaming transport threw: fall back to the non-streaming POST if no token landed, else surface a hint.
+        if(!got){ bub.remove(); try{ await sendChatOnce(text,fresh); }catch{ hint.textContent='request failed'; } }
+        else { _chatMsgs.push({role:'assistant',content:acc}); hint.textContent=''; if(fresh) loadThreads(); }
+      }
     }
     function svcCard(s){
       const cls = !s.installed?'off':(s.running&&s.healthy?'ok':(s.running?'warn':'off'));
