@@ -168,6 +168,57 @@ Assert (-not (Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (G
 Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'Chroma1-HD.safetensors').model -eq 'Chroma1-HD.safetensors') "-Model overrides body.model"
 Assert ((Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's').model -eq (Get-GenRecipe -Kind image).model) "no -Model -> recipe default model kept"
 
+# --- FLUX.2 Klein family override: a FILENAME-keyed PURE map applied AFTER the -Model swap ---
+# Pure function contract: a FLUX.2 Klein checkpoint -> the official ComfyUI-template params
+# (euler + the Flux2 specialty scheduler; distilled vs base steps/cfg); EVERY other/empty model -> {}.
+# This is the ONLY thing that may change a non-Z-Image path, and it fires ONLY for flux-2-klein* models.
+Assert ((Get-ModelFamilyOverride '').Count -eq 0)                  "family override: empty model -> no override"
+Assert ((Get-ModelFamilyOverride $null).Count -eq 0)              "family override: null model -> no override"
+Assert ((Get-ModelFamilyOverride 'z_image_bf16.safetensors').Count -eq 0) "family override: Z-Image -> no override (unchanged)"
+Assert ((Get-ModelFamilyOverride 'Chroma1-HD-fp8mixed-final.safetensors').Count -eq 0) "family override: Chroma -> no override (unchanged)"
+Assert ((Get-ModelFamilyOverride 'Illustrious-XL-v1.0.safetensors').Count -eq 0) "family override: anime SDXL -> no override (unchanged)"
+$ovD = Get-ModelFamilyOverride 'flux-2-klein-4b.safetensors'
+Assert ($ovD.steps -eq 4 -and $ovD.cfgscale -eq 1)               "family override: Klein DISTILLED -> 4 steps / cfg 1 (template-exact)"
+Assert ($ovD.sampler -eq 'euler' -and $ovD.scheduler -eq 'Flux2') "family override: Klein DISTILLED -> euler / Flux2 scheduler"
+$ovB = Get-ModelFamilyOverride 'flux-2-klein-base-4b.safetensors'
+Assert ($ovB.steps -eq 20 -and $ovB.cfgscale -eq 5)              "family override: Klein BASE -> 20 steps / cfg 5 (template-exact)"
+Assert ($ovB.sampler -eq 'euler' -and $ovB.scheduler -eq 'Flux2') "family override: Klein BASE -> euler / Flux2 scheduler"
+Assert ((Get-ModelFamilyOverride 'FLUX-2-KLEIN-4B.SAFETENSORS').sampler -eq 'euler') "family override: case-insensitive filename match"
+
+# -Kind guard (defense-in-depth): the FLUX.2 sampler knobs are an IMAGE-recipe override only. A non-image
+# kind (e.g. a hand-typed `doki gen -Edit -Model flux-2-klein-4b.safetensors`) must NOT get the override —
+# otherwise it would clobber the edit recipe's steps/cfg/sampler. Image kind (the default) is unaffected.
+Assert ((Get-ModelFamilyOverride 'flux-2-klein-4b.safetensors' -Kind image).Count -gt 0)  "family override: Klein under IMAGE kind -> override applies (unchanged)"
+Assert ((Get-ModelFamilyOverride 'flux-2-klein-4b.safetensors' -Kind edit).Count -eq 0)   "family override: Klein under EDIT kind -> NO override (edit recipe untouched)"
+Assert ((Get-ModelFamilyOverride 'flux-2-klein-4b.safetensors' -Kind video).Count -eq 0)  "family override: Klein under VIDEO kind -> NO override (non-image guarded)"
+
+# --- Build-GenBody integration: selecting a Klein checkpoint rewrites the Z-Image recipe knobs ---
+$bKleinD = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'flux-2-klein-4b.safetensors'
+Assert ($bKleinD.model -eq 'flux-2-klein-4b.safetensors')         "Klein body: -Model swaps the checkpoint"
+Assert ($bKleinD.steps -eq 4 -and $bKleinD.cfgscale -eq 1)        "Klein body: distilled overrides steps=4 / cfg=1 (over Z-Image 35/4.5)"
+Assert ($bKleinD.sampler -eq 'euler' -and $bKleinD.scheduler -eq 'Flux2') "Klein body: distilled overrides sampler=euler / scheduler=Flux2 (over dpmpp_2m/karras)"
+Assert (-not $bKleinD.ContainsKey('negativeprompt'))             "Klein body: drops the Z-Image curated negative (FLUX.2 carries no negative)"
+$bKleinB = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'flux-2-klein-base-4b.safetensors'
+Assert ($bKleinB.steps -eq 20 -and $bKleinB.cfgscale -eq 5)       "Klein body: base overrides steps=20 / cfg=5"
+Assert ($bKleinB.sampler -eq 'euler' -and $bKleinB.scheduler -eq 'Flux2') "Klein body: base overrides sampler=euler / scheduler=Flux2"
+# user -Negative is honoured even on Klein (set, since the recipe negative was dropped first by the override)
+$bKleinNeg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'flux-2-klein-4b.safetensors' -Negative 'extra limbs'
+Assert ($bKleinNeg.negativeprompt -eq 'extra limbs')             "Klein body: explicit -Negative still applies (recipe negative dropped, user negative set)"
+# NON-Klein -Model override must leave the Z-Image recipe knobs BYTE-FOR-BYTE intact (purely additive proof)
+$bChroma = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'Chroma1-HD-fp8mixed-final.safetensors'
+Assert ($bChroma.steps -eq 35 -and $bChroma.cfgscale -eq 4.5)    "non-Klein -Model: Z-Image knobs unchanged (steps 35 / cfg 4.5)"
+Assert ($bChroma.sampler -eq 'dpmpp_2m' -and $bChroma.scheduler -eq 'karras') "non-Klein -Model: Z-Image sampler/scheduler unchanged"
+Assert ($bChroma.negativeprompt -match 'worst quality')          "non-Klein -Model: Z-Image negative preserved (override is Klein-only)"
+# -Kind guard in Build-GenBody: a Klein checkpoint picked under -Edit must NOT inherit the FLUX.2 image
+# override — the edit recipe (Qwen-Image-Edit, steps=20 / cfg=2.5, no scheduler) stays intact, only the
+# checkpoint swaps. This stops a hand-typed `doki gen -Edit -Model flux-2-klein-4b.safetensors` from
+# clobbering the edit recipe's sampler knobs.
+$bKleinEdit = Build-GenBody -Recipe (Get-GenRecipe -Kind edit) -PromptFields (Get-GenPromptFields -Kind edit -Idea 'x') -SessionId 's' -Model 'flux-2-klein-4b.safetensors' -Kind edit
+Assert ($bKleinEdit.model -eq 'flux-2-klein-4b.safetensors')      "Klein under -Edit: -Model still swaps the checkpoint"
+Assert ($bKleinEdit.steps -eq 20 -and $bKleinEdit.cfgscale -eq 2.5) "Klein under -Edit: edit recipe steps=20 / cfg=2.5 kept (NO FLUX.2 override)"
+Assert (-not $bKleinEdit.ContainsKey('scheduler'))               "Klein under -Edit: no Flux2 scheduler injected (override guarded off non-image)"
+Assert (-not $bKleinEdit.ContainsKey('sampler'))                 "Klein under -Edit: no euler sampler injected (edit recipe untouched)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"

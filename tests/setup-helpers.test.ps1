@@ -138,6 +138,32 @@ try {
         # not a do_not_use / refiner / inpaint / component file — the canonical full checkpoint
         Assert ($spec.Url -notmatch '(?i)do_not_use|refiner|inpaint|/unet/|/vae/|-opt\.safetensors$') "anime SDXL: $($spec.File) targets the canonical full checkpoint (not a component/opt/do_not_use)"
     }
+
+    Write-Host "`nFLUX.2 Klein (-Models full): NON-GATED Comfy-Org repackaged checkpoints, well-formed HF resolve URLs"
+    # FLUX.2 Klein must be sourced from the NON-GATED Comfy-Org/flux2-klein-4B repo (the BFL repo returns 401);
+    # the resolve/ split_files paths are HF-tree-verified. Pin both the distilled (default) and base (quality)
+    # checkpoints by local filename, that they ride a Comfy-Org $flux2-rooted URL (NOT the gated BFL repo), and
+    # that the $flux2 base resolves to a well-formed HF resolve/main/ URL. The URL in setup.ps1 is an
+    # expandable "$flux2/diffusion_models/<file>" string, so match on its AST Extent.Text suffix (like Wan/ACE).
+    $flux2Base = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$flux2' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $flux2Base) "FLUX.2 Klein: setup.ps1 defines a `$flux2 base URL var"
+    $flux2Url = if ($flux2Base) { $flux2Base.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($flux2Url -match '^https://huggingface\.co/Comfy-Org/flux2-klein-4B/resolve/main/split_files$') "FLUX.2 Klein: `$flux2 = NON-GATED Comfy-Org resolve/main URL"
+    foreach ($spec in @(
+        @{ File = 'flux-2-klein-4b.safetensors' },
+        @{ File = 'flux-2-klein-base-4b.safetensors' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File } | Select-Object -First 1
+        Assert ($null -ne $e)                       "FLUX.2 Klein: $($spec.File) is wired as a Get-Model entry"
+        Assert ($e -and $e.Url -match '(?i)\$flux2/diffusion_models/') "FLUX.2 Klein: $($spec.File) URL hangs off the `$flux2 Comfy-Org base"
+        # GATING GUARD: must never reference the 401-gated black-forest-labs repo
+        Assert ($e -and $e.Url -notmatch '(?i)black-forest-labs') "FLUX.2 Klein: $($spec.File) does NOT point at the gated black-forest-labs repo"
+        # resolved full URL (base + suffix) is a well-formed HF resolve/main/*.safetensors URL
+        $full = ($e.Url -replace '(?i)\$flux2', $flux2Url).Trim('"')
+        Assert ($full -match $hfResolve) "FLUX.2 Klein: $($spec.File) resolves to a well-formed HF resolve/main/*.safetensors URL"
+    }
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
     Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"

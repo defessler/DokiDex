@@ -179,6 +179,37 @@ function Get-GenPromptFields {
     return @{ prompt = $p }
 }
 
+# FILENAME-keyed model-family param override: when the selected checkpoint belongs to a family whose sampler
+# knobs differ from the kind recipe, return the params to apply OVER the recipe (applied in Build-GenBody right
+# after the -Model swap). PURE + total: empty/unknown model -> @{} so EVERY existing path stays byte-for-byte
+# unchanged (only models matched below ever diverge). GPU-free; the on-disk filename is SwarmUI's model key.
+#
+# IMAGE-ONLY (defense-in-depth): -Kind gates the override to the image recipe — the values below are an
+# IMAGE-recipe replacement, so a non-image kind (e.g. a hand-typed `doki gen -Edit -Model flux-2-klein-4b…`)
+# returns @{} and keeps its own recipe's steps/cfg/sampler intact rather than being clobbered.
+#
+# FLUX.2 Klein — the FLUX.2 family needs sampler=euler + the new "Flux2" specialty scheduler (NOT Z-Image's
+# dpmpp_2m/karras), so a Klein checkpoint selected via -Model must override the Z-Image image recipe. The
+# scheduler+sampler are AUTHORITATIVE per SwarmUI's docs/Model Support.md, which states verbatim "Scheduler:
+# Defaults to Flux2, a new specialty scheduler added for Flux.2" and "Sampler: Defaults to Euler". The step
+# counts come from the official ComfyUI text-to-image template (image_flux2_klein_text_to_image.json):
+# distilled = 4 steps / CFG 1, base = 20 steps / CFG 5.
+#   ON-GPU NOTE: the 4-step distilled count diverges from SwarmUI's own prose (which cites ~8 steps for the
+#   distilled tier); the step counts here follow the ComfyUI template and, like all of these defaults, are
+#   install/render-unverified at rest (no GPU in CI). The scheduler/sampler VALUES are doc-confirmed above.
+function Get-ModelFamilyOverride {
+    param(
+        [string]$Model,
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image'
+    )
+    if (-not $Model -or $Kind -ne 'image') { return @{} }
+    if ($Model -like 'flux-2-klein*') {
+        if ($Model -like '*base*') { return @{ steps = 20; cfgscale = 5; sampler = 'euler'; scheduler = 'Flux2' } }
+        else                       { return @{ steps = 4;  cfgscale = 1; sampler = 'euler'; scheduler = 'Flux2' } }
+    }
+    return @{}
+}
+
 # merge recipe + prompt fields + session (+ optional init image) into the final GenerateText2Image body.
 function Build-GenBody {
     param(
@@ -190,13 +221,27 @@ function Build-GenBody {
         [int]$Duration = 0, [int]$Bpm = 0, [string]$Negative,
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
-        [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model
+        [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
     foreach ($kv in $PromptFields.GetEnumerator()) { $body[$kv.Key] = $kv.Value }
     # model override (manual picker / Auto router): replace the recipe's default checkpoint with a chosen one.
-    if ($Model) { $body.model = $Model }
+    # Then apply the checkpoint's FAMILY param override (e.g. FLUX.2 Klein -> euler/Flux2) OVER the kind recipe.
+    # Empty map for every non-matched model, so Z-Image / Turbo / Chroma / anime / video / music / edit paths
+    # are byte-for-byte unchanged; this fires ONLY when the chosen -Model belongs to an overriding family.
+    if ($Model) {
+        $body.model = $Model
+        # FAMILY override is IMAGE-recipe-only (Get-ModelFamilyOverride returns @{} for non-image kinds), so a
+        # Klein checkpoint hand-picked under -Edit/-Video keeps that kind's own recipe knobs untouched.
+        $ov = Get-ModelFamilyOverride -Model $Model -Kind $Kind
+        foreach ($kv in $ov.GetEnumerator()) { $body[$kv.Key] = $kv.Value }
+        # FLUX.2 drives a real CFG via euler/Flux2 but ships no curated negative -> drop the Z-Image negative
+        # so it isn't silently carried onto a FLUX.2 image gen (a user -Negative still sets it below). Gated to
+        # the image kind to match the override above (non-image recipes keep their own negative handling).
+        if ($Kind -eq 'image' -and $Model -like 'flux-2-klein*' -and $body.ContainsKey('negativeprompt')) { $body.Remove('negativeprompt') }
+    }
     if ($Seed -ge 0) { $body.seed = $Seed }   # >=0 = reproducible; omit (-1) lets SwarmUI pick a random seed
     # an init image turns text2image into img2img / image-edit; creativity 0 = keep the input faithfully,
     # higher = more variation (the -Strength "vary" dial). Defaults to 0 when no strength is given.
@@ -323,7 +368,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -338,7 +383,7 @@ function Invoke-Gen {
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }

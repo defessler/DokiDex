@@ -499,6 +499,23 @@ if ($Models -eq "full") {
     # reusing the qwen_3_4b text encoder + Flux ae VAE SwarmUI auto-fetched for Turbo (now the -Fast tier).
     Get-Model "https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/diffusion_models/z_image_bf16.safetensors" (Join-Path $diff "z_image_bf16.safetensors")
 
+    # FLUX.2 Klein 4B — BFL's distilled small FLUX.2. SwarmUI's own docs note the 4B "often seems smarter"
+    # than the 9B, and the 4B + Qwen-4B TE footprint (~7.75GB unet + 8.04GB TE + 0.34GB VAE) sits comfortably
+    # in 32GB at bf16. Selected via  doki gen -Model flux-2-klein-4b.safetensors  — the Build-GenBody family
+    # override then applies the FLUX.2 sampler knobs (euler + the Flux2 specialty scheduler), no recipe edit.
+    #   IMPORTANT — the official black-forest-labs/FLUX.2-klein repo is GATED (HF 401 unauthenticated); use the
+    #   NON-GATED Comfy-Org/flux2-klein-4B repackage (same pattern as z_image / Wan / ACE-Step / Qwen-Edit).
+    #   - distilled (DEFAULT): -Fast-equivalent, 4 steps / CFG 1.
+    #   - base (QUALITY): high-CFG variant, 20 steps / CFG 5.
+    # ONLY the two CHECKPOINTS are pre-staged here. SwarmUI AUTO-FETCHES the FLUX.2 text encoder (Qwen3-4B) and
+    # the FLUX.2 16ch VAE on first FLUX.2 use, so we deliberately DON'T download them as separate components:
+    # a separate qwen_3_4b.safetensors into Models/text_encoders would collide with the qwen_3_4b TE Z-Image
+    # already auto-fetches (shared filename -> whichever landed second silently SHADOWS the other, an order-
+    # dependent cross-model breakage). Letting SwarmUI manage the shared TE/VAE avoids that entirely.
+    $flux2 = "https://huggingface.co/Comfy-Org/flux2-klein-4B/resolve/main/split_files"
+    Get-Model "$flux2/diffusion_models/flux-2-klein-4b.safetensors"      (Join-Path $diff "flux-2-klein-4b.safetensors")
+    Get-Model "$flux2/diffusion_models/flux-2-klein-base-4b.safetensors" (Join-Path $diff "flux-2-klein-base-4b.safetensors")
+
     # Realism LoRA for `doki gen -Realism` — a photoreal Z-Image LoRA (Apache-2.0, public/non-gated HF
     # repo, scriptable resolve/ URL like the Wan-Lightning LoRAs above). Source ships the generic
     # pytorch_lora_weights.safetensors, so RENAME on save so it doesn't collide and SwarmUI references it

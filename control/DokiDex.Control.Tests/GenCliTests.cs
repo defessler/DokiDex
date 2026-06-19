@@ -91,6 +91,20 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Flux2_klein_model_is_forwarded_verbatim_params_stay_in_powershell()
+    {
+        // FLUX.2 Klein needs euler + the Flux2 scheduler (vs Z-Image's dpmpp_2m/karras), but those params are
+        // computed in doki-gen.ps1's Build-GenBody family override keyed on this filename — C# only plumbs the
+        // checkpoint. PARITY contract: the exact Klein filename must reach -Model untouched (so the PS override
+        // fires). Distilled (default) + base (quality) both pass through identically.
+        foreach (var file in new[] { "flux-2-klein-4b.safetensors", "flux-2-klein-base-4b.safetensors" })
+        {
+            var a = GenCli.BuildArgs(new GenRequest("x", "image", Model: file, OutPath: "o"));
+            var i = a.IndexOf("-Model"); Assert.True(i >= 0); Assert.Equal(file, a[i + 1]);
+        }
+    }
+
+    [Fact]
     public void ControlNet_units_serialize_to_one_json_arg_on_image_edit()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "image",
