@@ -9,7 +9,7 @@
 
 # switches -> exactly one kind, with an ambiguity guard (so `gen -Video -Music` fails loudly, not silently).
 function Resolve-GenKind {
-    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$InfiniteTalk, [switch]$Speak)
+    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$Pulid, [switch]$InfiniteTalk, [switch]$Speak)
     $picked = @()
     if ($Video) { $picked += 'video' }
     if ($Music) { $picked += 'music' }
@@ -17,6 +17,7 @@ function Resolve-GenKind {
     if ($I2v)   { $picked += 'i2v'   }
     if ($Foley) { $picked += 'foley' }
     if ($FaceId) { $picked += 'faceid' }
+    if ($Pulid) { $picked += 'pulid' }
     if ($InfiniteTalk) { $picked += 'infinitetalk' }
     # -Speak = the GATED TTS-Audio-Suite alternative speech path (15 engines + RVC), run as a ComfyUI custom
     # workflow in the GPU-EXCLUSIVE media group. This does NOT touch the coexisting-with-chat :8004 Chatterbox
@@ -24,7 +25,7 @@ function Resolve-GenKind {
     # transport (HTTP server in the LLM group). -Speak is opt-in only and requires `doki up media` + the on-GPU
     # per-engine TtsSuite-<engine> workflow (see docs/decisions.md).
     if ($Speak) { $picked += 'speech' }
-    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -InfiniteTalk / -Speak (got: $($picked -join ', '))" }
+    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -Pulid / -InfiniteTalk / -Speak (got: $($picked -join ', '))" }
     if ($picked.Count -eq 1) { return $picked[0] }
     return 'image'
 }
@@ -102,7 +103,7 @@ function Resolve-TtsEngine {
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler, [string]$Engine
     )
     $r = switch ($Kind) {
@@ -160,6 +161,12 @@ function Get-GenRecipe {
         # workflow JSON wires the init image to InstantID's FaceAnalysis/LoadImage node. GATED: needs the -FaceId
         # install (node + weights) AND the on-GPU-authored CustomWorkflows\InstantID.json (see docs/decisions.md).
         'faceid' { @{ comfyuicustomworkflow = 'InstantID' } }
+        # face-identity transfer via the PuLID-Flux custom ComfyUI workflow (FLUX.1-dev): pass the reference face
+        # as the init image (doki gen -Pulid -InitImage <face.png>). Ergonomic alias for -Workflow PuLID; the
+        # workflow JSON wires the init image to the PuLID-Flux apply node. GATED: needs the -Pulid install (balazik
+        # node + the non-gated FLUX fp8 base + pulid_flux weights) AND the on-GPU-authored CustomWorkflows\PuLID.json
+        # (which must FIRST verify the Alpha/stale node loads on the current ComfyUI) — see docs/decisions.md.
+        'pulid' { @{ comfyuicustomworkflow = 'PuLID' } }
         # audio-driven talking-video via the InfiniteTalk custom ComfyUI workflow (MeiGen InfiniteTalk on the
         # Wan2.1-I2V-14B base, run through Kijai's WanVideoWrapper): the portrait rides the init-image channel
         # (-InitImage <portrait>) and the driving voice rides the -Audio channel (-Audio <wav/mp3>). Ergonomic
@@ -280,7 +287,7 @@ function Get-GenPromptFields {
 function Get-ModelFamilyOverride {
     param(
         [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image'
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
@@ -350,7 +357,7 @@ function Build-GenBody {
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -442,7 +449,7 @@ function Build-GenBody {
 function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'speech')][string]$Kind = 'image',
         [string]$Engine,   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...): picks the TtsSuite-<engine> workflow
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
@@ -458,6 +465,9 @@ function Invoke-Gen {
     # InstantID is meaningless without a reference face, which rides the init-image channel — fail loudly up
     # front (mirrors -Edit) rather than POSTing an InstantID workflow with no face for SwarmUI to choke on.
     if ($Kind -eq 'faceid' -and -not $InitImage) { throw "-FaceId requires -InitImage <reference face>" }
+    # PuLID-Flux is likewise meaningless without a reference face, which rides the init-image channel — fail loudly
+    # up front (mirrors -Edit/-FaceId) rather than POSTing a PuLID workflow with no face for SwarmUI to choke on.
+    if ($Kind -eq 'pulid' -and -not $InitImage) { throw "-Pulid requires -InitImage <reference face>" }
     # InfiniteTalk needs BOTH a portrait (init-image channel) AND a driving audio clip — fail loudly up front on
     # either (mirrors -Edit/-FaceId) rather than POSTing a talking-video workflow with a missing input.
     if ($Kind -eq 'infinitetalk' -and -not $InitImage) { throw "-InfiniteTalk requires -InitImage <portrait>" }

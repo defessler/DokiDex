@@ -128,6 +128,56 @@ attribute, scrfd/det = detection) — (community mirror, not byte-verified — o
 auto-download); (3) the ControlNet target **subfolder** the node's loader expects. **Every existing path is
 byte-for-byte unchanged** (the `faceid` kind/recipe is purely additive; no default/URL/catalog row changed).
 
+**Update — PuLID-Flux face-identity SHIPPED as INSTALL-WIRING ONLY (the base InstantID deferred is now un-blocked; workflow JSON + node-load deferred to on-GPU).**
+The InstantID entry above **deferred PuLID-Flux on two premises** — (1) "DokiDex lacks a FLUX.1-dev base (~22GB)" and
+(2) base gating — and **this research partially overturns both**, so PuLID-Flux now ships as a GATED `-Pulid` sidecar
+mirroring `-FaceId`. **(1) Base un-blocked via a NON-GATED fp8 path.** The canonical `black-forest-labs/FLUX.1-dev`
+**is hard-gated** (contact-info license click-through, not scriptable); the convenient all-in-one `Comfy-Org/flux1-dev`
+is **license-restricted** (FLUX.1 [dev] Non-Commercial) **but NOT hard-gated** — no contact-info banner, per-file
+resolve links render, so it is technically scriptable. We use Kijai's fp8 instead for a **footprint** reason, not a
+gating one: the full-precision all-in-one is a poor 32GB fit, whereas the **~17 GB fp8** base slots into 32GB with
+room to spare — fp8 is the practical 32GB path. **`Kijai/flux-fp8` is verified UNGATED** (`gated:false`; resolve 302s
+to a public CDN, not a login wall): `flux1-dev-fp8.safetensors` (11.9 GB fp8_e4m3fn UNET). It is a UNET-only weight, so it needs the SEPARATE
+FLUX encoders DokiDex never shipped (its bases are Z-Image/SDXL/flux-2-klein — none provide FLUX.1's t5xxl), all also
+ungated: `comfyanonymous/flux_text_encoders` → `t5xxl_fp8_e4m3fn.safetensors` (4.9 GB) + `clip_l.safetensors` (246 MB),
+and `Kijai/flux-fp8` → `flux-vae-bf16.safetensors` (168 MB) as the VAE. Real base footprint **~17 GB**, comfortably
+inside 32 GB — heavier than InstantID's **zero**-new-base reuse, but no longer a hard blocker. License is still
+**FLUX.1 [dev] Non-Commercial** (free/ungated download, commercial use restricted — the same posture DokiDex already
+accepted for dev-license models). **(2) Node = `balazik/ComfyUI-PuLID-Flux`, Alpha + stale.** It self-describes as
+"Alpha version V0.1.0 … a prototype"; **last commit 2024-10-03** (~20 months stale, predates the current ComfyUI/torch),
+so it may not LOAD on a 2026 ComfyUI without patching — genuinely weaker than the maintenance-mode cubiq InstantID node.
+The only fork (`sipie800` Enhanced) is **FORMALLY DISCONTINUED 2025-10-07** — NOT used. **(3) Net-new weights** beyond
+the FLUX base + the shared antelopev2 are small: `pulid_flux_v0.9.1.safetensors` (1.14 GB, `guozinan/PuLID`, ungated) +
+the EVA02-CLIP the node auto-downloads on first run (~600 MB).
+
+**Shipped (the gated install only):** a **`-Pulid`** sidecar switch on `setup.ps1` (mirrors `-FaceId`/`-InfiniteTalk`)
+that clones the balazik node into `custom_nodes\ComfyUI-PuLID-Flux`, pip-installs `facexlib insightface onnxruntime-gpu`
+(the **-gpu wheel ONLY** — same EP-namespace clash as the InstantID block; `insightface` is a no-op if `-FaceId` ran),
+`Get-Model`s the non-gated FLUX fp8 base (unet → `diffusion_models\`, t5xxl/clip_l → `clip\`, ae → `vae\`) + the
+pulid_flux weight (→ `pulid\`), and **SHARES InstantID's antelopev2**: the balazik README target is EXACTLY the same
+`models\insightface\models\antelopev2` path `-FaceId` populates, so the **same `glintr100.onnx` sentinel** SKIPS the
+download when `-FaceId` already ran (no re-download across the two paths; AST-pinned). Ergonomic alias:
+`doki gen -Pulid -InitImage <face.png>` → `Resolve-GenKind`→`pulid`→`comfyuicustomworkflow=PuLID` (the reference face
+rides the **init-image** channel, same as `-FaceId`); `-Pulid` requires `-InitImage` (fails loudly up front like `-Edit`).
+An **AST-driven `setup-helpers`** block pins the node clone + the 5 non-gated weight URLs + a conservative
+all-in-one negative — setup never pulls from `black-forest-labs/FLUX.1-dev` (hard-gated) **or** the
+`Comfy-Org/flux1-dev` all-in-one (license-restricted-but-scriptable, just a poor 32GB fit), keeping the base on
+the fp8 split-files path — + the antelopev2 sentinel-guard; `doki-gen` pins the new
+kind/recipe + the `-InitImage` requirement + the IP-Adapter-flag negative.
+
+**Decision-rule branch taken: base + node + weights all verify with concrete NON-GATED resolve URLs → WIRE the gated
+`-Pulid` install; the runnable workflow JSON is deferred on-GPU (no blind JSON).** balazik's `examples/`
+(`pulid_flux_16bit_simple.json` etc.) are ComfyUI **UI-graph** exports (top-level `nodes`/`links`/`groups`), NOT
+SwarmUI's flat API-prompt `CustomWorkflows` format, so the runnable `media-assets\PuLID.json` is the **on-GPU authoring
+step** (convert UI-graph → API-prompt, repoint to the fp8 base + the separate t5xxl/clip_l/ae, inject the SwarmUI
+`${prompt}` + the reference-face init-image placeholder). Until then the `-Pulid` block installs node+weights and the
+workflow copy is **guarded by a `Test-Path` that Warns** (identical to the Foley/InstantID/InfiniteTalk copies).
+**On-GPU LABELED confirms (unprovable at rest):** (1) the Alpha/stale balazik node **even LOADS** on the current ComfyUI
+(verify this FIRST, before authoring the workflow); (2) face-ID **render quality** + the **32GB fit** of the fp8 base +
+the three encoders; (3) the antelopev2 contents (shared with `-FaceId`, community mirror, not byte-verified). **Every
+existing path is byte-for-byte unchanged** — the `-FaceId`/InstantID block + its antelopev2 are untouched; the `pulid`
+kind/recipe is purely additive; no default/URL/catalog row changed.
+
 **Update — InfiniteTalk audio-driven talking-video SHIPPED as INSTALL-WIRING ONLY (workflow JSON deferred to on-GPU authoring).**
 Mirrors the InstantID posture exactly, with one new wiring axis (audio) and one large new cost (an ~82GB base).
 **Node:** the real ComfyUI integration is **Kijai's `ComfyUI-WanVideoWrapper`**, NOT a standalone MeiGen node — the

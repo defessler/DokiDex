@@ -252,9 +252,74 @@ try {
         $full = ($e.Url -replace '(?i)\$ix', $ixUrl).Trim('"')
         Assert ($full -eq ($ixUrl + $spec.Suffix))     "InstantID: $($spec.File) resolves to the expected InstantX path ($($spec.Suffix))"
     }
-    # PuLID-Flux guard: the picked SDXL path must NEVER pull FLUX.1-dev (the rejected ~22GB base) or a PuLID weight.
-    $fluxPull = $entries | Where-Object { $_.Url -match '(?i)flux\.?1-dev|pulid' }
-    Assert ($fluxPull.Count -eq 0) "InstantID: the SDXL face-ID path pulls NO FLUX.1-dev / PuLID weights (PuLID-Flux is deferred)"
+    # NOTE (was a "PuLID is deferred" guard): PuLID-Flux is now ALSO wired as its own GATED -Pulid sidecar (the
+    # base un-blocked via a NON-GATED FLUX fp8 path — see the dedicated PuLID block below), so FLUX.1-dev/PuLID
+    # weights DO now appear in $entries. The InstantID block's OWN weights must still be exactly the 3 InstantX
+    # files above (it pulls no FLUX itself) — but that is already pinned by the 3 $ix asserts; a global
+    # "no flux anywhere" assertion would now be wrong. The InstantID weights are SDXL-only by construction (they
+    # ride $ix = InstantX/InstantID, never a flux/pulid URL), which the per-spec $ix-resolution asserts enforce.
+    foreach ($spec in @('ip-adapter.bin', 'instantid_controlnet.safetensors', 'instantid_controlnet_config.json')) {
+        $e = $entries | Where-Object { $_.File -eq $spec } | Select-Object -First 1
+        Assert ($e -and $e.Url -notmatch '(?i)flux|pulid') "InstantID: $spec is an SDXL InstantX weight, NOT a flux/pulid URL"
+    }
+
+    Write-Host "`nPuLID-Flux face-identity (-Pulid): balazik node + a NON-GATED FLUX fp8 base (Kijai unet + ae, comfyanonymous t5xxl/clip_l) + pulid_flux v0.9.1, antelopev2 SHARED with -FaceId"
+    # The GATED FLUX face-ID sidecar (-Pulid) un-blocks what InstantID deferred: it clones balazik/ComfyUI-PuLID-Flux
+    # (Alpha V0.1.0, last commit 2024-10-03 — node-load is the on-GPU step) and Get-Models a NON-GATED ~17GB FLUX
+    # fp8 base (Kijai/flux-fp8 ungated unet + comfyanonymous/flux_text_encoders ungated t5xxl/clip_l + Kijai's ae)
+    # plus pulid_flux_v0.9.1 (guozinan/PuLID, ungated). antelopev2 is SHARED with the -FaceId block (same
+    # models\insightface\models\antelopev2 path + the same glintr100.onnx sentinel) so it is NOT re-downloaded.
+    # Pin: (1) the balazik node is cloned, (2) the fp8 base + encoders + pulid weight are wired Get-Model entries
+    # off the verified NON-GATED repos (NOT the gated black-forest-labs / Comfy-Org/flux1-dev repos), with
+    # non-colliding local filenames, (3) the antelopev2 fetch is guarded by the glintr100.onnx sentinel so -Pulid
+    # does NOT re-fetch it when -FaceId already populated it. NO workflow JSON is registered (the runnable PuLID.json
+    # is the on-GPU authoring step — balazik's examples/ are UI-graph). URLs HF-tree-verified this session.
+    $puClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)balazik/ComfyUI-PuLID-Flux' }, $true)
+    Assert ($puClone.Count -ge 1) "PuLID-Flux: setup.ps1 clones the balazik/ComfyUI-PuLID-Flux node (Alpha/stale; node-load is the on-GPU step)"
+    # the rejected fork must NOT be cloned.
+    $puFork = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)sipie800' }, $true)
+    Assert ($puFork.Count -eq 0) "PuLID-Flux: the formally-discontinued sipie800 Enhanced fork is NOT cloned"
+
+    # the FLUX fp8 base + encoders + pulid weight — each a Get-Model entry off a VERIFIED NON-GATED repo.
+    foreach ($spec in @(
+        @{ File = 'flux1-dev-fp8.safetensors';     Url = '^https://huggingface\.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8\.safetensors$';                         What = 'fp8 UNET (Kijai, ungated)' },
+        @{ File = 't5xxl_fp8_e4m3fn.safetensors';  Url = '^https://huggingface\.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn\.safetensors$';   What = 't5xxl TE (comfyanonymous, ungated)' },
+        @{ File = 'clip_l.safetensors';            Url = '^https://huggingface\.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l\.safetensors$';             What = 'clip_l (comfyanonymous, ungated)' },
+        @{ File = 'flux-ae.safetensors';           Url = '^https://huggingface\.co/Kijai/flux-fp8/resolve/main/flux-vae-bf16\.safetensors$';                          What = 'FLUX VAE (Kijai, ungated)' },
+        @{ File = 'pulid_flux_v0.9.1.safetensors'; Url = '^https://huggingface\.co/guozinan/PuLID/resolve/main/pulid_flux_v0\.9\.1\.safetensors$';                    What = 'PuLID-Flux model (guozinan, ungated)' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File } | Select-Object -First 1
+        Assert ($null -ne $e)               "PuLID-Flux: $($spec.File) is wired as a Get-Model entry ($($spec.What))"
+        Assert ($e -and ($e.Url.Trim('"') -match $spec.Url)) "PuLID-Flux: $($spec.File) resolves to the verified NON-GATED URL ($($spec.What))"
+    }
+    # the base must NOT use the all-in-one dev repos — black-forest-labs/FLUX.1-dev is hard-gated (contact-info
+    # license click-through, not scriptable); Comfy-Org/flux1-dev is license-restricted-but-scriptable, but its
+    # full-precision all-in-one is a poor 32GB fit, so the fp8 split-files path is the deliberate, conservative choice.
+    $gated = $entries | Where-Object { $_.Url -match '(?i)black-forest-labs/FLUX\.1-dev|Comfy-Org/flux1-dev' }
+    Assert ($gated.Count -eq 0) "PuLID-Flux: the FLUX base is sourced ONLY from non-gated repos (no black-forest-labs/FLUX.1-dev or Comfy-Org/flux1-dev gated pulls)"
+
+    # antelopev2 SHARED with -FaceId: the -Pulid block must guard its antelopev2 fetch behind the SAME
+    # glintr100.onnx sentinel the InstantID block uses, so it does NOT re-download when -FaceId already populated it.
+    # AST-pin: the -Pulid block contains an  if (-not (Test-Path $anteOk)) { ... }  guard wrapping the antelopev2
+    # Get-Model, where $anteOk = the glintr100.onnx sentinel. Verify the sentinel assignment + the guarded fetch
+    # both live inside the  if ($Pulid) { ... }  block.
+    $pulidIf = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.IfStatementAst] -and
+        $x.Clauses[0].Item1.Extent.Text -match '^\s*\$Pulid\s*$' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $pulidIf) "PuLID-Flux: setup.ps1 has an  if (`$Pulid) { ... }  install block"
+    $pulidText = if ($pulidIf) { $pulidIf.Extent.Text } else { '' }
+    Assert ($pulidText -match '(?i)\$anteOk\s*=\s*Join-Path\s+\$insDir\s+"glintr100\.onnx"') "PuLID-Flux: the antelopev2 sentinel is glintr100.onnx under `$insDir (the SAME insightface path -FaceId uses)"
+    Assert ($pulidText -match '(?i)if\s*\(\s*-not\s*\(\s*Test-Path\s+\$anteOk\s*\)\s*\)') "PuLID-Flux: antelopev2 download is GUARDED by  if (-not (Test-Path `$anteOk))  so it is SKIPPED when -FaceId already populated it (no re-download)"
+    Assert ($pulidText -match '(?i)models\\insightface\\models\\antelopev2') "PuLID-Flux: antelopev2 lands in the SHARED models\insightface\models\antelopev2 path"
+    # the -Pulid block registers NO committed workflow JSON (the runnable PuLID.json is the on-GPU authoring step),
+    # so there is intentionally no media-assets\PuLID.json to assert — only the Test-Path-gated copy-or-Warn.
+    Assert ($pulidText -match '(?i)Test-Path\s+\$puWf') "PuLID-Flux: the workflow copy is GATED behind Test-Path media-assets\PuLID.json (copy-or-Warn; no blind JSON committed)"
 
     Write-Host "`nInfiniteTalk audio-driven talking-video (-InfiniteTalk): Kijai WanVideoWrapper node + adapter (`$itk) + wav2vec2 (`$w2v) + the ~82GB Wan2.1-I2V-14B base (`$w21)"
     # The GATED talking-video sidecar (-InfiniteTalk) clones Kijai/ComfyUI-WanVideoWrapper (the REAL ComfyUI

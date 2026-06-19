@@ -22,6 +22,7 @@ Assert ((Resolve-GenKind -Edit)  -eq 'edit')  "-Edit  -> edit"
 Assert ((Resolve-GenKind -I2v)   -eq 'i2v')   "-I2v   -> i2v"
 Assert ((Resolve-GenKind -Foley) -eq 'foley') "-Foley -> foley"
 Assert ((Resolve-GenKind -FaceId) -eq 'faceid') "-FaceId -> faceid (InstantID face-identity)"
+Assert ((Resolve-GenKind -Pulid) -eq 'pulid') "-Pulid -> pulid (PuLID-Flux face-identity)"
 Assert ((Resolve-GenKind -InfiniteTalk) -eq 'infinitetalk') "-InfiniteTalk -> infinitetalk (audio-driven talking-video)"
 $ambiguous = $false
 try { Resolve-GenKind -Video -Music | Out-Null } catch { $ambiguous = $true }
@@ -29,6 +30,9 @@ Assert $ambiguous                             "-Video -Music -> throws (ambiguou
 $ambiguous2 = $false
 try { Resolve-GenKind -FaceId -Foley | Out-Null } catch { $ambiguous2 = $true }
 Assert $ambiguous2                            "-FaceId -Foley -> throws (ambiguous)"
+$ambiguousPulid = $false
+try { Resolve-GenKind -Pulid -FaceId | Out-Null } catch { $ambiguousPulid = $true }
+Assert $ambiguousPulid                        "-Pulid -FaceId -> throws (ambiguous)"
 $ambiguous3 = $false
 try { Resolve-GenKind -InfiniteTalk -I2v | Out-Null } catch { $ambiguous3 = $true }
 Assert $ambiguous3                            "-InfiniteTalk -I2v -> throws (ambiguous)"
@@ -126,6 +130,30 @@ Assert $faceidOk                                           "-FaceId WITH -InitIm
 $fbBody = $null; try { $fbBody = $fb | ConvertFrom-Json } catch {}
 Assert ($fbBody -and $fbBody.comfyuicustomworkflow -eq 'InstantID') "-FaceId -InitImage -BodyOnly -> body carries comfyuicustomworkflow=InstantID + the init image"
 Remove-Item -LiteralPath $faceTmp -Force -ErrorAction SilentlyContinue
+
+# pulid = the PuLID-Flux custom-workflow alias (FLUX.1-dev face-identity). Maps to comfyuicustomworkflow=PuLID;
+# the reference face rides the init-image channel (doki gen -Pulid -InitImage <face.png>), NOT a new key.
+$pul = Get-GenRecipe -Kind pulid
+Assert ($pul.comfyuicustomworkflow -eq 'PuLID') "pulid -> PuLID custom workflow (the FLUX face-identity alias)"
+Assert (-not $pul.ContainsKey('useipadapterforrevision')) "pulid -> does NOT set SwarmUI's IP-Adapter-revision flag (the face rides init-image, a different path)"
+
+# --- Invoke-Gen: -Pulid (PuLID-Flux) REQUIRES -InitImage up front (mirrors -Edit/-FaceId's init-image guard) ---
+# PuLID-Flux is meaningless without a reference face, which rides the init-image channel. The guard must fire
+# loudly BEFORE any SwarmUI contact, so `doki gen -Pulid 'portrait'` with no -InitImage throws a clear
+# "requires -InitImage" error. GPU/network-free: the throw path returns before the SwarmUI probe, and the
+# positive path uses a real temp file + -BodyOnly (stops before any /API call).
+$pulidNoInit = $false; $pulidErr = $null
+try { Invoke-Gen -Prompt 'portrait of a hero' -Kind pulid | Out-Null } catch { $pulidNoInit = $true; $pulidErr = "$($_.Exception.Message)" }
+Assert $pulidNoInit                                        "-Pulid with NO -InitImage -> throws (a reference face is mandatory)"
+Assert ($pulidErr -match 'requires\s+-InitImage')         "-Pulid missing -InitImage -> the error names 'requires -InitImage' (clear, up-front)"
+$pulidTmp = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-pulid-$([guid]::NewGuid().ToString('N')).png"
+Set-Content -LiteralPath $pulidTmp -Value 'not-a-real-image-just-bytes' -NoNewline
+$pulidOk = $true
+try { $pb = Invoke-Gen -Prompt 'portrait of a hero' -Kind pulid -InitImage $pulidTmp -BodyOnly } catch { $pulidOk = $false }
+Assert $pulidOk                                            "-Pulid WITH -InitImage -> does NOT throw the init-image guard (reference face supplied)"
+$pbBody = $null; try { $pbBody = $pb | ConvertFrom-Json } catch {}
+Assert ($pbBody -and $pbBody.comfyuicustomworkflow -eq 'PuLID') "-Pulid -InitImage -BodyOnly -> body carries comfyuicustomworkflow=PuLID + the init image"
+Remove-Item -LiteralPath $pulidTmp -Force -ErrorAction SilentlyContinue
 
 # infinitetalk = the InfiniteTalk custom-workflow alias (audio-driven talking-video on Wan2.1-I2V-14B). Maps to
 # comfyuicustomworkflow=InfiniteTalk; the portrait rides the init-image channel and the voice rides -Audio.

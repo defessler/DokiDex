@@ -18,6 +18,7 @@ param(
     [switch]$Sam,       # optional sidecar: Segment-Anything point segmentation (semantic click->mask in the edit canvas)
     [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
     [switch]$FaceId,    # optional sidecar: InstantID face-identity reference (SDXL — reuses the anime Illustrious/Animagine base, no FLUX needed)
+    [switch]$Pulid,     # optional sidecar: PuLID-Flux face-identity (FLUX.1-dev) — pulls a NON-GATED ~17GB FLUX fp8 base (Kijai unet + t5xxl/clip_l/ae) + the balazik PuLID-Flux node (Alpha/stale); SHARES InstantID's antelopev2
     [switch]$InfiniteTalk,  # optional sidecar: audio-driven talking-video via MeiGen InfiniteTalk on the Wan2.1-I2V-14B base — NOTE pulls an ~82GB Wan2.1 base NOT otherwise on disk
     [switch]$TtsSuite,  # optional sidecar: TTS-Audio-Suite ComfyUI node (15 TTS engines + RVC). A GATED ALTERNATIVE to the standalone :8004 Chatterbox server (which stays the coexisting-with-chat default, untouched) — this one runs in the GPU-exclusive media group. Engines AUTO-DOWNLOAD their own weights on first use (nothing pre-fetched); the runtime workflow is the on-GPU authoring step.
     [switch]$Nunchaku,  # optional sidecar: Nunchaku NVFP4 speed runtime (wheel + ComfyUI-nunchaku node) — ~3x faster on Blackwell/RTX-50xx for the Z-Image-Turbo (the default base) + Qwen-Image NVFP4 svdq variants. +Models full fetches them. (FLUX.2 Klein NVFP4 is BFL-native FP4, fetched under -Models full, not here.)
@@ -811,6 +812,107 @@ if ($InfiniteTalk) {
     else { Warn "media-assets\InfiniteTalk.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
 
     Ok "InfiniteTalk ready -> node + weights installed (~82GB Wan2.1-I2V-14B base + adapter + wav2vec2). On-GPU LABELED: author the workflow JSON, confirm the 32GB fit (fp8 base + block-swap), source the fp8 repack, and pin the audio body-key. Run via  doki gen -InfiniteTalk -InitImage <portrait> -Audio <clip> '<prompt>'  once authored."
+}
+
+# 5h-quinquies. PuLID-Flux face-identity (GATED sidecar, -Pulid) — FLUX-based face-ID, the alternative InstantID
+#     (5h-bis) deferred because DokiDex shipped no FLUX.1-dev base. THIS block un-blocks it via a NON-GATED FLUX
+#     fp8 path (NOT the gated black-forest-labs / Comfy-Org repos): Kijai/flux-fp8 ships an ungated fp8 UNET + the
+#     ungated bf16 ae, and comfyanonymous/flux_text_encoders ships the ungated t5xxl/clip_l — together ~17GB (11.9 unet + 4.9 t5 +
+#     .25 clip_l + .17 vae), comfortably inside 32GB. (All HF-tree verified: the model cards show NO contact-info
+#     gate; resolve URLs 302 to a public CDN, not a login wall. The license is still FLUX.1 [dev] Non-Commercial —
+#     free/ungated download, commercial use restricted — the same posture DokiDex already accepted for dev-license
+#     models.) Mirrors the Foley/InstantID install (node clone + comfy-python pip + Get-Model weights).
+#     TWO honest caveats, flagged here exactly like InstantID flagged PuLID's missing base:
+#       (1) THE NODE IS WEAK — balazik/ComfyUI-PuLID-Flux self-describes as "Alpha version V0.1.0 ... a prototype";
+#           last commit 2024-10-03 (~20 months stale, predates the current ComfyUI/torch), so it may not LOAD on a
+#           2026 ComfyUI without patching. The only fork (sipie800 Enhanced) is FORMALLY DISCONTINUED 2025-10-07 —
+#           do NOT use it. So node-load is the labeled on-GPU step (verify it imports BEFORE authoring the workflow).
+#       (2) ~17GB NEW FOOTPRINT — unlike InstantID's zero-new-base reuse, PuLID-Flux adds the FLUX fp8 unet + three
+#           SEPARATE FLUX encoders (t5xxl + clip_l + ae) DokiDex did not previously ship (its bases are
+#           Z-Image/SDXL/flux-2-klein, none provide FLUX.1's t5xxl). SwarmUI maps the ComfyUI dirs: the fp8 unet ->
+#           diffusion_models\, the t5xxl/clip_l -> clip\, the ae -> vae\.
+#     antelopev2 IS SHARED with InstantID (5h-bis): the balazik README target is EXACTLY the same
+#     models\insightface\models\antelopev2 path the -FaceId block populates, so the glintr100.onnx sentinel below
+#     SKIPS the download when -FaceId already ran (no re-download across the two paths). The PuLID-specific net-new
+#     weight is just pulid_flux_v0.9.1 (~1.14GB) + the EVA02-CLIP the node auto-downloads on first run (~600MB).
+#     WORKFLOW IS NOT SHIPPED: balazik's examples/ (pulid_flux_16bit_simple.json etc.) are ComfyUI UI-GRAPH exports
+#     (top-level nodes/links/groups), NOT SwarmUI's flat API-prompt CustomWorkflows format; so the runnable
+#     media-assets\PuLID.json is the ON-GPU authoring step (convert UI-graph -> API-prompt, repoint to the fp8 base
+#     + the separate t5xxl/clip_l/ae, inject the SwarmUI ${prompt} + the reference-face init-image placeholder; see
+#     docs/decisions.md). Until then this installs node+weights only and Warns the workflow is absent (same
+#     Test-Path posture as the Foley/InstantID/InfiniteTalk copies). Cite:
+#     github.com/balazik/ComfyUI-PuLID-Flux/tree/master/examples ; huggingface.co/Kijai/flux-fp8 ; huggingface.co/guozinan/PuLID.
+if ($Pulid) {
+    Info "PuLID-Flux face-identity (balazik/ComfyUI-PuLID-Flux, FLUX.1-dev) — pulls a NON-GATED ~17GB FLUX fp8 base (Kijai unet + t5xxl/clip_l/ae); node is Alpha/stale (node-load is the on-GPU step); SHARES InstantID's antelopev2"
+    Ensure-WinGet "Git.Git" "git"
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        # 1) the node (balazik/ComfyUI-PuLID-Flux — Alpha V0.1.0, last commit 2024-10-03; the only viable node, but
+        #    INSTALL-ONLY: do NOT promise it loads on a current ComfyUI without the on-GPU load test). NOT the
+        #    sipie800 Enhanced fork (formally discontinued 2025-10-07).
+        $puNode = Join-Path $nodes "ComfyUI-PuLID-Flux"
+        if (-not (Test-Path $puNode)) { Info "installing PuLID-Flux node ..."; Git-Clone https://github.com/balazik/ComfyUI-PuLID-Flux $puNode } else { Ok "PuLID-Flux node present" }
+        # 2) its python deps (same 3-candidate comfy-python probe Foley/InstantID/InfiniteTalk use). onnxruntime-gpu
+        #    ONLY (NOT plain onnxruntime too): the same EP-namespace clash documented in the InstantID block — with
+        #    both present the CPU build can win the `onnxruntime` module namespace so CUDAExecutionProvider silently
+        #    fails to register and antelopev2 falls back to slow CPU. insightface is SHARED with InstantID, so this
+        #    is a no-op pip if -FaceId already ran.
+        $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
+            ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($cpy) { Info "installing PuLID-Flux python deps (facexlib + insightface + onnxruntime-gpu) ..."; & $cpy -m pip install facexlib insightface onnxruntime-gpu | Out-Null; Ok "PuLID-Flux deps installed" }
+        else { Warn "PuLID-Flux deps: run  <comfy-python> -m pip install facexlib insightface onnxruntime-gpu  manually" }
+
+        $cmodels = Join-Path $swarm "dlbackend\comfy\ComfyUI\models"
+
+        # 3) the NON-GATED FLUX fp8 base (~17GB) — Kijai's ungated fp8 UNET + ae + comfyanonymous's ungated t5xxl/clip_l.
+        #    SwarmUI maps the ComfyUI dirs: fp8 unet -> diffusion_models\, t5xxl/clip_l -> clip\, ae -> vae\.
+        #    (NOT black-forest-labs/FLUX.1-dev — that one IS hard-gated behind a license click-through, not scriptable;
+        #    Comfy-Org/flux1-dev is license-restricted (FLUX.1 [dev] Non-Commercial) but technically scriptable, yet
+        #    its full-precision all-in-one is a poor 32GB fit — Kijai's ~17GB fp8 footprint is the practical 32GB path.
+        #    Kijai/flux-fp8 + comfyanonymous/flux_text_encoders are verified ungated.)
+        $diffDir = Join-Path $cmodels "diffusion_models"; New-Item -ItemType Directory -Force $diffDir | Out-Null
+        $clipDir = Join-Path $cmodels "clip";             New-Item -ItemType Directory -Force $clipDir | Out-Null
+        $vaeDir  = Join-Path $cmodels "vae";              New-Item -ItemType Directory -Force $vaeDir  | Out-Null
+        Get-Model "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors"                      (Join-Path $diffDir "flux1-dev-fp8.safetensors")          # 11.9 GB fp8_e4m3fn UNET (ungated)
+        Get-Model "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors" (Join-Path $clipDir "t5xxl_fp8_e4m3fn.safetensors")       # 4.9 GB FLUX T5 text-encoder (ungated)
+        Get-Model "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"          (Join-Path $clipDir "clip_l.safetensors")                 # 246 MB CLIP-L (ungated)
+        Get-Model "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux-vae-bf16.safetensors"                      (Join-Path $vaeDir "flux-ae.safetensors")                 # 168 MB FLUX VAE (Kijai's bf16, ungated)
+
+        # 3-bis) the PuLID-Flux model (guozinan/PuLID is NON-GATED) — the NEWER v0.9.1. -> models\pulid\. The
+        #        EVA02-CLIP (EVA02_CLIP_L_336_psz14_s6B.pt) the node AUTO-downloads on first run (~600MB), so it is
+        #        not pre-fetched here.
+        $puDir = Join-Path $cmodels "pulid"; New-Item -ItemType Directory -Force $puDir | Out-Null
+        Get-Model "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors"                  (Join-Path $puDir "pulid_flux_v0.9.1.safetensors")        # 1.14 GB (ungated)
+
+        # 4) antelopev2 face encoder — SHARED with the InstantID -FaceId block (5h-bis): the balazik README target is
+        #    EXACTLY this same models\insightface\models\antelopev2 path. So GUARD on the SAME glintr100.onnx sentinel
+        #    the InstantID block uses — if -FaceId already populated it, SKIP the download (no re-download / shadow
+        #    across the two paths). If only -Pulid runs, fetch the SAME MonsterMMORPG mirror zip InstantID uses.
+        $insDir = Join-Path $cmodels "insightface\models\antelopev2"; New-Item -ItemType Directory -Force $insDir | Out-Null
+        $anteZip = Join-Path $insDir "antelopev2.zip"
+        $anteOk  = Join-Path $insDir "glintr100.onnx"   # sentinel: shared with the InstantID block — present => skip
+        if (-not (Test-Path $anteOk)) {
+            Get-Model "https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip" $anteZip
+            if (Test-Path $anteZip) {
+                Info "unzipping antelopev2 face encoder ..."
+                try { Expand-Archive -Path $anteZip -DestinationPath $insDir -Force; Remove-Item $anteZip -Force -ErrorAction SilentlyContinue; Ok "antelopev2 unzipped -> $insDir" }
+                catch { Warn "antelopev2 unzip failed ($($_.Exception.Message)); the PuLID-Flux node can auto-download it on first run instead" }
+            } else { Warn "antelopev2 mirror unreachable; the PuLID-Flux node can auto-download it on first run instead" }
+        } else { Ok "antelopev2 present (shared with InstantID -FaceId — not re-downloaded)" }
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -Pulid after it installs" }
+
+    # 5) workflow registration — GATED on the JSON existing. No authoritative SwarmUI-API PuLID.json is sourceable
+    #    (balazik's examples/ are UI-graphs, not API-prompt) — it is the on-GPU authoring step (see the header
+    #    comment + docs/decisions.md). Until media-assets\PuLID.json is authored + validated on a live GPU (which
+    #    must FIRST verify the Alpha/stale node even LOADS on the current ComfyUI), copy nothing and Warn (same
+    #    Test-Path posture as Foley/InstantID/InfiniteTalk). Once committed it rides the existing
+    #    doki gen -Pulid -InitImage <face.png>  hook (comfyuicustomworkflow=PuLID), no C#/recipe change.
+    $puWf  = Join-Path $root "media-assets\PuLID.json"
+    $puCwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\PuLID.json"
+    if (Test-Path $puWf) { New-Item -ItemType Directory -Force (Split-Path $puCwf) | Out-Null; Copy-Item $puWf $puCwf -Force; Ok "PuLID workflow installed" }
+    else { Warn "media-assets\PuLID.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
+
+    Ok "PuLID-Flux ready -> node + weights installed (~17GB non-gated FLUX fp8 base + pulid_flux v0.9.1; antelopev2 shared with -FaceId). On-GPU LABELED: FIRST verify the Alpha/stale balazik node LOADS on the current ComfyUI, THEN author the workflow JSON + confirm render quality. Run via  doki gen -Pulid -InitImage <face.png> '<prompt>'  once authored."
 }
 
 # 5h-quater. Nunchaku NVFP4 speed runtime (GATED sidecar, -Nunchaku) — mirrors the Foley/InstantID/InfiniteTalk
