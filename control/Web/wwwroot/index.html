@@ -76,6 +76,10 @@
     .bub.user{align-self:flex-end;background:var(--surface3);border:1px solid var(--border)}
     .bub.assistant{align-self:flex-start;background:var(--surface2);border:1px solid var(--border)}
     .bub.assistant.err{border-color:var(--gold);color:var(--gold)}
+    /* P4 voice readback: a tiny speaker button per assistant bubble (font-size:0 on the bubble would clip glyphs — keep it inline) */
+    .bub .tts{background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:0 0 0 6px;line-height:1;vertical-align:baseline}
+    .bub .tts:hover{color:var(--cyan)}
+    .bub .tts:disabled{cursor:default;opacity:.7}
   </style>
 </head>
 <body>
@@ -240,6 +244,7 @@
           <input id="newPersonaName" class="kin" style="width:200px" placeholder="name">
           <textarea id="newPersonaSystem" class="kin" style="flex:1;min-height:60px" placeholder="system / behavior (uncensored)"></textarea>
           <label class="hint">lorebook <select id="newPersonaLorebook" class="kin" style="width:auto"><option value="">none</option></select></label>
+          <label class="hint">voice <select id="newPersonaVoice" class="kin" style="width:auto"><option value="">default</option></select></label>
           <button class="ghost" onclick="savePersona()">Save</button>
           <span class="hint" id="newPersonaHint"></span>
         </div>
@@ -396,7 +401,7 @@
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
-      if (v==='chat') { loadPersonas(); loadLorebooks(); loadThreads(); renderChatGuard(); document.getElementById('chatInput').focus(); }
+      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); renderChatGuard(); document.getElementById('chatInput').focus(); }
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];
@@ -1236,31 +1241,68 @@
     // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
     let _chatMsgs=[], _chatConv=null;
     function appendBubble(role,text){ const log=document.getElementById('chatLog');
-      const b=$(`<div class="bub ${role}"></div>`); b.textContent=text||''; log.appendChild(b); log.scrollTop=log.scrollHeight; return b; }
+      const b=$(`<div class="bub ${role}"></div>`);
+      if(role==='assistant'){
+        // Assistant bubbles keep their text in a dedicated span so the 🔊 button is a sibling (never wiped by
+        // streaming's text writes) and readback reads ONLY the spoken text (no button glyph). _text = that span.
+        const span=document.createElement('span'); span.textContent=text||''; b.appendChild(span); b._text=span;
+        const tts=$(`<button class="tts" type="button" title="Read aloud" aria-label="Read aloud">🔊</button>`);
+        tts.onclick=()=>readBubble(tts, b); b.appendChild(tts);
+      } else { b.textContent=text||''; }
+      log.appendChild(b); log.scrollTop=log.scrollHeight; return b; }
+    // P4 voice readback — synth the assistant bubble's final text via the existing POST /api/speak (Chatterbox :8004)
+    // and play it. Voice = the selected persona card's default voice, or '' (server default). Degrades quietly when
+    // TTS is down (503): a brief inline note + a 'tts down' bubble hint; the chat itself is never broken.
+    async function readBubble(btn, bub){
+      const span=bub._text||bub; const text=(span.textContent||'').trim();
+      if(!text || btn.disabled) return;
+      const prev=btn.textContent; btn.disabled=true; btn.textContent='⏳';
+      const hint=document.getElementById('chatHint'); const prevHint=hint?hint.textContent:'';
+      try{
+        const r=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ text, voice:personaVoice() })});
+        if(!r.ok){ // 503 = TTS service down (agent mode carries tts:8004; media mode does not) — degrade, don't break.
+          let msg='voice unavailable'; try{ const j=await r.json(); if(j&&j.error) msg=j.error; }catch{}
+          if(hint) hint.textContent=msg; return;
+        }
+        const j=await r.json();
+        if(j&&j.mediaUrl){ try{ new Audio(j.mediaUrl).play(); }catch{} if(hint) hint.textContent=prevHint; }
+      }catch{ if(hint) hint.textContent='voice request failed'; }
+      finally{ btn.disabled=false; btn.textContent=prev; }
+    }
     function renderThread(conv){
       _chatConv=conv?conv.id:null; _chatMsgs=(conv&&conv.messages)?conv.messages.map(m=>({role:m.role,content:m.content})):[];
       const log=document.getElementById('chatLog'); log.innerHTML='';
       _chatMsgs.forEach(m=>appendBubble(m.role==='assistant'?'assistant':'user', m.content));
       document.getElementById('chatHint').textContent='';
     }
+    // Loaded persona cards (full PersonaCard objects from GET /api/personas) cached so readback can derive the
+    // selected card's default voice with no extra fetch. Keyed by card name.
+    let _personaCards={};
     async function loadPersonas(){
       const sel=document.getElementById('chatPersona'); const cur=sel.value;
       try{ const list=await (await fetch('/api/personas')).json();
-        sel.innerHTML='<option value="">default</option>';
-        (list||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.name; o.textContent=c.name; sel.appendChild(o); });
+        sel.innerHTML='<option value="">default</option>'; _personaCards={};
+        (list||[]).forEach(c=>{ _personaCards[c.name]=c; const o=document.createElement('option'); o.value=c.name; o.textContent=c.name; sel.appendChild(o); });
         sel.value=cur;
       }catch{}
+    }
+    // The selected persona's default readback voice (PersonaCard.Voice → camelCase 'voice'); '' = server default.
+    function personaVoice(){
+      const sel=document.getElementById('chatPersona'); const c=sel?_personaCards[sel.value]:null;
+      return (c&&c.voice)?c.voice:'';
     }
     async function savePersona(){
       const name=document.getElementById('newPersonaName').value.trim();
       const system=document.getElementById('newPersonaSystem').value.trim();
       const lorebook=document.getElementById('newPersonaLorebook').value;
+      const voice=document.getElementById('newPersonaVoice').value;   // P4: PersonaCard.Voice (case-insensitive bind); '' = server default
       const h=document.getElementById('newPersonaHint');
       if(!name){ h.textContent='name it first'; return; }
       try{
-        // PersonaCard body (case-insensitive bind); P0 collects name + system, P3 adds the lorebook ref — the rest stay null/empty.
+        // PersonaCard body (case-insensitive bind); P0 collects name + system, P3 adds the lorebook ref, P4 adds voice — the rest stay null/empty.
         const r=await fetch('/api/personas',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({name, system, persona:'', greeting:'', examples:'', lorebook})});
+          body:JSON.stringify({name, system, persona:'', greeting:'', examples:'', lorebook, voice})});
         if(!r.ok){ h.textContent='bad persona name'; return; }
         const sel=document.getElementById('chatPersona'); sel.value=name;   // preserved across loadPersonas()
         await loadPersonas();
@@ -1274,6 +1316,17 @@
         sel.innerHTML='<option value="">none</option>';
         (list||[]).forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
         sel.value=cur;
+      }catch{}
+    }
+    // P4: populate the persona-form voice picker from GET /api/voices (blank "default" lead + each registered voice).
+    // Lazy + idempotent — loaded in the same chat init path as personas/lorebooks; reuses the /api/voices registry.
+    let _personaVoicesLoaded=false;
+    async function loadPersonaVoices(){
+      if(_personaVoicesLoaded) return; const sel=document.getElementById('newPersonaVoice'); if(!sel) return;
+      try{ const vs=await (await fetch('/api/voices')).json();
+        sel.innerHTML='<option value="">default</option>';
+        (vs||[]).forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+        _personaVoicesLoaded=true;
       }catch{}
     }
     // One editable lore-entry row: keys (comma-separated) + content + an enabled checkbox.
@@ -1368,10 +1421,10 @@
           let ev='', data='';
           frame.split('\n').forEach(ln=>{ if(ln.startsWith('event:')) ev=ln.slice(6).trim();
             else if(ln.startsWith('data:')) data+=(data?'\n':'')+ln.slice(5).replace(/^ /,''); });
-          if(ev==='error'){ bub.classList.add('err'); bub.textContent=data||'LLM not reachable — start agent mode first'; errored=true; hint.textContent=''; }
+          if(ev==='error'){ bub.classList.add('err'); (bub._text||bub).textContent=data||'LLM not reachable — start agent mode first'; errored=true; hint.textContent=''; }
           else if(ev==='done'){ done=true; }
           else if(ev==='meta'){ try{ const m=JSON.parse(data); if(m&&m.conversation) _chatConv=m.conversation; }catch{} }
-          else if(data){ try{ const t=JSON.parse(data).t; if(typeof t==='string'){ got=true; acc+=t; bub.textContent+=t; log.scrollTop=log.scrollHeight; } }catch{} }
+          else if(data){ try{ const t=JSON.parse(data).t; if(typeof t==='string'){ got=true; acc+=t; (bub._text||bub).textContent+=t; log.scrollTop=log.scrollHeight; } }catch{} }
         };
         // Drain every COMPLETE '\n\n'-terminated frame currently buffered (leaves any partial tail in buf).
         const drain=()=>{ let nl; while((nl=buf.indexOf('\n\n'))>=0){ const frame=buf.slice(0,nl); buf=buf.slice(nl+2); handleFrame(frame); } };
