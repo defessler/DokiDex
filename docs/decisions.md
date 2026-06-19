@@ -1,5 +1,77 @@
 # Decision log
 
+## 2026-06-19 — TRUE real-time (StreamDiffusion/LCM) follow-up to the shipped live canvas → **DEFER** (evaluated, not built)
+
+The v0.11 **F2** ask was a *true* multi-fps (~30 fps) real-time canvas, the StreamDiffusion/LCM
+follow-up to the **shipped** real-time canvas — which is an **honest per-POST Z-Image-Turbo img2img
+loop at ~1-3 renders/sec** (each debounced stroke-batch rides the existing `GenerationJobs` single-flight
+`_gpu` gate as an **Ephemeral** `GenJob`: writes to `%TEMP%`, skips the Library sidecar via
+`GenJob.ShouldPersist`, hidden from `Recent()` via `GenJob.FilterRecent`; the underlying gen is
+`SwarmGen.RunAsync`'s one-WS-per-render `GenerateText2ImageWS` path). **Decision-rule branch taken:
+DEFER** — record the honest evaluation, make **NO** install/recipe/C# change, keep the shipped per-POST
+canvas byte-for-byte the default. Three grounded reasons it is **not** worth it for a single-user 32GB box:
+
+- **The fps win is gated on a quality drop already rejected.** The published StreamDiffusion 30–91 fps
+  numbers (91 fps SD-Turbo on a 4090; 100+ fps with large batches) are **SD-Turbo- / SD1.5-class** (SD-Turbo
+  is distilled **SD2.1**, `stabilityai/sd-turbo`; the genuinely-SD1.5 path is the LCM alt, dreamshaper-7 +
+  lcm-lora-sdv1-5) and the headline fps **requires TensorRT engine compilation** (the upstream
+  `StreamDiffusionTensorRTEngineLoader` node; note the paper's ~59.6× at 1 step is attributed to *all* its
+  proposed strategies combined with mature acceleration tooling, **not** TensorRT in isolation — but without
+  engine compilation the real-time fps is not reached). Either path is a meaningful step down from **Z-Image**,
+  which this very log (the `-Nunchaku` / Z-Image entries above) confirms as DokiDex's **#1 photoreal default +
+  real-time-canvas base**. So true real-time means shipping a *second, worse-looking* model **and** maintaining
+  a per-resolution/per-GPU TensorRT build step (brittle, on-GPU). Sources (fps/quality claims are upstream,
+  not independently benchmarked here): https://arxiv.org/pdf/2312.12491 ; https://huggingface.co/stabilityai/sd-turbo
+
+- **True real-time is a NEW ARCHITECTURE, not a workflow.** The maintained real-time line
+  (`livepeer/comfystream` + `livepeer/ComfyUI-Stream-Pack` + `pschroedl/ComfyUI-StreamDiffusion`, the
+  StreamDiffusion V2 / Daydream lineage; upstream `cumulo-autumn/StreamDiffusion`) is a **persistent
+  WebRTC server** that keeps the diffusion pipeline **RESIDENT in VRAM** and streams frames
+  bidirectionally. That is the *opposite* of DokiDex's per-POST model (open WS → send one `-BodyOnly`
+  body → drain `gen_progress`/`preview` → first image/error frame is terminal → close → download
+  artifact, all in `SwarmGen.cs`). You **cannot** reach 30 fps by POSTing faster: the entire speedup
+  comes from **not** reloading/re-encoding per frame, which the runner does *by construction* (fresh
+  `GetNewSession` + full per-prompt graph every render = structurally per-frame-cold). Reaching it needs
+  a **large new subsystem**: a long-lived resident-pipeline service + a persistent WS/WebRTC streaming
+  endpoint + a new GPU-ownership model (vs the single-flight `_gpu` gate) + new lifecycle/teardown —
+  bypassing `GetNewSession`/`GenerateText2ImageWS` entirely. A per-POST StreamDiffusion-*checkpoint*
+  render WOULD run through the existing `comfyuicustomworkflow` runner, but that delivers only a
+  **faster still**, NOT the resident 30 fps stream F2 wants.
+
+- **The ~1–3 fps you have is already "good enough" interactive AND strictly better-looking.** For a
+  single user sketching, ~1–3 renders/sec of **Z-Image** quality beats 30 fps of SD-Turbo quality for
+  almost every real use, and the 32GB box can't trivially hold a resident StreamDiffusion engine +
+  TensorRT build + the rest of the media stack hot.
+
+**Node maturity (the weak point, recorded honestly so a future revisit doesn't re-discover it):**
+`jesenzhang/ComfyUI_StreamDiffusion` is **dead/dormant** (155★, 13 commits, "input latent not
+implemented", img2img needs `batch_size=1`) — do not build on it. `ryanontheinside/ComfyUI_RealtimeNodes`
+is **utility-only** (active 81★, but explicitly **no** StreamDiffusion/LCM pipeline — value/motion/MediaPipe
+control + FPS-overlay nodes). The real path — `pschroedl/ComfyUI-StreamDiffusion` (~6★, niche) **with**
+`livepeer/comfystream` (a WebRTC **server**, not a plain node) + `ComfyUI-Stream-Pack` — is exactly the
+heavy resident-pipeline subsystem above, not a Foley/InstantID-style node clone.
+
+**Verified shopping list, kept ON ICE (no `setup.ps1`/`doki-gen.ps1` change made):** a light 32GB-feasible
+model is `sd_turbo.safetensors` (**5.21 GB verified single-file**,
+https://huggingface.co/stabilityai/sd-turbo/resolve/main/sd_turbo.safetensors → `models/checkpoints`); the
+LCM alternative is an SD1.5 base (e.g. `Lykon/dreamshaper-7`) + `latent-consistency/lcm-lora-sdv1-5`
+(~135 MB → `models/loras`). **Either way you ALSO need on-GPU TensorRT engine compilation** for the
+headline fps (per `StreamDiffusionTensorRTEngineLoader`) — flagged on-GPU/brittle the same way the
+InfiniteTalk block flags its unconfirmed 32GB fit. Even a clean gated `-RealtimeFast` **install** (node +
+`sd_turbo` + a `comfyuicustomworkflow=RealtimeFast` alias, exactly the `-FaceId`/`-InfiniteTalk` posture)
+would only ship the **faster-still** kind — it does **not** deliver real-time — and would still introduce a
+second, lower-quality model whose only F2 value is unlockable by the deferred resident-pipeline build. So
+shipping it now buys a quality regression for no real-time payoff; that is why the install is **deferred too**,
+not just the wiring.
+
+**What would flip this to WIRE:** a future **Z-Image-Turbo** (or **Nunchaku NVFP4 Z-Image**) distilled UNet
+that is **StreamDiffusion/LCM-compatible** — the quality objection evaporates and the resident-pipeline
+build (resident service + persistent WS/WebRTC transport + new GPU-ownership model + the repointing of the
+browser live-canvas loop) becomes worth scheduling. Until then, the cheap intermediate win is the
+**existing** path pushed harder (lower steps/res on the ephemeral render, keep SwarmUI warm) — same
+architecture, no new model, no quality regression. The shipped per-POST Z-Image live canvas + its
+live-loop JS stay the untouched default.
+
 ## 2026-06-19 — Chat surface built out P2→Pn + shipped (v0.7.0); anime SDXL pack added; remaining model-adds gated
 
 Drove `feat/chat-phases` through the design's full phase plan via ultracode (per-phase
