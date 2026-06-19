@@ -234,6 +234,85 @@ the wiring (the one unknown that could turn the thin wire into authoring a workf
 additive-override path end-to-end); (3) the exact **NVFP4 step/cfg band** + the distilled-vs-base call on Klein at fp4;
 (4) the **real Blackwell speedup** vs the bf16/GGUF path on this 32GB box.
 
+**Update — TTS-Audio-Suite SHIPPED as INSTALL-WIRING ONLY (a GATED ALTERNATIVE; the per-engine workflow JSON deferred
+to on-GPU authoring).** This was the LAST and MOST-DIVERGENT model-add on the gated-follow-ups list — a 15-engine TTS
+node (`diodiogod/TTS-Audio-Suite`, code license **MIT**) that bundles ChatterBox/F5/VibeVoice/Higgs v2+v3/**IndexTTS-2**/
+Step-Audio/CosyVoice3/Qwen3-TTS/MOSS/Granite/Echo/Dots + **RVC** voice-conversion. The architecture decision the
+2026-06-18 note flagged is now **resolved and recorded**.
+
+**ARCHITECTURE — it is a GATED ALTERNATIVE, NOT a replacement for the `:8004` speech path.** DokiDex's TTS is the
+**standalone Chatterbox server** (`devnen/Chatterbox-TTS-Server`, installed by `-Tts`) on `:8004` — `control/Web/Tts.cs`
+`Base=http://127.0.0.1:8004`, `POST /v1/audio/speech`, and the `/api/speak` endpoint Chat P4 voice-readback reuses. It
+lives in the **LLM/llama-swap group** and **COEXISTS WITH CHAT** (voice readback works while the coder model is loaded,
+**no GPU-exclusivity**) — a **load-bearing property of the chat surface**. TTS-Audio-Suite is a **ComfyUI node** that runs
+inside SwarmUI's **media group, GPU-EXCLUSIVE with the LLM on 32GB** (2026-06-13). So routing speech through it would
+**evict the LLM to media mode just to speak a line** — a real ergonomic regression for the primary chat-with-voice use
+case. Its incremental value (IndexTTS-2 duration/emotion, Higgs v3's 100+ langs, RVC voice-changer) is **quality/feature
+niceties for an explicit opt-in flow**, not a missing capability — DokiDex already has uncensored zero-shot voice cloning
++ a pronunciation lexicon + multi-speaker dialogue concat over Chatterbox. **So `:8004` stays the coexisting default,
+BYTE-FOR-BYTE UNTOUCHED** (no new branch in `SynthBytesAsync`, no engine param on `SpeakRequest`); the suite is an opt-in
+**media-group alternative** the user picks by mode + flag.
+
+**Decision-rule branch taken (the 2nd branch — same as InstantID/InfiniteTalk): node verified, but NO authoritative
+SwarmUI-hook-ready workflow JSON is sourceable → wire ONLY the gated install + the kind alias + this note; do NOT
+blind-author a workflow JSON.** The suite's `example_workflows` (the "🌈 IndexTTS-2 integration.json", "Higgs Audio v3
+Integration.json", etc.) are ComfyUI **UI-GRAPH** exports (top-level `id`/`nodes`/`links`/`groups`/`config`) — VERIFIED by
+fetching the raw IndexTTS-2 integration JSON — **not** SwarmUI's flat **API-prompt** `CustomWorkflows` format. Identical
+wall to InstantID (`examples/InstantID_basic.json`) and InfiniteTalk (Kijai's `example_workflows`). So the runnable
+per-engine `media-assets\TtsSuite-<engine>.json` (e.g. `TtsSuite-IndexTTS2.json` / `TtsSuite-Higgs.json`) are the **on-GPU
+authoring step** (load the UI-graph live → convert to API-prompt → rewire the text/voice/output injection points →
+validate a render). Cite: `github.com/diodiogod/TTS-Audio-Suite/tree/main/example_workflows` (UI-graph, not API-prompt).
+
+**Shipped (the gated install only):** a **`-TtsSuite`** sidecar switch on `setup.ps1` (mirrors `-FaceId`/`-InfiniteTalk`/
+`-Nunchaku`) that clones the node into `custom_nodes\TTS-Audio-Suite` and pip-installs its requirements via the same
+3-candidate comfy-python probe with the `$cpy`/else **Warn graceful-degradation** fallback. **No weights are pre-fetched:**
+the suite's README states **ALL 15 engines AUTO-DOWNLOAD their own models on first node-use** (into the node's
+`models\TTS\<engine>` convention), so `-TtsSuite` ships the node + its deps and lets each engine fetch its **complete,
+current** file set lazily on the first `-Speak` that runs it. *(An earlier opt-in `-Models full` pre-fetch of **IndexTTS-2**
+via `hf download IndexTeam/IndexTTS-2` and **Higgs v3** via a lone `model.safetensors` Get-Model off a `$hg`
+`bosonai/higgs-audio-v3-tts-4b` base was **REMOVED**: it had two footguns — Higgs was **half-pinned** (only the 9.31GB
+weight, not its `model.safetensors.index.json`/`config.json`/tokenizer siblings, so a sharded-aware loader could refuse a
+lone file), and the IndexTTS-2 idempotency gate keyed only on `Test-Path gpt.pth`, so an interrupted multi-file pull looked
+"complete" and never resumed. Auto-download-on-first-use eliminates **both** — there is no half-pinned/partial-pull risk and
+no tier gate to reason about. Sizes are still license-noted in the setup header for awareness: IndexTTS-2 ~5.9GB, Higgs v3
+9.31GB.)* **Ergonomic alias:** a new `speech` kind (`doki gen -Speak [-Engine <name>] '<text>' [-Audio <ref.wav>]`) →
+`Resolve-GenKind`→`speech` → `comfyuicustomworkflow=TtsSuite-<engine>` (the engine selects WHICH workflow JSON runs).
+The engine is normalized by **`Resolve-TtsEngine`**: strip non-alphanumerics **then case-fold through a known-engine table
+to ONE canonical casing**, so `IndexTTS-2`/`IndexTTS2`/`indextts2`/`index tts 2` ALL collapse to the **same**
+`TtsSuite-IndexTTS2` name (an unknown engine keeps its stripped, as-typed-case token, so the other ~13 engines still pass
+through); default `IndexTTS2`. *(The prior `-replace '[^A-Za-z0-9]',''` did NOT case-fold, so `indextts2` routed to a
+distinct `TtsSuite-indextts2` — a split-brain the doki-gen test now pins case-sensitively with `-ceq`.)* The text rides the
+standard `${prompt}` injection point **verbatim** (NOT the `:8013` `<mpprompt:..>` rewriter — that would rewrite the spoken
+words); an optional zero-shot reference voice clip rides **`-Audio`** on the same provisional `inputaudio` body-key
+InfiniteTalk parks. A fail-loud `-Speak requires text` guard mirrors `-Edit`/`-FaceId`; the `-Audio` kind-guard now permits
+**both** `infinitetalk` and `speech`. The workflow copy is **guarded by a `Test-Path` Warn** for `media-assets\TtsSuite-*.json`
+(identical to the Foley/InstantID/InfiniteTalk copies). **An AST-driven `setup-helpers` block** pins the node clone + a
+**removal guard that NO `hf` IndexTTS-2 pull / `$hg` Higgs var / lone `model.safetensors` Get-Model entry remains** (so the
+footguns can't creep back) + a **CONTRACT guard that the `:8004` Chatterbox server is cloned exactly ONCE** (by `-Tts`) so
+`-TtsSuite` adds no second/alternate Chatterbox path; **`doki-gen`** pins the `speech` kind/recipe, the per-engine
+workflow resolution + the **canonical case-fold** normalization, the literal-`${prompt}` placement, the
+`-Speak`-requires-text + `-Audio` guards, and a **doki.ps1 `-Speak`/`-Engine -BodyOnly` seam test**. **License caveats**
+(accurate, not the brief's assumed labels) are
+printed in the setup header: **IndexTTS-2** = bilibili **INDEX license** (PERMITS commercial use for individuals/small orgs;
+separate license only above 100M MAU OR RMB 1B/yr; bars using it to improve other models — **fully fine** single-user, the
+LESS restrictive of the two); **Higgs Audio v3** = Boson **Research/Non-Commercial** (single-user/local OK; bars
+non-consensual voice cloning); **Echo-TTS** = CC-BY-NC-SA; RVC/most others permissive.
+
+**On-GPU / LABELED confirms (render-unverified at rest — no GPU in CI):** (1) the engines **auto-download** their weights
+on first node-use into the node's `models\TTS\<engine>` convention (inferred from the suite's conventions; setup pre-fetches
+nothing, so there is no half-pinned/partial-pull risk to confirm); (2) **whether SwarmUI's image/video-centric CustomWorkflow runner can host a
+pure-TTS node returning a WAV at all** — its custom-workflow path may need an audio-output-node mapping that doesn't exist
+out of the box; this is a **genuine risk the on-GPU step must settle BEFORE promising the `-Speak` route end-to-end**; (3)
+the per-engine **audio-input/text injection node names** (pinned when the workflow is authored). **Honest verdict:** marginal
+value for a single user, and the GPU-exclusivity regresses nothing only because we **did NOT** wire it into the coexisting
+chat path — the right call per the repo's own discipline is **install-only + on-GPU-flag**, keeping `:8004` the default and
+deferring the workflow wiring rather than blind-authoring it. Suite green throughout (PS doki-gen **237→243**, setup-helpers
+**104→108** — the close-review pass dropped the fragile IndexTTS-2/Higgs weight pre-fetch in favour of the node's
+auto-download and added a canonical case-fold to the engine normalization; C# **456** unchanged — no C#/Tts.cs/api-speak/chat
+change); Debug+Release `--no-incremental` clean. **Every
+existing path is byte-for-byte unchanged** (the `speech` kind + the `-Speak`/`-Engine` plumbing are purely additive; no
+default/URL/catalog row/`:8004` behaviour changed).
+
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 
 ## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present

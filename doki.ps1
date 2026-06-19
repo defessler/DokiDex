@@ -23,6 +23,7 @@ param(
     [switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley,
     [switch]$FaceId,   # InstantID face-identity transfer (SDXL) — pass the reference face as -InitImage; needs setup.ps1 -FaceId + the on-GPU InstantID workflow
     [switch]$InfiniteTalk,   # audio-driven talking-video (MeiGen InfiniteTalk on Wan2.1-I2V-14B) — portrait via -InitImage, audio via -Audio; needs setup.ps1 -InfiniteTalk + the on-GPU InfiniteTalk workflow (~82GB base)
+    [switch]$Speak,   # GATED TTS-Audio-Suite alternative speech (15 engines + RVC), run in the GPU-exclusive media group — text is the gen idea, optional zero-shot ref voice via -Audio, engine via -Engine. Needs setup.ps1 -TtsSuite + the on-GPU TtsSuite-<engine> workflow. Does NOT touch the coexisting-with-chat :8004 Chatterbox default.
     [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
     [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
     [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
@@ -31,7 +32,8 @@ param(
     [string]$EndImage, [switch]$Reference, [double]$RefWeight = 0.6,
     [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
     [string]$InitImage, [string]$MaskImage, [string]$Out,
-    [string]$Audio   # -InfiniteTalk audio clip (wav/mp3) — the driving voice; required for -InfiniteTalk alongside -InitImage <portrait>
+    [string]$Audio,   # -InfiniteTalk driving voice (wav/mp3, required), OR -Speak optional zero-shot reference voice clip
+    [string]$Engine   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...) -> the TtsSuite-<engine> custom workflow
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -385,10 +387,10 @@ switch ($Command) {
         & python (Join-Path $serving "memory-mcp\code_index.py") $root
     }
     "gen" {
-        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-FaceId|-InfiniteTalk] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Raw] [-Out <file>] [-NoOpen]" }
+        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-FaceId|-InfiniteTalk|-Speak] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Engine <tts-engine>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
-        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -FaceId:$FaceId -InfiniteTalk:$InfiniteTalk
-        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlNets $ControlNets -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $Tile -Model $Model -InitImage $InitImage -MaskImage $MaskImage -Audio $Audio -Out $Out -BodyOnly:$BodyOnly
+        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -FaceId:$FaceId -InfiniteTalk:$InfiniteTalk -Speak:$Speak
+        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Engine $Engine -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlNets $ControlNets -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $Tile -Model $Model -InitImage $InitImage -MaskImage $MaskImage -Audio $Audio -Out $Out -BodyOnly:$BodyOnly
         if ($BodyOnly) { $genResult } else { $null = $genResult }   # -BodyOnly prints the GenerateText2Image body JSON for the web host (live-progress WS path)
     }
     "test" {

@@ -405,6 +405,53 @@ try {
     # it is the fp4 (Blackwell NVFP4) build, NOT an int4 pre-Blackwell rank variant, and NOT a Lightning distill
     Assert ($eZTurboNv -and $eZTurboNv.File -match '(?i)fp4' -and $eZTurboNv.File -notmatch '(?i)int4|lightning') "Nunchaku: the fetched Z-Image-Turbo file is the svdq-fp4 (Blackwell NVFP4) build, not an int4/Lightning variant"
 
+    Write-Host "`nTTS-Audio-Suite (-TtsSuite): diodiogod node clone; engines AUTO-DOWNLOAD weights on first use (no fragile pre-fetch)"
+    # The GATED TTS sidecar (-TtsSuite) is the repo's most-divergent model-add: a 15-engine ComfyUI node that is a
+    # GATED ALTERNATIVE to the standalone :8004 Chatterbox server (which stays the coexisting-with-chat default,
+    # BYTE-FOR-BYTE untouched). Decision-rule branch: node verified, but the suite's example_workflows are ComfyUI
+    # UI-GRAPHS (not SwarmUI API-prompt CustomWorkflows), so this block wires ONLY the gated install (node clone +
+    # pip deps); the runnable per-engine TtsSuite-*.json is the on-GPU authoring step (see docs/decisions.md). What
+    # -TtsSuite PROVIDES is the node + its python deps; the per-engine weights are NOT pre-fetched — the suite's
+    # README states ALL 15 engines AUTO-DOWNLOAD their own models on first node-use. The earlier opt-in pre-fetch of
+    # IndexTTS-2 (via `hf`) and Higgs v3 (a lone model.safetensors via Get-Model) was REMOVED: it was two footguns —
+    # (a) Higgs was HALF-PINNED (only the weight, not its index.json/config/tokenizer siblings, so a sharded loader
+    # could fail to load a lone file) and (b) IndexTTS-2's idempotency gate keyed only on Test-Path gpt.pth, so an
+    # interrupted multi-file pull looked "complete" and never resumed. Relying on the node's documented auto-download
+    # eliminates both. Pin: (1) the node is cloned from the diodiogod/TTS-Audio-Suite repo; (2) NO IndexTTS-2 `hf`
+    # pre-fetch and NO Higgs `$hg`/model.safetensors Get-Model entry remain in the suite block (auto-download owns
+    # the weights); (3) no committed TtsSuite-*.json is asserted (on-GPU authoring step).
+    $tsClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)diodiogod/TTS-Audio-Suite' }, $true)
+    Assert ($tsClone.Count -ge 1) "TtsSuite: setup.ps1 clones the diodiogod/TTS-Audio-Suite node (15 TTS engines + RVC)"
+
+    # AUTO-DOWNLOAD CONTRACT — the fragile weight pre-fetches are GONE. Assert the whole setup.ps1 source no longer
+    # carries the IndexTTS-2 `hf download IndexTeam/IndexTTS-2` pull, no longer defines the Higgs `$hg` base URL var,
+    # and exposes no Get-Model entry for a lone `model.safetensors` off a `$hg` base. (These guard against the
+    # half-pinned/partial-pull footguns silently creeping back in.)
+    $hfIndex = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'hf' -and
+        $x.Extent.Text -match '(?i)IndexTeam/IndexTTS-2' }, $true)
+    Assert ($hfIndex.Count -eq 0) "TtsSuite: NO IndexTTS-2 `hf download` pre-fetch remains (the node auto-downloads it on first use; the gpt.pth-only idempotency gate footgun is gone)"
+    $hgBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$hg' }, $true) | Select-Object -First 1)
+    Assert ($null -eq $hgBase) "TtsSuite: NO `$hg bosonai base URL var remains (the half-pinned Higgs model.safetensors pre-fetch was removed)"
+    $eHiggs = $entries | Where-Object { $_.File -eq 'model.safetensors' -and $_.Url -match '(?i)\$hg/' } | Select-Object -First 1
+    Assert ($null -eq $eHiggs) "TtsSuite: NO lone Higgs model.safetensors Get-Model entry remains (auto-download fetches the FULL set: weight + index.json + config + tokenizer)"
+
+    # CONTRACT GUARD — the gated alternative must NOT touch the :8004 Chatterbox default. The -TtsSuite block lives
+    # entirely in setup.ps1 (a ComfyUI node install); it must NOT re-point/edit the devnen Chatterbox-TTS-Server
+    # clone, the :8004 bind, or the /v1/audio/speech path. Assert the suite block introduces no devnen/8004 churn
+    # beyond the ONE devnen clone the separate -Tts block already owns (so the coexisting default stays byte-for-byte).
+    $devnenClones = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)devnen/Chatterbox' }, $true)
+    Assert ($devnenClones.Count -eq 1) "TtsSuite: the :8004 Chatterbox server is cloned exactly ONCE (by -Tts) — -TtsSuite adds NO second/alternate Chatterbox path (the coexisting default stays untouched)"
+
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
     Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"

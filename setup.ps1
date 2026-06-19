@@ -19,6 +19,7 @@ param(
     [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
     [switch]$FaceId,    # optional sidecar: InstantID face-identity reference (SDXL — reuses the anime Illustrious/Animagine base, no FLUX needed)
     [switch]$InfiniteTalk,  # optional sidecar: audio-driven talking-video via MeiGen InfiniteTalk on the Wan2.1-I2V-14B base — NOTE pulls an ~82GB Wan2.1 base NOT otherwise on disk
+    [switch]$TtsSuite,  # optional sidecar: TTS-Audio-Suite ComfyUI node (15 TTS engines + RVC). A GATED ALTERNATIVE to the standalone :8004 Chatterbox server (which stays the coexisting-with-chat default, untouched) — this one runs in the GPU-exclusive media group. Engines AUTO-DOWNLOAD their own weights on first use (nothing pre-fetched); the runtime workflow is the on-GPU authoring step.
     [switch]$Nunchaku,  # optional sidecar: Nunchaku NVFP4 speed runtime (wheel + ComfyUI-nunchaku node) — ~3x faster on Blackwell/RTX-50xx for the Z-Image-Turbo (the default base) + Qwen-Image NVFP4 svdq variants. +Models full fetches them. (FLUX.2 Klein NVFP4 is BFL-native FP4, fetched under -Models full, not here.)
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
     [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
@@ -904,6 +905,98 @@ if ($Nunchaku) {
     } else { Info "nunchaku NVFP4 weights skipped (re-run with -Models full to fetch the Z-Image-Turbo + Qwen-Image NVFP4 variants); node + wheel installed so any NVFP4 model is one Get-Model away" }
 
     Ok "Nunchaku ready -> NVFP4 runtime (wheel + node) installed$(if ($Models -eq 'full') { ' + Z-Image-Turbo/Qwen NVFP4 weights' }). Speeds up Z-Image-Turbo (the default base) + Qwen-Image on Blackwell (Klein NVFP4 is BFL-native FP4, under -Models full). ON-GPU LABELED: confirm the svdq loader is a plain -Model swap vs a custom workflow, the wheel/torch/CUDA match, and the real 32GB speedup."
+}
+
+# 5h-quinquies. TTS-Audio-Suite (GATED sidecar, -TtsSuite) — the 15-engine TTS + RVC ComfyUI custom node
+#     (github.com/diodiogod/TTS-Audio-Suite, code license MIT). Mirrors the Foley/InstantID/InfiniteTalk node
+#     install (Git-Clone + the 3-candidate comfy-python pip with the $cpy/else Warn graceful-degradation
+#     fallback). NO weights are pre-fetched — all 15 engines auto-download their own (complete, current) model
+#     sets on first node-use, so -TtsSuite ships the node + its deps and lets each engine fetch lazily.
+#
+#   ARCHITECTURE — this is a GATED ALTERNATIVE, NOT a replacement for the :8004 speech path. DokiDex's primary
+#   TTS is the STANDALONE Chatterbox server (devnen/Chatterbox-TTS-Server) on :8004, installed by -Tts above
+#   (control/Web/Tts.cs: Base=http://127.0.0.1:8004, POST /v1/audio/speech; the /api/speak endpoint Chat P4
+#   voice-readback reuses). It lives in the LLM/llama-swap group and COEXISTS WITH CHAT — you can hear voice
+#   readback while the coder model is loaded, with NO GPU-exclusivity. THAT path is the unconditional default
+#   and is left BYTE-FOR-BYTE UNTOUCHED. TTS-Audio-Suite is a ComfyUI node that runs INSIDE SwarmUI's media
+#   group, which is GPU-EXCLUSIVE with the LLM on 32GB (decisions.md 2026-06-13). So routing speech through it
+#   means evicting the LLM to media mode just to speak — strictly worse for the chat-with-voice use case. Its
+#   value is the EXTRA engines/features (IndexTTS-2 duration/emotion, Higgs v3's 100+ langs, RVC voice-changer)
+#   for an explicit, opt-in `doki up media` -> `doki gen -Speak` flow, NOT the everyday readback path.
+#
+#   LICENSE CAVEATS (printed in the header below; verify before any claim — accurate, not the brief's assumed labels):
+#     - Higgs Audio v3 (bosonai/higgs-audio-v3-tts-4b) = Boson "Higgs Audio v3 Research & Non-Commercial
+#       License": research/non-commercial ONLY; hosted/revenue use needs a separate commercial license; bars
+#       non-consensual voice cloning/impersonation. FINE for single-user/local. The single safetensors is 9.31GB.
+#     - IndexTTS-2 (IndexTeam/IndexTTS-2) = bilibili "INDEX model license" — NOT a flat non-commercial license:
+#       it PERMITS commercial use for individuals/small orgs; a separate bilibili license is needed ONLY above
+#       100M MAU OR RMB 1B annual revenue, and it bars using the model to improve OTHER AI models. Fully fine
+#       for DokiDex single-user (LESS restrictive than Higgs v3). Whole-dir ~5.9GB.
+#     - Echo-TTS (one of the 15 auto-download engines) = CC-BY-NC-SA (non-commercial). RVC + most others are
+#       permissive/MIT-compatible. ALL 15 engines AUTO-DOWNLOAD their own weights on first node use — setup
+#       pre-fetches NOTHING (an earlier opt-in IndexTTS-2/Higgs pre-fetch was removed: it half-pinned Higgs to a
+#       lone safetensors and used a single-file gpt.pth idempotency gate that couldn't detect a partial pull).
+#
+#   WORKFLOW IS NOT SHIPPED: the suite's example_workflows (the "🌈 IndexTTS-2 integration.json" etc.) are ComfyUI
+#   UI-GRAPH exports (top-level id/nodes/links/groups/config), NOT SwarmUI's flat API-prompt CustomWorkflows
+#   format — VERIFIED by fetching the raw IndexTTS-2 integration JSON. This is the IDENTICAL blocker InstantID /
+#   InfiniteTalk hit. So the runnable per-engine media-assets\TtsSuite-*.json (e.g. TtsSuite-IndexTTS2.json /
+#   TtsSuite-Higgs.json) are the ON-GPU authoring step (load the UI-graph live -> convert to API-prompt -> rewire
+#   the text/voice/output injection points -> validate a render). Until they exist this installs the node + deps
+#   only (engines auto-download their weights on first use) and Warns (same Test-Path posture as Foley/InstantID/
+#   InfiniteTalk). It rides the existing  doki gen -Speak
+#   -Engine <name>  hook (comfyuicustomworkflow=TtsSuite-<engine>), no C#/Tts.cs/api-speak change.
+#   Cite: github.com/diodiogod/TTS-Audio-Suite/tree/main/example_workflows (UI-graph, not SwarmUI API-prompt).
+#   ON-GPU LABELED confirms (no GPU in CI): (1) the engines AUTO-DOWNLOAD their own weights on first node-use (per
+#   the suite README) into the node's models\TTS\<engine> convention — setup pre-fetches NOTHING (no half-pinned /
+#   partial-pull risk); (2) whether SwarmUI's image/video-centric CustomWorkflow runner can host a pure-TTS node returning a WAV at all
+#   (it may need an audio-output-node mapping that doesn't exist out of the box) — settle BEFORE promising the
+#   -Speak route end-to-end; (3) the per-engine audio-input/text injection node names (the workflow authoring step).
+if ($TtsSuite) {
+    Info "TTS-Audio-Suite (diodiogod/TTS-Audio-Suite, MIT) — 15 TTS engines + RVC ComfyUI node. GATED ALTERNATIVE to the :8004 Chatterbox default (which stays the coexisting-with-chat speech path, UNTOUCHED); this runs in the GPU-exclusive media group."
+    Warn "LICENSE: IndexTTS-2 = bilibili INDEX license (commercial OK for individuals/small orgs; separate license only >100M MAU or RMB 1B/yr; no using it to improve other models). Higgs Audio v3 = Boson Research/Non-Commercial (single-user/local OK; no non-consensual voice cloning). Echo-TTS = CC-BY-NC-SA. RVC/most others permissive. Local single-user use is fine."
+    Ensure-WinGet "Git.Git" "git"
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        # 1) the node
+        $tsNode = Join-Path $nodes "TTS-Audio-Suite"
+        if (-not (Test-Path $tsNode)) { Info "installing TTS-Audio-Suite node ..."; Git-Clone https://github.com/diodiogod/TTS-Audio-Suite $tsNode } else { Ok "TTS-Audio-Suite node present" }
+        # 2) its python deps (same 3-candidate comfy-python probe Foley/InstantID/InfiniteTalk use, with the
+        #    $cpy/else Warn graceful-degradation fallback). requirements.txt covers the 15 engines' shared deps.
+        $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
+            ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+        $tsReq = Join-Path $tsNode "requirements.txt"
+        if ($cpy -and (Test-Path $tsReq)) { Info "installing TTS-Audio-Suite python deps ..."; try { Pip $cpy install -r $tsReq; Ok "TTS-Audio-Suite deps installed" } catch { Warn "TTS-Audio-Suite deps: run  <comfy-python> -m pip install -r `"$tsReq`"  manually ($($_.Exception.Message))" } }
+        else { Warn "TTS-Audio-Suite deps: run  <comfy-python> -m pip install -r `"$tsReq`"  manually" }
+
+        # 3) WEIGHTS — NOT pre-fetched. The diodiogod/TTS-Audio-Suite README states ALL 15 engines AUTO-DOWNLOAD
+        #    their own models on first node-use (into the suite's models\TTS\<engine> convention), so -TtsSuite
+        #    deliberately ships the node + its pip deps and lets each engine fetch its weights lazily on the first
+        #    `doki gen -Speak -Engine <engine>` that actually runs it. This REPLACES an earlier opt-in pre-fetch of
+        #    IndexTTS-2 (via `hf`) and Higgs v3 (a lone model.safetensors via Get-Model), which carried two footguns:
+        #    (a) Higgs was HALF-PINNED — only model.safetensors was fetched, but the HF repo also ships
+        #    model.safetensors.index.json + config.json + tokenizer files; a sharded-aware loader that sees the
+        #    index.json may refuse to load a lone weight; (b) the IndexTTS-2 idempotency gate keyed only on
+        #    Test-Path gpt.pth, so an interrupted multi-file pull (gpt.pth landed, s2mel.pth / the qwen subfolder
+        #    did not) was treated as complete and never resumed. Auto-download-on-first-use eliminates BOTH (the node
+        #    always pulls the engine's COMPLETE, current file set), so there is no half-pinned/partial-pull risk and
+        #    no -Models-full tier gate to reason about here. See docs/decisions.md (the TTS-Audio-Suite note).
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -TtsSuite after it installs" }
+
+    # 4) workflow registration — GATED on the per-engine JSON existing. No authoritative SwarmUI-API TtsSuite-*.json
+    #    is sourceable (the suite's example_workflows are UI-graphs, not API-prompt — see the header) — it is the
+    #    on-GPU authoring step (one JSON per engine, e.g. TtsSuite-IndexTTS2.json / TtsSuite-Higgs.json). Until they
+    #    exist, copy whatever IS authored and Warn for the rest (same Test-Path posture as Foley/InstantID/InfiniteTalk).
+    #    Once committed, each rides the  doki gen -Speak -Engine <engine>  hook (comfyuicustomworkflow=TtsSuite-<engine>).
+    $tsWfDir  = Join-Path $root "media-assets"
+    $tsCwfDir = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows"
+    $tsWfs = @(Get-ChildItem -Path $tsWfDir -Filter "TtsSuite-*.json" -ErrorAction SilentlyContinue)
+    if ($tsWfs.Count -gt 0) {
+        New-Item -ItemType Directory -Force $tsCwfDir | Out-Null
+        foreach ($w in $tsWfs) { Copy-Item $w.FullName (Join-Path $tsCwfDir $w.Name) -Force; Ok "TtsSuite workflow installed: $($w.Name)" }
+    } else { Warn "media-assets\TtsSuite-*.json not present (the runnable per-engine SwarmUI workflows are the on-GPU authoring step — see docs/decisions.md); node + deps installed (engines auto-download their weights on first use), workflows skipped" }
+
+    Ok "TTS-Audio-Suite ready -> node + deps installed (all 15 engines AUTO-DOWNLOAD their weights on first -Speak use — nothing pre-fetched, so no half-pinned/partial-pull risk). The :8004 Chatterbox path is UNCHANGED (still the coexisting-with-chat default). ON-GPU LABELED: author the per-engine workflow JSON, confirm SwarmUI can host a WAV-output TTS node, and pin the auto-download paths. Run via  doki up media  then  doki gen -Speak -Engine IndexTTS2 '<text>' [-Audio ref.wav]  once authored."
 }
 
 # 5i. Configure MagicPrompt -> local prompt-rewriter (:8013) HEADLESSLY via its API

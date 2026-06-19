@@ -9,7 +9,7 @@
 
 # switches -> exactly one kind, with an ambiguity guard (so `gen -Video -Music` fails loudly, not silently).
 function Resolve-GenKind {
-    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$InfiniteTalk)
+    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$InfiniteTalk, [switch]$Speak)
     $picked = @()
     if ($Video) { $picked += 'video' }
     if ($Music) { $picked += 'music' }
@@ -18,7 +18,13 @@ function Resolve-GenKind {
     if ($Foley) { $picked += 'foley' }
     if ($FaceId) { $picked += 'faceid' }
     if ($InfiniteTalk) { $picked += 'infinitetalk' }
-    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -InfiniteTalk (got: $($picked -join ', '))" }
+    # -Speak = the GATED TTS-Audio-Suite alternative speech path (15 engines + RVC), run as a ComfyUI custom
+    # workflow in the GPU-EXCLUSIVE media group. This does NOT touch the coexisting-with-chat :8004 Chatterbox
+    # default (Tts.cs / api-speak), which stays the unconditional everyday readback path — it's a different
+    # transport (HTTP server in the LLM group). -Speak is opt-in only and requires `doki up media` + the on-GPU
+    # per-engine TtsSuite-<engine> workflow (see docs/decisions.md).
+    if ($Speak) { $picked += 'speech' }
+    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -InfiniteTalk / -Speak (got: $($picked -join ', '))" }
     if ($picked.Count -eq 1) { return $picked[0] }
     return 'image'
 }
@@ -71,12 +77,33 @@ function Expand-References {
     return $sb.ToString()
 }
 
+# Normalize a -Engine string to the CANONICAL TtsSuite workflow token (the on-disk TtsSuite-<token>.json stem).
+# Two steps: (1) strip every non-alphanumeric (so 'IndexTTS-2'/'index tts 2' lose their hyphen/spaces); (2) map
+# the stripped-LOWERCASE form through a known-engine table to the ONE canonical casing. Without the case-fold,
+# 'indextts2' would route to TtsSuite-indextts2 while the default routes to TtsSuite-IndexTTS2 — two different
+# (and only one authored) filenames. The table is the suite's 15 engines; an UNKNOWN engine falls back to its
+# stripped (as-typed-case) token, so any not-yet-tabled engine still gets a TtsSuite-<engine> name. Canonical
+# casings match the suite's own engine labels so the on-GPU-authored JSON can be named to match 1:1.
+function Resolve-TtsEngine {
+    param([Parameter(Mandatory)][string]$Engine)
+    $stripped = $Engine -replace '[^A-Za-z0-9]', ''
+    $canon = @{
+        indextts2  = 'IndexTTS2'; higgs = 'Higgs'; rvc = 'RVC'; chatterbox = 'ChatterBox'
+        f5         = 'F5'; vibevoice = 'VibeVoice'; cosyvoice3 = 'CosyVoice3'; qwen3tts = 'Qwen3TTS'
+        stepaudio  = 'StepAudio'; moss = 'MOSS'; granite = 'Granite'; echo = 'Echo'; dots = 'Dots'
+        kokoro     = 'Kokoro'; orpheus = 'Orpheus'
+    }
+    $key = $stripped.ToLowerInvariant()
+    if ($canon.ContainsKey($key)) { return $canon[$key] }
+    return $stripped
+}
+
 # kind (+ -Fast / -Upscale modifiers) -> the SwarmUI body fields for that recipe (model + sampler knobs),
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image',
-        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image',
+        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler, [string]$Engine
     )
     $r = switch ($Kind) {
         # DEFAULT image = Z-Image BASE (non-distilled) — the quality ceiling: a real CFG + working negative
@@ -140,6 +167,23 @@ function Get-GenRecipe {
         # audio-load nodes. GATED: needs the -InfiniteTalk install (node + ~82GB base + adapter + wav2vec2) AND
         # the on-GPU-authored CustomWorkflows\InfiniteTalk.json (the audio body-key is pinned there) — see docs/decisions.md.
         'infinitetalk' { @{ comfyuicustomworkflow = 'InfiniteTalk' } }
+        # GATED TTS-Audio-Suite alternative speech (15 engines + RVC) via a per-ENGINE ComfyUI custom workflow.
+        # The chosen engine selects WHICH workflow JSON runs (one per engine, e.g. TtsSuite-IndexTTS2 /
+        # TtsSuite-Higgs), so the recipe resolves -Engine -> comfyuicustomworkflow='TtsSuite-<engine>' exactly the
+        # way 'foley'/'infinitetalk' resolve to a single workflow. The text rides the standard ${prompt} injection
+        # point; an optional reference voice clip rides the audio body-key (-Audio, the same provisional inputaudio
+        # key InfiniteTalk parks — pinned on-GPU once the authored workflow names its audio-load node). Default
+        # engine = IndexTTS2 (duration/emotion control). Engine is normalized (strip non-alphanumerics, THEN
+        # case-fold to a canonical token) so 'IndexTTS-2'/'IndexTTS2'/'indextts2'/'index tts 2' ALL resolve to the
+        # SAME workflow name (TtsSuite-IndexTTS2) — a known-engine table maps the stripped-lowercase token to its
+        # canonical casing; an unknown engine keeps its stripped token (the other ~13 engines still pass through).
+        # GATED: needs the -TtsSuite install (node; weights auto-download on first use) AND the on-GPU-authored
+        # CustomWorkflows\TtsSuite-<engine>.json (see docs/decisions.md). This NEVER touches the :8004 Chatterbox
+        # default (chat readback / api-speak) — that's a different transport.
+        'speech' {
+            $eng = if ($Engine) { (Resolve-TtsEngine $Engine) } else { 'IndexTTS2' }
+            @{ comfyuicustomworkflow = "TtsSuite-$eng"; seed = -1 }
+        }
     }
     # -Upscale = pure 4x-UltraSharp post pass (control% 0 regenerates NO detail). -Refine = a real hi-res-fix:
     # same upscaler but control% 0.35 regenerates coherent detail, + tiling to cap VRAM on the DiT model.
@@ -174,6 +218,9 @@ function Get-GenPromptFields {
         # [instrumental] for no vocals. -Lyrics turns the instrumental composer into a song composer.
         'music' { return @{ prompt = $(if ($Lyrics) { $Lyrics } else { '[instrumental]' }); textaudiostyle = $Idea } }
         'edit'  { $p = $Idea }
+        # speech (TTS-Audio-Suite): the idea is the LITERAL text to speak — it must ride ${prompt} verbatim,
+        # NOT through the :8013 cinematic <mpprompt:..> rewriter (that would rewrite the words being spoken).
+        'speech' { return @{ prompt = $Idea } }
         default { $p = $(if ($Raw) { $Idea } else { "<mpprompt:$Idea>" }) }
     }
     # SwarmUI tags ride OUTSIDE the rewriter wrapper. -Realism applies a Z-Image realism LoRA; -Face runs the
@@ -233,7 +280,7 @@ function Get-GenPromptFields {
 function Get-ModelFamilyOverride {
     param(
         [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image'
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
@@ -303,7 +350,7 @@ function Build-GenBody {
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -395,7 +442,8 @@ function Build-GenBody {
 function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk', 'speech')][string]$Kind = 'image',
+        [string]$Engine,   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...): picks the TtsSuite-<engine> workflow
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
@@ -414,6 +462,11 @@ function Invoke-Gen {
     # either (mirrors -Edit/-FaceId) rather than POSTing a talking-video workflow with a missing input.
     if ($Kind -eq 'infinitetalk' -and -not $InitImage) { throw "-InfiniteTalk requires -InitImage <portrait>" }
     if ($Kind -eq 'infinitetalk' -and -not $Audio)     { throw "-InfiniteTalk requires -Audio <wav/mp3>" }
+    # -Speak (TTS-Audio-Suite) needs TEXT to synthesize — fail loudly up front (mirrors -Edit/-FaceId) rather
+    # than POSTing a speech workflow with nothing to speak. The text is the gen idea ($Prompt); a reference voice
+    # clip is OPTIONAL (rides -Audio, the zero-shot clone input). $Prompt is already Mandatory, but guard the
+    # whitespace-only case so the error names -Speak (the dispatcher fails earlier on an empty $Arg too).
+    if ($Kind -eq 'speech' -and [string]::IsNullOrWhiteSpace($Prompt)) { throw "-Speak requires text to synthesize (the gen idea is the spoken text)" }
     if ($Upscale -and $Kind -notin @('image', 'edit')) { throw "-Upscale only applies to image/edit gens (got $Kind)" }
     if ($Refine -and $Kind -notin @('image', 'edit')) { throw "-Refine only applies to image/edit gens (got $Kind)" }
     if ($Face -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Face only applies to image/edit/i2v gens (got $Kind)" }
@@ -423,7 +476,10 @@ function Invoke-Gen {
     # provisional `inputaudio` key whenever -Audio is set, so `doki gen -Video -Audio x.wav` would silently smuggle
     # a stray audio key into a Wan video body — symmetric with the -MaskImage guard above. Fire BEFORE the audio
     # file-read so a real clip on the wrong kind is rejected too (not waved through by the existence check).
-    if ($Audio -and $Kind -ne 'infinitetalk') { throw "-Audio only applies to -InfiniteTalk gens (got $Kind)" }
+    # -Audio rides infinitetalk (driving voice) OR speech (the optional zero-shot reference voice clip for the
+    # TTS-Audio-Suite engines). Any other kind would silently smuggle the provisional `inputaudio` key into a
+    # non-audio body, so reject it loudly (symmetric with -MaskImage). Both audio-consuming kinds are permitted.
+    if ($Audio -and $Kind -notin @('infinitetalk', 'speech')) { throw "-Audio only applies to -InfiniteTalk / -Speak gens (got $Kind)" }
     $initB64 = $null
     if ($InitImage) {
         if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }
@@ -474,7 +530,7 @@ function Invoke-Gen {
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
     # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.
     if ($BodyOnly) {
-        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
+        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler -Engine $Engine
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
         $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -AudioB64 $audioB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession

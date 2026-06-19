@@ -177,6 +177,64 @@ try { Invoke-Gen -Prompt 'a person speaking' -Kind infinitetalk -InitImage $itPo
 Assert $audRightKind                                      "-InfiniteTalk -InitImage -Audio -> does NOT throw the audio kind-guard (infinitetalk legitimately consumes audio)"
 Remove-Item -LiteralPath $itPortrait2, $itAudio2 -Force -ErrorAction SilentlyContinue
 
+# --- Resolve-GenKind: -Speak -> the GATED TTS-Audio-Suite speech kind ('speech'), with the ambiguity guard ---
+Assert ((Resolve-GenKind -Speak) -eq 'speech') "-Speak -> speech (the gated TTS-Audio-Suite alternative speech path)"
+$ambiguous4 = $false
+try { Resolve-GenKind -Speak -Music | Out-Null } catch { $ambiguous4 = $true }
+Assert $ambiguous4                             "-Speak -Music -> throws (ambiguous)"
+
+# --- speech recipe: -Engine selects the per-engine TtsSuite-<engine> custom workflow (default IndexTTS2). The
+# engine is normalized (non-alphanumerics stripped AND case-folded to a canonical token) so
+# 'IndexTTS-2'/'IndexTTS2'/'indextts2'/'index tts 2' all collapse to the SAME workflow name. This routes EXACTLY
+# like foley/infinitetalk (a comfyuicustomworkflow alias), so the engine is picked by WHICH workflow JSON is
+# installed — no engine param ever enters the :8004 Tts.cs/api-speak path.
+$spDefault = Get-GenRecipe -Kind speech
+Assert ($spDefault.comfyuicustomworkflow -eq 'TtsSuite-IndexTTS2') "speech (no -Engine) -> TtsSuite-IndexTTS2 (default engine = duration/emotion control)"
+Assert ($spDefault.seed -eq -1)                                    "speech -> seed -1 (like foley)"
+Assert ((Get-GenRecipe -Kind speech -Engine 'Higgs').comfyuicustomworkflow -eq 'TtsSuite-Higgs') "speech -Engine Higgs -> TtsSuite-Higgs"
+Assert ((Get-GenRecipe -Kind speech -Engine 'RVC').comfyuicustomworkflow -eq 'TtsSuite-RVC')     "speech -Engine RVC -> TtsSuite-RVC (voice-conversion)"
+# case-fold + strip: every casing/punctuation variant of the default engine collapses to ONE canonical workflow
+# name (no more 'indextts2' vs 'IndexTTS2' split-brain that would point at a different, non-existent JSON). Use
+# case-SENSITIVE -ceq here: PS -eq is case-insensitive, so it would mask a casing drift in the resolved filename
+# (the very bug being fixed). -ceq pins the EXACT canonical casing the on-disk TtsSuite-IndexTTS2.json must match.
+Assert ((Get-GenRecipe -Kind speech -Engine 'IndexTTS-2').comfyuicustomworkflow -ceq 'TtsSuite-IndexTTS2')  "speech -Engine 'IndexTTS-2' -> canonical TtsSuite-IndexTTS2 (hyphen stripped)"
+Assert ((Get-GenRecipe -Kind speech -Engine 'indextts2').comfyuicustomworkflow -ceq 'TtsSuite-IndexTTS2')   "speech -Engine 'indextts2' -> canonical TtsSuite-IndexTTS2 (case-folded, NOT a distinct lowercase name)"
+Assert ((Get-GenRecipe -Kind speech -Engine 'INDEXTTS2').comfyuicustomworkflow -ceq 'TtsSuite-IndexTTS2')   "speech -Engine 'INDEXTTS2' -> canonical TtsSuite-IndexTTS2 (upper-case folded to canonical)"
+Assert ((Get-GenRecipe -Kind speech -Engine 'index tts 2').comfyuicustomworkflow -ceq 'TtsSuite-IndexTTS2') "speech -Engine 'index tts 2' -> canonical TtsSuite-IndexTTS2 (spaces stripped + case-folded)"
+
+# --- Get-GenPromptFields: speech idea is the LITERAL spoken text -> ${prompt} verbatim, NOT the <mpprompt:..>
+# cinematic rewriter (which would rewrite the words being spoken). No SwarmUI tags either (image-family only).
+$pfSpeech = Get-GenPromptFields -Kind speech -Idea 'Hello there, this is a test.'
+Assert ($pfSpeech.prompt -eq 'Hello there, this is a test.')       "speech idea -> literal text (no <mpprompt:..> rewriter wrap)"
+Assert (-not ($pfSpeech.prompt -match '<mpprompt:|<lora:|<segment:')) "speech -> no rewriter wrap / no SwarmUI tags (literal spoken text)"
+
+# --- Invoke-Gen: -Speak REQUIRES text to synthesize (mirrors the -Edit/-FaceId up-front guards); a reference
+# voice clip is OPTIONAL (rides -Audio). The throw path returns before any SwarmUI contact; the happy path uses
+# -BodyOnly (no /API call) and proves the body carries the workflow alias + the literal text in prompt.
+$speakNoText = $false; $speakErr = $null
+try { Invoke-Gen -Prompt '   ' -Kind speech | Out-Null } catch { $speakNoText = $true; $speakErr = "$($_.Exception.Message)" }
+Assert $speakNoText                                        "-Speak with blank text -> throws (nothing to synthesize)"
+Assert ($speakErr -match '(?i)-Speak requires text')      "-Speak missing text -> the error names '-Speak requires text' (clear, up-front)"
+$spOk = $true; $spBody = $null
+try { $spBody = Invoke-Gen -Prompt 'Read this aloud.' -Kind speech -Engine 'IndexTTS2' -BodyOnly } catch { $spOk = $false }
+Assert $spOk                                              "-Speak WITH text -> does NOT throw (text supplied)"
+$spBodyObj = $null; try { $spBodyObj = $spBody | ConvertFrom-Json } catch {}
+Assert ($spBodyObj -and $spBodyObj.comfyuicustomworkflow -eq 'TtsSuite-IndexTTS2') "-Speak -BodyOnly -> body carries comfyuicustomworkflow=TtsSuite-IndexTTS2"
+Assert ($spBodyObj -and $spBodyObj.prompt -eq 'Read this aloud.') "-Speak -BodyOnly -> the literal spoken text rides \${prompt}"
+Assert ($spBodyObj -and -not $spBodyObj.inputaudio)       "-Speak with no -Audio -> no audio body-key (ref clip is optional)"
+
+# --- speech accepts an OPTIONAL reference voice clip via -Audio (zero-shot clone). The -Audio kind-guard permits
+# it (it permits infinitetalk AND speech); the clip rides the same provisional inputaudio body-key InfiniteTalk
+# parks (pinned on-GPU once the authored workflow names its audio-load node).
+$spRef = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-speak-ref-$([guid]::NewGuid().ToString('N')).wav"
+Set-Content -LiteralPath $spRef -Value 'not-a-real-wav-just-bytes' -NoNewline
+$spRefOk = $true; $spRefBody = $null
+try { $spRefBody = Invoke-Gen -Prompt 'Clone my voice.' -Kind speech -Engine 'IndexTTS2' -Audio $spRef -BodyOnly } catch { $spRefOk = $false }
+Assert $spRefOk                                           "-Speak -Audio <ref> -> does NOT throw the audio kind-guard (speech legitimately consumes a reference clip)"
+$spRefObj = $null; try { $spRefObj = $spRefBody | ConvertFrom-Json } catch {}
+Assert ($spRefObj -and $spRefObj.inputaudio)             "-Speak -Audio -BodyOnly -> body carries the reference voice (provisional inputaudio key)"
+Remove-Item -LiteralPath $spRef -Force -ErrorAction SilentlyContinue
+
 $up = Get-GenRecipe -Kind image -Upscale
 Assert ($up.refinermethod -eq 'PostApply' -and $up.refinerupscalemethod -eq 'model-4x-UltraSharp.pth') "image -Upscale -> 4x-UltraSharp refiner"
 Assert ($up.refinercontrolpercentage -eq 0)                        "image -Upscale -> control% 0 (pure upscale)"
@@ -503,6 +561,23 @@ $vdOut = & pwsh -NoProfile -File $dokiPs1 gen "a koi swimming" -Video -BodyOnly 
 $vdLine = @($vdOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
 $vdBody = $null; try { $vdBody = $vdLine | ConvertFrom-Json } catch { }
 Assert ($vdBody -and $vdBody.model -eq 'wan2.2_ti2v_5B_fp16.safetensors') "doki.ps1 gen -Video (no -Quality) -> body stays on the Wan 2.2 5B default (unchanged)"
+
+# SPEECH mirror: -Speak + -Engine must forward through doki.ps1 to the speech recipe (a dropped param/forward
+# would mean `doki gen -Speak` silently falls back to an image gen with every other suite still green). Shell
+# the real doki.ps1 -BodyOnly (no GPU/network) and assert the emitted body carries the per-engine TtsSuite
+# workflow + the literal spoken text in ${prompt}. This is the GATED TTS-Audio-Suite alternative path; it NEVER
+# touches the :8004 Chatterbox default (a different transport), so there is nothing to regress on that side.
+$spOut = & pwsh -NoProfile -File $dokiPs1 gen "Hello from DokiDex." -Speak -Engine "Higgs" -BodyOnly 2>&1
+$spLine = @($spOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
+$spSeam = $null; try { $spSeam = $spLine | ConvertFrom-Json } catch { }
+Assert ($null -ne $spSeam) "doki.ps1 gen -Speak -Engine Higgs -BodyOnly -> emits a parseable JSON body"
+Assert ($spSeam -and $spSeam.comfyuicustomworkflow -eq 'TtsSuite-Higgs') "doki.ps1 forwards -Speak/-Engine -> body carries comfyuicustomworkflow=TtsSuite-Higgs"
+Assert ($spSeam -and $spSeam.prompt -eq 'Hello from DokiDex.') "doki.ps1 -Speak body -> the literal spoken text rides \${prompt} (no <mpprompt:..> rewrite)"
+# control: -Speak with no -Engine -> the default IndexTTS2 workflow (the forward defaults, not drops, the engine)
+$spdOut = & pwsh -NoProfile -File $dokiPs1 gen "Default engine please." -Speak -BodyOnly 2>&1
+$spdLine = @($spdOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
+$spdSeam = $null; try { $spdSeam = $spdLine | ConvertFrom-Json } catch { }
+Assert ($spdSeam -and $spdSeam.comfyuicustomworkflow -eq 'TtsSuite-IndexTTS2') "doki.ps1 gen -Speak (no -Engine) -> defaults to TtsSuite-IndexTTS2 (engine defaulted, not dropped)"
 
 # --- Expand-Wildcards: __name__ -> a random line from <name>.txt, seed-reproducible, unknown left as-is ---
 $wcDir = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-wc-$([guid]::NewGuid().ToString('N'))"
