@@ -237,6 +237,15 @@ def walk_repo(root):
 
 if __name__ == "__main__":
     import sys
+    # `search QUERY [K]` prints a JSON array of {path,start_line,end_line,content,score} to stdout (the C# chat
+    # tool shells this and parses stdout — no temp file). A connection error (embed server down) / missing index
+    # propagates as a non-zero exit, which the caller degrades to a graceful "code search unavailable". Any other
+    # argv (or none) runs the original full reindex, so `python code_index.py [repo]` is unchanged.
+    if len(sys.argv) > 1 and sys.argv[1] == "search":
+        q = sys.argv[2] if len(sys.argv) > 2 else ""
+        k = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+        print(json.dumps(search(q, k)))
+        sys.exit(0)
     repo = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     files = list(walk_repo(repo))
     print(f"indexing {len(files)} files under {repo} -> {DB_PATH}")

@@ -3,20 +3,24 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 namespace DokiDex.Web;
 
-// The curated, in-process TOOL REGISTRY for the chat agent loop. This slice ships exactly ONE tool —
-// search_library — over the existing GalleryService. The single-tool scope is deliberate: decisions.md records
-// that open models lose tool-selection accuracy as the tool list grows, so the mitigation is a SMALL curated set
-// + a BOUNDED loop (Chat.MaxToolHops) + graceful fallthrough (a plain-content reply with no tool_calls IS the
-// answer). More tools are FUTURE gated additions — web-search / code-RAG / generate-from-chat need external
-// integration or a GPU handoff and are out of this slice.
+// The curated, in-process TOOL REGISTRY for the chat agent loop. This slice ships THREE tools — search_library
+// (over the existing GalleryService), web_search (DuckDuckGo via the `uvx ddgs` sidecar), and code_search
+// (semantic RAG over this repo via the code_index.py `search` dispatch over the :8090 embed server). The
+// small-curated-set discipline still holds at THREE: decisions.md records that open models lose tool-selection
+// accuracy as the tool list grows, so the mitigation is a SMALL curated set + a BOUNDED loop (Chat.MaxToolHops)
+// + graceful fallthrough (a plain-content reply with no tool_calls IS the answer). The sidecar tools degrade
+// (never throw, never hang) when uvx/uv/the index/the embed server are absent. Further tools stay FUTURE gated
+// additions — generate-from-chat / a GPU handoff are out of this slice.
 //
-// Two surfaces, kept pure where possible (no GPU; the disk touch is thin):
+// Surfaces, kept pure where possible (no GPU; the sidecar/disk touch is thin and degrades):
 //   • ToolsJson    — the OpenAI 'tools' array placed verbatim into the request body (well-formed, unit-tested).
 //   • Run(name, argumentsJson) — dispatch by name; an unknown name returns a clear text (never throws) so the
-//     model gets a usable tool result and the loop can recover. ParseQuery is the pure arg-parse seam.
+//     model gets a usable tool result and the loop can recover. ParseQuery / ParseQueryAndK are the pure arg-parse
+//     seams; FormatToolResult is the pure Result -> tool-text decision shared by the two sidecar executors.
 public static class ChatTools
 {
     // How many top library matches a search_library result folds in (name + prompt each), to bound the tool text.
@@ -56,9 +60,60 @@ public static class ChatTools
         },
     };
 
-    // The 'tools' array placed into the request body. ONE tool this slice (a curated set is the open-model
-    // tool-selection mitigation); future tools append here as gated additions.
-    public static readonly object[] ToolsJson = { SearchLibrarySchema };
+    // web_search — DuckDuckGo via the ddgs CLI (sidecar). Sharp description: this is for CURRENT/EXTERNAL facts
+    // the model can't know, NOT the user's local library. A {query} + an optional {k} (result count).
+    public static readonly object WebSearchSchema = new
+    {
+        type = "function",
+        function = new
+        {
+            name = "web_search",
+            description = "Search the public web (DuckDuckGo) for current or external information the model "
+                + "doesn't already know — news, docs, facts, prices, definitions. Returns the top result titles, "
+                + "URLs, and snippets. Use this for anything NOT in the user's local media library or this repo's "
+                + "code (use search_library / code_search for those).",
+            parameters = new
+            {
+                type = "object",
+                properties = new
+                {
+                    query = new { type = "string", description = "The web search query (e.g. 'latest SDXL turbo release notes')." },
+                    k = new { type = "integer", description = "How many results to return (1-10, default 5)." },
+                },
+                required = new[] { "query" },
+            },
+        },
+    };
+
+    // code_search — semantic RAG over THIS repo's indexed source (sidecar). Sharp description: this is for
+    // WHERE-is-it-in-the-code questions where a literal grep would miss the right file.
+    public static readonly object CodeSearchSchema = new
+    {
+        type = "function",
+        function = new
+        {
+            name = "code_search",
+            description = "Semantic search over THIS project's source code (RAG) to find WHERE something is "
+                + "implemented when a literal keyword search would miss the right file (different wording, related "
+                + "concept). Returns the most relevant code chunks with file path and line range. Requires the "
+                + "local code index; if unavailable it says so.",
+            parameters = new
+            {
+                type = "object",
+                properties = new
+                {
+                    query = new { type = "string", description = "What to find in the codebase (e.g. 'the bounded agent tool loop')." },
+                    k = new { type = "integer", description = "How many code chunks to return (1-10, default 5)." },
+                },
+                required = new[] { "query" },
+            },
+        },
+    };
+
+    // The 'tools' array placed into the request body. A deliberate gated expansion 1 -> 3 (search_library +
+    // web_search + code_search); decisions.md warns open models lose tool-selection accuracy as the list grows,
+    // so the set stays SMALL and the descriptions stay sharp. Do not sprawl past this curated trio.
+    public static readonly object[] ToolsJson = { SearchLibrarySchema, WebSearchSchema, CodeSearchSchema };
 
     // PURE: pull the trimmed {query} string out of an OpenAI tool-call arguments JSON STRING. A missing/blank
     // query, no arguments at all, or malformed JSON all yield "" (a blank query lists the most recent items) —
@@ -78,6 +133,31 @@ public static class ChatTools
         catch { return ""; }
     }
 
+    // PURE: pull a {query} string AND an optional integer {k} out of a tool-call arguments JSON STRING, for tools
+    // that take a result-count. Reuses ParseQuery for the query; k defaults to `defaultK` when absent, and is
+    // tolerant of a string-typed int (some models emit "k":"4"). Malformed/missing => ("" , defaultK). Never
+    // throws. The executor clamps k to a sane range, so an out-of-band number is harmless.
+    public static (string query, int k) ParseQueryAndK(string? argumentsJson, int defaultK)
+    {
+        var query = ParseQuery(argumentsJson);
+        var k = defaultK;
+        if (!string.IsNullOrWhiteSpace(argumentsJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(argumentsJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object
+                    && doc.RootElement.TryGetProperty("k", out var kv))
+                {
+                    if (kv.ValueKind == JsonValueKind.Number && kv.TryGetInt32(out var ki)) k = ki;
+                    else if (kv.ValueKind == JsonValueKind.String && int.TryParse(kv.GetString(), out var ks)) k = ks;
+                }
+            }
+            catch { /* keep defaultK */ }
+        }
+        return (query, k);
+    }
+
     // Dispatch a tool by name, returning the tool RESULT TEXT that becomes the role:"tool" message content. An
     // unknown tool name yields a clear "unknown tool" text (the model can recover / re-plan) rather than throwing,
     // and the search_library executor is wrapped so a disk hiccup degrades to a graceful message — the agent loop
@@ -88,8 +168,18 @@ public static class ChatTools
         {
             case "search_library":
                 return RunSearchLibrary(ParseQuery(argumentsJson));
+            case "web_search":
+            {
+                var (q, k) = ParseQueryAndK(argumentsJson, 5);
+                return RunWebSearch(q, k);
+            }
+            case "code_search":
+            {
+                var (q, k) = ParseQueryAndK(argumentsJson, 5);
+                return RunCodeSearch(q, k);
+            }
             default:
-                return $"unknown tool: '{name}'. The only available tool is search_library.";
+                return $"unknown tool: '{name}'. Available tools are: search_library, web_search, code_search.";
         }
     }
 
@@ -111,6 +201,57 @@ public static class ChatTools
         {
             return $"search_library failed: {ex.Message}";
         }
+    }
+
+    // web_search executor: shell the ddgs sidecar (bounded by its own 20s timeout), then render the top results
+    // to a SHORT bounded text. Run is synchronous (Chat.cs calls it sync), so we block on the async sidecar with
+    // GetAwaiter().GetResult(); the Result -> tool-text decision goes through the pure FormatToolResult so an
+    // Ok-but-empty search yields the formatter's clean "no web results" line (NOT the "done" sentinel) and only a
+    // genuine !Ok surfaces the degrade message. Any unexpected throw is caught — the agent loop must never crash
+    // on a tool. Result text is bounded so it can't bloat context across the loop's hops.
+    private static string RunWebSearch(string query, int k)
+    {
+        try
+        {
+            var r = WebSearch.SearchAsync(query, k, CancellationToken.None).GetAwaiter().GetResult();
+            return FormatToolResult(r.Ok, r.Rows.Count, r.Message, WebSearch.FormatWebResults(query, r.Rows));
+        }
+        catch (Exception ex)
+        {
+            return $"web_search unavailable: {ex.Message}";
+        }
+    }
+
+    // code_search executor: shell the code_index.py search sidecar (bounded 30s), render the top chunks to a
+    // SHORT bounded text. Same sync-blocking + graceful-degrade contract as web_search, via the same pure
+    // FormatToolResult decision: an Ok-but-empty search renders the formatter's "no matching code" line (NOT the
+    // raw "done" sentinel), and only a down embed server / unbuilt index (!Ok) surfaces its specific message.
+    private static string RunCodeSearch(string query, int k)
+    {
+        try
+        {
+            var r = CodeSearch.SearchAsync(query, k, CancellationToken.None).GetAwaiter().GetResult();
+            return FormatToolResult(r.Ok, r.Rows.Count, r.Message, CodeSearch.FormatCodeResults(query, r.Rows));
+        }
+        catch (Exception ex)
+        {
+            return $"code_search unavailable: {ex.Message}";
+        }
+    }
+
+    // PURE: the sidecar Result -> tool-text decision shared by RunWebSearch / RunCodeSearch (so it can be
+    // unit-tested with NO process). `formatted` is the bounded formatter output — the results block when rowCount
+    // > 0, else the formatter's clean "no results / unavailable" line.
+    //   • ok  -> `formatted` ALWAYS. On a ran-fine-but-empty search (rowCount == 0) the sidecars carry Message
+    //            "done"; the success branch must IGNORE that sentinel and surface the clean "no results" line.
+    //   • !ok -> a genuine degrade (sidecar / embed server / network down): surface the SPECIFIC `message` so the
+    //            model learns why, falling back to `formatted` (the clean line) when no message was provided.
+    // Total + side-effect-free, so the "done must not leak" guard can't silently regress.
+    public static string FormatToolResult(bool ok, int rowCount, string? message, string formatted)
+    {
+        _ = rowCount;   // reserved for future per-state shaping; the decision is ok vs !ok today
+        if (ok) return formatted;
+        return string.IsNullOrWhiteSpace(message) ? formatted : message!;
     }
 
     // PURE: render the matched (name, prompt) pairs into the compact tool-result text, TRUNCATING each prompt to

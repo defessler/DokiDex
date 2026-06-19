@@ -11,11 +11,16 @@ window so activation scans exactly the turns the prompt sends); **P4** voice rea
 (per-assistant-bubble TTS reuse of `/api/speak`); **P5** vision-in-chat (attach a Library
 image — incl. edit/inpaint stills — → multimodal turn forced to the Vision tier via the
 tested `Chat.VisionModel`); **Pn.1** tool-calling (a bounded 4-hop / 4-min agent loop +
-ONE curated in-process tool `search_library`; `ParseToolCalls` synthesizes unique ids,
+the first curated in-process tool `search_library`; `ParseToolCalls` synthesizes unique ids,
 the echoed assistant turn carries `content:null`, the per-hop transcript shaping is pure +
-tested). Web-search / code-RAG / generate-from-chat are deferred as future gated tools
-(external integration / GPU handoff). Suite **376 → 452** green throughout; Debug+Release
-clean each commit.
+tested); **Pn.2** added the next two curated tools — `web_search` (DuckDuckGo via the
+`uvx ddgs` sidecar) and `code_search` (semantic RAG over this repo via `code_index.py`'s
+`search` dispatch over the :8090 embed server), each degrading gracefully (never throw, never
+hang — the child is killed on the per-tool timeout) when its sidecar/index/server is absent.
+So the registry now ships **THREE** tools, and the small-curated-set discipline (open models
+lose tool-selection accuracy as the list grows — keep it small + sharp) still holds at three.
+Only **generate-from-chat** (and any GPU handoff) stays deferred as a future gated tool.
+Suite **376 → 452** green throughout; Debug+Release clean each commit.
 
 **Model-adds — shipped the one cleanly-wireable add:** the **anime SDXL pack**
 (Illustrious-XL v1.0 + Animagine XL 4.0) as gated `-Models full` downloads + matching
