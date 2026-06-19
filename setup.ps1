@@ -17,6 +17,7 @@ param(
     [switch]$Demucs,    # optional audio-tools sidecar: stem separation (vocals/drums/bass/other) via Demucs
     [switch]$Sam,       # optional sidecar: Segment-Anything point segmentation (semantic click->mask in the edit canvas)
     [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
+    [switch]$FaceId,    # optional sidecar: InstantID face-identity reference (SDXL — reuses the anime Illustrious/Animagine base, no FLUX needed)
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
     [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
@@ -622,6 +623,72 @@ if ($Models -eq "full") {
     $cwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\WanFoley.json"
     if (Test-Path $wf) { New-Item -ItemType Directory -Force (Split-Path $cwf) | Out-Null; Copy-Item $wf $cwf -Force; Ok "WanFoley workflow installed" }
     else { Warn "media-assets\WanFoley.json not present (authored at build time); skipping" }
+}
+
+# 5h-bis. InstantID face-identity reference (GATED sidecar, -FaceId) — SDXL-based, so it REUSES the anime
+#     Illustrious/Animagine SDXL checkpoints already on disk (5f, lines ~549-550): NO new base download.
+#     (PuLID-Flux was the alternative but needs FLUX.1-dev ~22GB which DokiDex does not ship — deferred until a
+#     FLUX base tier exists.) Node = cubiq/ComfyUI_InstantID (maintenance-mode/stable). ~4.55GB of add-on weights.
+#     Mirrors the Foley install (node clone + comfy-python pip + Get-Model weights). WORKFLOW IS NOT SHIPPED:
+#     the upstream example (examples/InstantID_basic.json) is a ComfyUI UI-GRAPH export (not SwarmUI's API-prompt
+#     CustomWorkflows format) and hardcodes the checkpoint + a reference jpg — converting/re-authoring it blind
+#     would be guesswork, so the runnable InstantID.json is the ON-GPU authoring step (see docs/decisions.md).
+#     Until media-assets\InstantID.json is authored on a live GPU, this installs node+weights only and Warns that
+#     the workflow is absent (same Test-Path posture as the Foley copy above).
+if ($FaceId) {
+    Info "InstantID face-identity reference (cubiq/ComfyUI_InstantID, SDXL — reuses the anime base)"
+    Ensure-WinGet "Git.Git" "git"
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        # 1) the node
+        $idNode = Join-Path $nodes "ComfyUI_InstantID"
+        if (-not (Test-Path $idNode)) { Info "installing InstantID node ..."; Git-Clone https://github.com/cubiq/ComfyUI_InstantID $idNode } else { Ok "InstantID node present" }
+        # 2) its python deps (same 3-candidate comfy-python probe the Foley node uses). onnxruntime-gpu ONLY
+        #    (NOT plain onnxruntime too): with BOTH installed the CPU build can win the `onnxruntime` module
+        #    namespace and CUDAExecutionProvider silently fails to register, so antelopev2 face-embedding falls
+        #    back to slow CPU — a known InsightFace gotcha. The -gpu wheel provides the same module name with CUDA.
+        if ($cpy) { Info "installing InstantID python deps (insightface + onnxruntime-gpu) ..."; & $cpy -m pip install insightface onnxruntime-gpu | Out-Null; Ok "InstantID deps installed" }
+        else { Warn "InstantID deps: run  <comfy-python> -m pip install insightface onnxruntime-gpu  manually" }
+
+        # 3) weights (~4.55GB): IP-Adapter (instantid\), ControlNet + config (controlnet\), antelopev2 face encoder.
+        #    The InstantID node also CAN auto-download antelopev2 on first run; the explicit fetch below is a
+        #    convenience (community HF mirror) — if it fails the node self-heals on first gen.
+        $cmodels = Join-Path $swarm "dlbackend\comfy\ComfyUI\models"
+        $idDir   = Join-Path $cmodels "instantid";  New-Item -ItemType Directory -Force $idDir   | Out-Null
+        $cnDir   = Join-Path $cmodels "controlnet"; New-Item -ItemType Directory -Force $cnDir   | Out-Null
+        $insDir  = Join-Path $cmodels "insightface\models\antelopev2"; New-Item -ItemType Directory -Force $insDir | Out-Null
+        $ix = "https://huggingface.co/InstantX/InstantID/resolve/main"
+        Get-Model "$ix/ip-adapter.bin"                                       (Join-Path $idDir "ip-adapter.bin")
+        Get-Model "$ix/ControlNetModel/diffusion_pytorch_model.safetensors"  (Join-Path $cnDir "instantid_controlnet.safetensors")
+        Get-Model "$ix/ControlNetModel/config.json"                          (Join-Path $cnDir "instantid_controlnet_config.json")
+        # antelopev2 face encoder: a 361MB zip (upstream's primary pointer is Google Drive = not scriptable; this
+        # is the MonsterMMORPG HF mirror). Unzip to insightface\models\antelopev2\ (the 5 .onnx models — a MIX, not
+        # all detectors: glintr100 = recognition/embedding, genderage = attribute, scrfd/det = detection). The
+        # 5-.onnx contents are NOT byte-verified at rest — confirm on-GPU, or delete the dir to let the node
+        # auto-download antelopev2 on first run.
+        $anteZip = Join-Path $insDir "antelopev2.zip"
+        $anteOk  = Join-Path $insDir "glintr100.onnx"   # sentinel: one of the 5 expected detectors
+        if (-not (Test-Path $anteOk)) {
+            Get-Model "https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip" $anteZip
+            if (Test-Path $anteZip) {
+                Info "unzipping antelopev2 face encoder ..."
+                try { Expand-Archive -Path $anteZip -DestinationPath $insDir -Force; Remove-Item $anteZip -Force -ErrorAction SilentlyContinue; Ok "antelopev2 unzipped -> $insDir" }
+                catch { Warn "antelopev2 unzip failed ($($_.Exception.Message)); the InstantID node can auto-download it on first run instead" }
+            } else { Warn "antelopev2 mirror unreachable; the InstantID node can auto-download it on first run instead" }
+        } else { Ok "antelopev2 present" }
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -FaceId after it installs" }
+
+    # 4) workflow registration — GATED on the JSON existing. The runnable SwarmUI-API InstantID.json is NOT
+    #    sourceable from the upstream UI-graph example (see the header comment) — it is the on-GPU authoring step.
+    #    Until media-assets\InstantID.json is authored + validated on a live GPU, copy nothing and Warn (same
+    #    Test-Path posture as the Foley copy). Once committed it rides the existing  doki gen -Workflow InstantID
+    #    -InitImage <face.png>  hook (comfyuicustomworkflow=InstantID), no C#/recipe change.
+    $idWf  = Join-Path $root "media-assets\InstantID.json"
+    $idCwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\InstantID.json"
+    if (Test-Path $idWf) { New-Item -ItemType Directory -Force (Split-Path $idCwf) | Out-Null; Copy-Item $idWf $idCwf -Force; Ok "InstantID workflow installed" }
+    else { Warn "media-assets\InstantID.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
+
+    Ok "InstantID ready -> node + weights installed. Run via  doki gen -FaceId -InitImage <face.png> '<prompt>'  (or the lower-level  doki gen -Workflow InstantID -InitImage <face.png>) once the workflow JSON is authored on-GPU."
 }
 
 # 5i. Configure MagicPrompt -> local prompt-rewriter (:8013) HEADLESSLY via its API

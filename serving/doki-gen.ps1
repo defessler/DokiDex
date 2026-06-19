@@ -9,14 +9,15 @@
 
 # switches -> exactly one kind, with an ambiguity guard (so `gen -Video -Music` fails loudly, not silently).
 function Resolve-GenKind {
-    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley)
+    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId)
     $picked = @()
     if ($Video) { $picked += 'video' }
     if ($Music) { $picked += 'music' }
     if ($Edit)  { $picked += 'edit'  }
     if ($I2v)   { $picked += 'i2v'   }
     if ($Foley) { $picked += 'foley' }
-    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley (got: $($picked -join ', '))" }
+    if ($FaceId) { $picked += 'faceid' }
+    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId (got: $($picked -join ', '))" }
     if ($picked.Count -eq 1) { return $picked[0] }
     return 'image'
 }
@@ -73,7 +74,7 @@ function Expand-References {
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler
     )
     $r = switch ($Kind) {
@@ -126,6 +127,11 @@ function Get-GenRecipe {
         'i2v'   { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = 'wan2.2_ti2v_5B_fp16.safetensors'; videoframes = 49; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = 'Image'; videoformat = 'h264-mp4' } }
         # video + synced SFX via the WanFoley custom ComfyUI workflow -> one muxed mp4 with 48 kHz audio.
         'foley' { @{ comfyuicustomworkflow = 'WanFoley'; seed = -1 } }
+        # face-identity transfer via the InstantID custom ComfyUI workflow (SDXL): pass the reference face as the
+        # init image (doki gen -FaceId -InitImage <face.png>). Ergonomic alias for -Workflow InstantID; the
+        # workflow JSON wires the init image to InstantID's FaceAnalysis/LoadImage node. GATED: needs the -FaceId
+        # install (node + weights) AND the on-GPU-authored CustomWorkflows\InstantID.json (see docs/decisions.md).
+        'faceid' { @{ comfyuicustomworkflow = 'InstantID' } }
     }
     # -Upscale = pure 4x-UltraSharp post pass (control% 0 regenerates NO detail). -Refine = a real hi-res-fix:
     # same upscaler but control% 0.35 regenerates coherent detail, + tiling to cap VRAM on the DiT model.
@@ -219,7 +225,7 @@ function Get-GenPromptFields {
 function Get-ModelFamilyOverride {
     param(
         [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image'
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
@@ -253,7 +259,7 @@ function Build-GenBody {
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -338,7 +344,7 @@ function Build-GenBody {
 function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
@@ -350,6 +356,9 @@ function Invoke-Gen {
         [string]$Base = 'http://127.0.0.1:7801'
     )
     if ($Kind -eq 'edit' -and -not $InitImage) { throw "-Edit needs -InitImage <path-to-image>" }
+    # InstantID is meaningless without a reference face, which rides the init-image channel — fail loudly up
+    # front (mirrors -Edit) rather than POSTing an InstantID workflow with no face for SwarmUI to choke on.
+    if ($Kind -eq 'faceid' -and -not $InitImage) { throw "-FaceId requires -InitImage <reference face>" }
     if ($Upscale -and $Kind -notin @('image', 'edit')) { throw "-Upscale only applies to image/edit gens (got $Kind)" }
     if ($Refine -and $Kind -notin @('image', 'edit')) { throw "-Refine only applies to image/edit gens (got $Kind)" }
     if ($Face -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Face only applies to image/edit/i2v gens (got $Kind)" }

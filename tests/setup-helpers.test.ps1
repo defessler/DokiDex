@@ -209,6 +209,42 @@ try {
     # Edit-2511 block's $te/$vae targets; a second VAE under a different name would be a redundant duplicate).
     Assert ($eQ -and $eQ.File -eq 'Qwen_Image-Q4_K_M.gguf') "Qwen-Image GGUF: saves under the canonical QuantStack local filename"
 
+    Write-Host "`nInstantID face-identity (-FaceId): cubiq node + InstantX weights wired off a `$ix base, into the ComfyUI model dirs"
+    # The GATED face-ID sidecar (-FaceId) installs cubiq/ComfyUI_InstantID + ~4.55GB of InstantX weights and
+    # REUSES the anime SDXL base already on disk (no FLUX). It is SDXL — PuLID-Flux (FLUX.1-dev ~22GB) was the
+    # rejected alternative. The 3 weights hang off a $ix InstantX resolve/main base. Pin: (1) the node is cloned
+    # from the cubiq repo, (2) $ix is the InstantX HF resolve/main base, (3) the IP-Adapter .bin + the ControlNet
+    # safetensors + its config.json are wired Get-Model entries riding $ix, with non-colliding local filenames.
+    # NOTE: this block does NOT register a workflow JSON — the runnable SwarmUI InstantID.json is the on-GPU
+    # authoring step (the upstream example is UI-graph, not API-prompt), so there is intentionally no committed
+    # media-assets\InstantID.json to assert here (see docs/decisions.md). Sizes/URLs HF-tree-verified this session.
+    $idClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)cubiq/ComfyUI_InstantID' }, $true)
+    Assert ($idClone.Count -ge 1) "InstantID: setup.ps1 clones the cubiq/ComfyUI_InstantID node (maintenance-mode/stable SDXL face-ID node)"
+
+    $ixBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$ix' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $ixBase) "InstantID: setup.ps1 defines a `$ix InstantX base URL var"
+    $ixUrl = if ($ixBase) { $ixBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($ixUrl -match '^https://huggingface\.co/InstantX/InstantID/resolve/main$') "InstantID: `$ix = InstantX/InstantID resolve/main URL"
+    foreach ($spec in @(
+        @{ File = 'ip-adapter.bin';                    Suffix = '/ip-adapter.bin' },
+        @{ File = 'instantid_controlnet.safetensors';  Suffix = '/ControlNetModel/diffusion_pytorch_model.safetensors' },
+        @{ File = 'instantid_controlnet_config.json';  Suffix = '/ControlNetModel/config.json' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File } | Select-Object -First 1
+        Assert ($null -ne $e)                          "InstantID: $($spec.File) is wired as a Get-Model entry"
+        Assert ($e -and $e.Url -match '(?i)\$ix/')     "InstantID: $($spec.File) URL hangs off the `$ix InstantX base"
+        $full = ($e.Url -replace '(?i)\$ix', $ixUrl).Trim('"')
+        Assert ($full -eq ($ixUrl + $spec.Suffix))     "InstantID: $($spec.File) resolves to the expected InstantX path ($($spec.Suffix))"
+    }
+    # PuLID-Flux guard: the picked SDXL path must NEVER pull FLUX.1-dev (the rejected ~22GB base) or a PuLID weight.
+    $fluxPull = $entries | Where-Object { $_.Url -match '(?i)flux\.?1-dev|pulid' }
+    Assert ($fluxPull.Count -eq 0) "InstantID: the SDXL face-ID path pulls NO FLUX.1-dev / PuLID weights (PuLID-Flux is deferred)"
+
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
     Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"

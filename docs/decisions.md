@@ -86,6 +86,43 @@ load (headless-accepted via the existing `InstallConfirmWS` path); (2) the exact
 the doc-supported **20–50 steps / cfg 4** band (the 20/4 start point, tune live); (3) the live **32GB fit**
 + render quality. The override knobs are additive + unit-tested at rest; output quality is the on-GPU step.
 
+**Update — InstantID face-identity SHIPPED as INSTALL-WIRING ONLY (workflow JSON deferred to on-GPU authoring).**
+Picked **InstantID** (`cubiq/ComfyUI_InstantID`) over **PuLID-Flux** for the gated face-ID integration, decisively
+on three grounded reasons: **(1) base on disk** — InstantID is **SDXL** and reuses the anime
+**Illustrious/Animagine SDXL** checkpoints already shipped (`setup.ps1:549-550`), so **no new base download**;
+PuLID-Flux *requires* **FLUX.1-dev (~12-22GB)** which DokiDex does NOT ship. **(2) node maturity** — cubiq is
+maintenance-mode/stable; both PuLID-Flux nodes are weaker (balazik = Alpha V0.1.0 prototype; the sipie800 fork is
+**formally discontinued** 2025-10-07). **(3) weight size** — InstantID add-on is **~4.55GB** (1.69GB IP-Adapter +
+2.5GB ControlNet + 361MB antelopev2) vs PuLID's weights **plus** the multi-GB FLUX base. PuLID-Flux is **deferred**
+until/unless a FLUX base tier is added.
+
+**Shipped (the gated install only):** a **`-FaceId`** sidecar switch on `setup.ps1` (mirrors `-Sam`/`-Demucs`/`-Train`)
+that clones the cubiq node into `custom_nodes\ComfyUI_InstantID`, pip-installs `insightface onnxruntime-gpu` (the
+**-gpu wheel ONLY**, not plain `onnxruntime` too: with both present the CPU build can win the `onnxruntime` module
+namespace so CUDAExecutionProvider silently fails to register and antelopev2 falls back to slow CPU — a known InsightFace gotcha)
+via the same 3-candidate comfy-python probe the Foley node uses, and `Get-Model`s the 3 InstantX weights
+(`$ix = InstantX/InstantID resolve/main`) into ComfyUI's `models\{instantid,controlnet,insightface}` dirs
+(antelopev2 zip unzipped, with a comment that the node can auto-download it on first run if the community mirror
+fails). Ergonomic alias: `doki gen -FaceId -InitImage <face.png>` -> `Resolve-GenKind`->`faceid`->
+`comfyuicustomworkflow=InstantID` (the reference face rides the **init-image** channel, NOT SwarmUI's own
+IP-Adapter-revision flag — a different path). All sizes/URLs HF-tree-verified; an **AST-driven `setup-helpers`**
+block pins the node clone + the 3 `$ix` weight entries + a guard that the SDXL path pulls **no FLUX/PuLID** weights;
+`doki-gen` pins the new kind/recipe + the IP-Adapter-flag negative.
+
+**Decision-rule branch taken: install URLs verified, but NO authoritative SwarmUI-hook-ready workflow JSON is
+sourceable -> wire ONLY the gated install + this note; do NOT commit a blind workflow JSON.** The upstream example
+(`examples/InstantID_basic.json`) is a ComfyUI **UI-graph** export (not SwarmUI's **API-prompt** `CustomWorkflows`
+format), and hardcodes both the checkpoint (`AlbedoBaseXL`) and a reference jpg — converting it to API-prompt,
+re-pointing it to Illustrious/Animagine, and injecting the SwarmUI `${prompt}` / reference-image placeholders is
+**blind-authoring**. So the runnable `media-assets\InstantID.json` is the **on-GPU authoring step**: author/convert
++ validate a gen against the live node, THEN commit it (same posture WanFoley implies). Until then the `-FaceId`
+block installs node+weights and the workflow copy is **guarded by a `Test-Path` that Warns** if `media-assets\InstantID.json`
+is absent (identical to the WanFoley copy). **On-GPU LABELED confirms:** (1) node load + face-ID **render quality**;
+(2) the antelopev2 mirror's **5 `.onnx`** contents — a MIX, not all detectors (glintr100 = recognition, genderage =
+attribute, scrfd/det = detection) — (community mirror, not byte-verified — or let the node
+auto-download); (3) the ControlNet target **subfolder** the node's loader expects. **Every existing path is
+byte-for-byte unchanged** (the `faceid` kind/recipe is purely additive; no default/URL/catalog row changed).
+
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 
 ## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present

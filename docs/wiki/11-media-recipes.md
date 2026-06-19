@@ -7,7 +7,7 @@ the TTS/STT services; memory via the MCP tools.
 > Switch the GPU first: **`.\doki.ps1 up media`** for image/video/audio, **`up agent`** for
 > chat/speech. They're mutually exclusive on 32 GB.
 >
-> **One-liner:** `.\doki.ps1 gen "<idea>" [-Video|-Music|-Edit|-I2v|-Foley] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism]`
+> **One-liner:** `.\doki.ps1 gen "<idea>" [-Video|-Music|-Edit|-I2v|-Foley|-FaceId] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism]`
 > wraps the calls below — it picks the recipe, wraps the idea in `<mpprompt:…>` for the `:8013` rewriter, POSTs
 > to SwarmUI, and opens the result. The tables here are the underlying API; `doki gen` is the shortcut.
 
@@ -29,6 +29,7 @@ that `session_id` in the body. Output paths come back in `images[]`.
 | **Realism LoRA** (-Realism) | append ` <lora:Z-Image-Realism:0.7>` to the prompt: applies a Z-Image realism LoRA (photoreal skin/detail) at weight 0.7. The `Z-Image-Realism.safetensors` must live in `Models\Lora` (fetched by `setup.ps1 -Models full`). **image / edit / i2v** only. |
 | **Music** (ACE-Step 1.5 — turbo default) | `model=acestep_v1.5_turbo.safetensors, prompt="[instrumental]", textaudiostyle="upbeat electronic", textaudiobpm=128, textaudioduration=10, steps=10, cfgscale=1` → an mp3. **-Quality** swaps to the XL base (quality): `model=acestep_v1.5_xl_base_bf16.safetensors, steps=50, cfgscale=6, sampler=euler, scheduler=simple` (params from the official ComfyUI `audio_ace_step1_5_xl_base.json` example; bpm/duration unchanged). Turbo stays the music default; XL base is opt-in via -Quality. |
 | **Video + synced SFX** (Foley) | `comfyuicustomworkflow=WanFoley, prompt=..., seed=-1` → one muxed mp4 with 48 kHz audio |
+| **Face identity** (InstantID — GATED) | `comfyuicustomworkflow=InstantID, initimage=<base64 reference face>, prompt=...` → an identity-preserved SDXL gen (the reference face's identity carried onto a fresh image). Opt-in: install with `setup.ps1 -FaceId` (cubiq InstantID node + IP-Adapter/ControlNet/antelopev2 weights; SDXL, reuses the anime base — no new checkpoint). `doki gen -FaceId -InitImage <face.png>` is the ergonomic alias (the reference face rides the **init-image** channel, NOT SwarmUI's IP-Adapter-revision flag); `-FaceId` requires `-InitImage`. ⚠ on-GPU: the runnable `CustomWorkflows\InstantID.json` is the on-GPU authoring step (the upstream example is a ComfyUI UI-graph, not SwarmUI's API-prompt format) — until authored, `-FaceId` install wires node+weights only. |
 
 **Simple prompts:** wrap a lazy idea in `<mpprompt:a cat on a skateboard>` and the always-on 3B
 rewriter (`:8013`) expands it at generate time (MagicPrompt). The default image path is **Z-Image

@@ -21,9 +21,13 @@ Assert ((Resolve-GenKind -Music) -eq 'music') "-Music -> music"
 Assert ((Resolve-GenKind -Edit)  -eq 'edit')  "-Edit  -> edit"
 Assert ((Resolve-GenKind -I2v)   -eq 'i2v')   "-I2v   -> i2v"
 Assert ((Resolve-GenKind -Foley) -eq 'foley') "-Foley -> foley"
+Assert ((Resolve-GenKind -FaceId) -eq 'faceid') "-FaceId -> faceid (InstantID face-identity)"
 $ambiguous = $false
 try { Resolve-GenKind -Video -Music | Out-Null } catch { $ambiguous = $true }
 Assert $ambiguous                             "-Video -Music -> throws (ambiguous)"
+$ambiguous2 = $false
+try { Resolve-GenKind -FaceId -Foley | Out-Null } catch { $ambiguous2 = $true }
+Assert $ambiguous2                            "-FaceId -Foley -> throws (ambiguous)"
 
 # --- Get-GenRecipe: the docs/wiki/11-media-recipes.md table, 1:1 ---
 $img = Get-GenRecipe -Kind image
@@ -95,6 +99,29 @@ Assert ($i2v.videomodel -eq 'wan2.2_ti2v_5B_fp16.safetensors' -and $i2v.videofra
 Assert ($i2v.videoresolution -eq 'Image' -and $i2v.videosteps -eq 20) "i2v -> videoresolution=Image + videosteps (the I2V trigger trio)"
 $fol = Get-GenRecipe -Kind foley
 Assert ($fol.comfyuicustomworkflow -eq 'WanFoley' -and $fol.seed -eq -1) "foley -> WanFoley custom workflow + seed -1"
+# faceid = the InstantID custom-workflow alias (SDXL face-identity). Maps to comfyuicustomworkflow=InstantID;
+# the reference face rides the init-image channel (doki gen -FaceId -InitImage <face.png>), NOT a new key.
+$fid = Get-GenRecipe -Kind faceid
+Assert ($fid.comfyuicustomworkflow -eq 'InstantID') "faceid -> InstantID custom workflow (the face-identity alias)"
+Assert (-not $fid.ContainsKey('useipadapterforrevision')) "faceid -> does NOT set SwarmUI's IP-Adapter-revision flag (the face rides init-image, a different path)"
+
+# --- Invoke-Gen: -FaceId (InstantID) REQUIRES -InitImage up front (mirrors -Edit's init-image guard) ---
+# InstantID is meaningless without a reference face, which rides the init-image channel. The guard must fire
+# loudly BEFORE any SwarmUI contact (same as -Edit), so `doki gen -FaceId 'portrait'` with no -InitImage throws
+# a clear "requires -InitImage" error. GPU/network-free: the throw path returns before the SwarmUI probe, and
+# the positive path uses a real temp file + -BodyOnly (stops before any /API call).
+$faceidNoInit = $false; $faceidErr = $null
+try { Invoke-Gen -Prompt 'portrait of a hero' -Kind faceid | Out-Null } catch { $faceidNoInit = $true; $faceidErr = "$($_.Exception.Message)" }
+Assert $faceidNoInit                                       "-FaceId with NO -InitImage -> throws (a reference face is mandatory)"
+Assert ($faceidErr -match 'requires\s+-InitImage')         "-FaceId missing -InitImage -> the error names 'requires -InitImage' (clear, up-front)"
+$faceTmp = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-faceid-$([guid]::NewGuid().ToString('N')).png"
+Set-Content -LiteralPath $faceTmp -Value 'not-a-real-image-just-bytes' -NoNewline
+$faceidOk = $true
+try { $fb = Invoke-Gen -Prompt 'portrait of a hero' -Kind faceid -InitImage $faceTmp -BodyOnly } catch { $faceidOk = $false }
+Assert $faceidOk                                           "-FaceId WITH -InitImage -> does NOT throw the init-image guard (reference face supplied)"
+$fbBody = $null; try { $fbBody = $fb | ConvertFrom-Json } catch {}
+Assert ($fbBody -and $fbBody.comfyuicustomworkflow -eq 'InstantID') "-FaceId -InitImage -BodyOnly -> body carries comfyuicustomworkflow=InstantID + the init image"
+Remove-Item -LiteralPath $faceTmp -Force -ErrorAction SilentlyContinue
 
 $up = Get-GenRecipe -Kind image -Upscale
 Assert ($up.refinermethod -eq 'PostApply' -and $up.refinerupscalemethod -eq 'model-4x-UltraSharp.pth') "image -Upscale -> 4x-UltraSharp refiner"
