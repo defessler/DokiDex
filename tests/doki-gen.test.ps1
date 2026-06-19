@@ -353,6 +353,75 @@ Assert ($bQwen.sampler -eq 'euler' -and $bQwen.scheduler -eq 'simple') "Qwen bod
 # acceptable alternative but removing a working negative is not required and Klein behaviour stays untouched.
 Assert ($bQwen.negativeprompt -match 'worst quality')          "Qwen body: Z-Image curated negative KEPT (Qwen runs fine with a negative at CFG 4)"
 
+# --- Nunchaku NVFP4 variants (gated -Nunchaku speed lever): the family override covers them with ZERO/ONE change ---
+# (1) FLUX.2 Klein NVFP4 (flux-2-klein-4b-nvfp4.safetensors, BFL's OWN NATIVE NVFP4 checkpoint — NOT a nunchaku
+#     svdq quant; it loads via ComfyUI's native FLUX.2 FP4 path, so it ships in -Models full, not the -Nunchaku
+#     block) — the existing 'flux-2-klein*' glob ALREADY matches it. The filename has no '-base-' infix so the glob
+#     takes the DISTILLED branch (4 steps / cfg 1 / euler / Flux2). CAVEAT: BFL's nvfp4 card states NO inference
+#     config and does NOT label the file distilled-vs-base (the '-base-' convention was Comfy-Org's repackage
+#     naming, not BFL's nvfp4 repo), so this distilled routing is the CONSERVATIVE assumption and is on-GPU-
+#     unverified (a 4-vs-base-step A/B) — see the matching note in doki-gen.ps1. Cleanest integration: no recipe change.
+$ovKleinNvfp4 = Get-ModelFamilyOverride 'flux-2-klein-4b-nvfp4.safetensors'
+Assert ($ovKleinNvfp4.steps -eq 4 -and $ovKleinNvfp4.cfgscale -eq 1) "Nunchaku: Klein NVFP4 -> inherits the (conservative, on-GPU-unverified) DISTILLED branch (4 steps / cfg 1) via the existing flux-2-klein* glob (no recipe change)"
+Assert ($ovKleinNvfp4.sampler -eq 'euler' -and $ovKleinNvfp4.scheduler -eq 'Flux2') "Nunchaku: Klein NVFP4 -> euler / Flux2 (shares the distilled Klein sampler knobs)"
+# the NVFP4 file must NOT be misread as the base/quality variant (it has no '-base-' infix, mirroring the distilled vs base convention)
+Assert ($ovKleinNvfp4.steps -ne 20) "Nunchaku: Klein NVFP4 -> NOT the 20-step base branch (no '-base-' infix -> distilled)"
+# Build-GenBody integration: selecting the Klein NVFP4 checkpoint also drops the Z-Image negative (the
+# 'flux-2-klein*' negative-drop guard already fires on the nvfp4 name — same byte-for-byte path as plain Klein).
+$bKleinNvfp4 = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'flux-2-klein-4b-nvfp4.safetensors'
+Assert ($bKleinNvfp4.model -eq 'flux-2-klein-4b-nvfp4.safetensors') "Nunchaku Klein NVFP4 body: -Model swaps to the nvfp4 checkpoint"
+Assert ($bKleinNvfp4.steps -eq 4 -and $bKleinNvfp4.sampler -eq 'euler') "Nunchaku Klein NVFP4 body: distilled knobs applied (4 steps / euler)"
+Assert (-not $bKleinNvfp4.ContainsKey('negativeprompt')) "Nunchaku Klein NVFP4 body: Z-Image negative dropped (the flux-2-klein* guard fires on the nvfp4 name too)"
+
+# (2) Qwen-Image NVFP4 base (svdq-fp4_r128-qwen-image.safetensors) — the .gguf-locked Qwen match does NOT catch
+#     the .safetensors NVFP4 file, so ONE additive line keys it to the SAME base band (20 steps / cfg 4 / euler /
+#     simple). It is the NON-distilled base, so it needs a REAL cfg (cfg 1 would only suit a Lightning distill).
+Assert ((Get-ModelFamilyOverride 'svdq-fp4_r128-qwen-image.safetensors').steps -eq 20) "Nunchaku: Qwen NVFP4 base -> 20 steps (additive svdq-*qwen-image override, same base band as the GGUF)"
+$ovQwenNvfp4 = Get-ModelFamilyOverride 'svdq-fp4_r128-qwen-image.safetensors'
+Assert ($ovQwenNvfp4.cfgscale -eq 4) "Nunchaku: Qwen NVFP4 base -> cfg 4 (real cfg; the non-distilled base, not a Lightning distill)"
+Assert ($ovQwenNvfp4.sampler -eq 'euler' -and $ovQwenNvfp4.scheduler -eq 'simple') "Nunchaku: Qwen NVFP4 base -> euler / simple (shares the base Qwen sampler knobs)"
+# the int4 (pre-Blackwell) build shares the base band; case-insensitive match holds
+Assert ((Get-ModelFamilyOverride 'svdq-int4_r128-qwen-image.safetensors').steps -eq 20) "Nunchaku: Qwen NVFP4/INT4 svdq variants both match the base band (svdq-*qwen-image)"
+Assert ((Get-ModelFamilyOverride 'SVDQ-FP4_R128-QWEN-IMAGE.SAFETENSORS').sampler -eq 'euler') "Nunchaku: Qwen svdq override is case-insensitive"
+# the Lightning fp4 distills (4/8-step) are EXCLUDED — they want cfg=1 / low steps, not this base band
+Assert ((Get-ModelFamilyOverride 'svdq-fp4_r128-qwen-image-lightningv2.0-4steps.safetensors').Count -eq 0) "Nunchaku: Qwen NVFP4 LIGHTNING distill -> NO base override (excluded; it wants cfg=1/low-step, fetched only on demand)"
+# -Kind guard (defense-in-depth): the svdq override is image-only, like the GGUF/Klein overrides
+Assert ((Get-ModelFamilyOverride 'svdq-fp4_r128-qwen-image.safetensors' -Kind image).Count -gt 0) "Nunchaku: Qwen NVFP4 under IMAGE kind -> override applies"
+Assert ((Get-ModelFamilyOverride 'svdq-fp4_r128-qwen-image.safetensors' -Kind edit).Count -eq 0)  "Nunchaku: Qwen NVFP4 under EDIT kind -> NO override (non-image guarded)"
+# Build-GenBody integration: the Qwen NVFP4 base body carries the base band over the Z-Image recipe
+$bQwenNvfp4 = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'svdq-fp4_r128-qwen-image.safetensors'
+Assert ($bQwenNvfp4.model -eq 'svdq-fp4_r128-qwen-image.safetensors') "Nunchaku Qwen NVFP4 body: -Model swaps to the svdq checkpoint"
+Assert ($bQwenNvfp4.steps -eq 20 -and $bQwenNvfp4.cfgscale -eq 4) "Nunchaku Qwen NVFP4 body: overrides steps=20 / cfg=4 (over the Z-Image recipe)"
+Assert ($bQwenNvfp4.negativeprompt -match 'worst quality') "Nunchaku Qwen NVFP4 body: Z-Image curated negative KEPT (same as the Qwen GGUF; runs fine with a negative at cfg 4)"
+# (3) Z-Image-Turbo NVFP4 (svdq-fp4_r128-z-image-turbo.safetensors, nunchaku-ai/nunchaku-z-image-turbo) — the
+#     nunchaku Z-Image-Turbo 4-bit weight (added nunchaku v1.1.0, perf-boosted v1.2.0). This accelerates DokiDex's
+#     #1 photoreal + real-time-canvas BASE (Z-Image-Turbo) on Blackwell, so it needs the EXISTING Turbo recipe
+#     (steps 8 / cfg 1 / euler / simple — the -Fast image band), NOT the Z-Image BASE 35/4.5 default. An additive
+#     svdq-*z-image-turbo branch keys it to the Turbo knobs. It must NOT inherit the bf16 BASE recipe.
+$ovZTurboNvfp4 = Get-ModelFamilyOverride 'svdq-fp4_r128-z-image-turbo.safetensors'
+Assert ($ovZTurboNvfp4.steps -eq 8 -and $ovZTurboNvfp4.cfgscale -eq 1) "Nunchaku: Z-Image-Turbo NVFP4 -> the Turbo band (8 steps / cfg 1), not the Z-Image BASE 35/4.5"
+Assert ($ovZTurboNvfp4.sampler -eq 'euler' -and $ovZTurboNvfp4.scheduler -eq 'simple') "Nunchaku: Z-Image-Turbo NVFP4 -> euler / simple (the existing Turbo sampler knobs)"
+# the int4 (pre-Blackwell) + r32/r256 rank variants share the same Turbo band; case-insensitive match holds
+Assert ((Get-ModelFamilyOverride 'svdq-int4_r128-z-image-turbo.safetensors').steps -eq 8) "Nunchaku: Z-Image-Turbo svdq INT4/rank variants all match the Turbo band (svdq-*z-image-turbo)"
+Assert ((Get-ModelFamilyOverride 'SVDQ-FP4_R128-Z-IMAGE-TURBO.SAFETENSORS').sampler -eq 'euler') "Nunchaku: Z-Image-Turbo svdq override is case-insensitive"
+# -Kind guard (defense-in-depth): the svdq z-image-turbo override is image-only, like the GGUF/Klein/Qwen overrides
+Assert ((Get-ModelFamilyOverride 'svdq-fp4_r128-z-image-turbo.safetensors' -Kind image).Count -gt 0) "Nunchaku: Z-Image-Turbo NVFP4 under IMAGE kind -> override applies"
+Assert ((Get-ModelFamilyOverride 'svdq-fp4_r128-z-image-turbo.safetensors' -Kind video).Count -eq 0)  "Nunchaku: Z-Image-Turbo NVFP4 under VIDEO kind -> NO override (non-image guarded)"
+# Build-GenBody integration: the Z-Image-Turbo NVFP4 body carries the Turbo band over the Z-Image BASE recipe.
+# Z-Image Turbo carries NO curated negative (the -Fast recipe omits it), so the override DROPS the BASE negative.
+$bZTurboNvfp4 = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'svdq-fp4_r128-z-image-turbo.safetensors'
+Assert ($bZTurboNvfp4.model -eq 'svdq-fp4_r128-z-image-turbo.safetensors') "Nunchaku Z-Image-Turbo NVFP4 body: -Model swaps to the svdq z-image-turbo checkpoint"
+Assert ($bZTurboNvfp4.steps -eq 8 -and $bZTurboNvfp4.cfgscale -eq 1) "Nunchaku Z-Image-Turbo NVFP4 body: overrides steps=8 / cfg=1 (Turbo band over the Z-Image BASE 35/4.5)"
+Assert ($bZTurboNvfp4.sampler -eq 'euler' -and $bZTurboNvfp4.scheduler -eq 'simple') "Nunchaku Z-Image-Turbo NVFP4 body: euler / simple (over the BASE dpmpp_2m/karras)"
+Assert (-not $bZTurboNvfp4.ContainsKey('negativeprompt')) "Nunchaku Z-Image-Turbo NVFP4 body: Z-Image BASE curated negative dropped (Turbo carries no negative)"
+# CRITICAL additive guard: the svdq z-image-turbo branch is keyed on the '-turbo' suffix, so the plain Z-Image
+# BASE bf16 default (z_image_bf16.safetensors) must STILL get NO override — its 35/4.5 path is byte-for-byte intact.
+Assert ((Get-ModelFamilyOverride 'z_image_bf16.safetensors').Count -eq 0) "Nunchaku: the svdq z-image-turbo add does NOT leak onto the plain Z-Image BASE bf16 default (still no override)"
+
+# guard: a non-svdq, non-Klein -Model still leaves the Z-Image recipe byte-for-byte (the adds are additive only)
+$bZimgGuard = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'z_image_bf16.safetensors'
+Assert ($bZimgGuard.steps -eq 35 -and $bZimgGuard.sampler -eq 'dpmpp_2m') "Nunchaku adds are additive: Z-Image -Model still keeps 35 steps / dpmpp_2m (no svdq/Klein nvfp4 leakage)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"

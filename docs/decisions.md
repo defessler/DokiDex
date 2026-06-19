@@ -171,6 +171,69 @@ does), so the placement is left as-is and the routing is flagged as a labeled on
 **Every existing path is byte-for-byte unchanged** (the `infinitetalk` kind/recipe + the additive `-Audio` plumbing
 are purely additive; no default/URL/catalog row changed).
 
+**Update — Nunchaku NVFP4 speed runtime SHIPPED as a gated `-Nunchaku` install + the verified NVFP4 model
+variants (moved off the gated-follow-ups list above).** Nunchaku is **NOT a model** — it is a **SPEED RUNTIME**
+(the `nunchaku-ai/nunchaku` pip wheel + the `ComfyUI-nunchaku` node; the org is **nunchaku-ai** — the old
+`mit-han-lab/nunchaku` name is stale/redirects) that runs **NVFP4-quantized** model variants **~3x faster than BF16
+on Blackwell/RTX-50xx**. Its value depends on whether a nunchaku NVFP4 variant exists for a model DokiDex runs.
+
+> **CORRECTION (adversarial-review fix) — the original relevance analysis made two sourcing errors, now fixed:**
+> **(A) Z-Image-Turbo DOES have a nunchaku NVFP4 variant — the original "NO MATCH for Z-Image / nunchaku has no
+> Z-Image arch" claim was WRONG.** `nunchaku-ai/nunchaku-z-image-turbo` ships `svdq-fp4_r128-z-image-turbo.safetensors`
+> (~3.91 GB, HF-tree + HEAD verified; also r32 + int4 ranks). nunchaku **v1.1.0** added Z-Image-Turbo 4-bit and
+> **v1.2.0** a perf boost ("fuse qkv/norm/rotary for z image"); the pinned **v1.2.1** is after both. This is the
+> **highest-value** NVFP4 add of the lot: Z-Image-Turbo is DokiDex's **#1 photoreal default + real-time-canvas base**,
+> so this DOES accelerate the main draft path on Blackwell. **(B) FLUX.2 Klein NVFP4 is NOT a nunchaku model — it is
+> BFL's OWN NATIVE FP4 checkpoint.** Its card cites native ComfyUI + Diffusers FP4 with **no** Nunchaku/SVDQuant (no
+> `svdq-` prefix), and nunchaku's changelog has **zero** FLUX.2 entries — it loads via ComfyUI's native FLUX.2 FP4
+> path, needing no nunchaku wheel/node. So Klein NVFP4 was **moved out of `-Nunchaku` into `-Models full`** (next to
+> the plain Klein checkpoints) and **relabelled** "(native FP4, Blackwell)".
+
+**Net result — three NVFP4 image weights, two of them nunchaku svdq, one native:**
+(1) **Z-Image-Turbo NVFP4** (nunchaku svdq-fp4, `-Nunchaku`) — accelerates the default base; recipe = the Turbo band
+(8 steps / cfg 1 / euler / simple). (2) **Qwen-Image NVFP4** (nunchaku svdq-fp4 non-Lightning base, `-Nunchaku`,
+13.1GB) — base band 20/4/euler/simple. (3) **FLUX.2 Klein 4B NVFP4** (BFL native FP4, `-Models full`, 2.46GB,
+**NON-GATED** — 302→xet CDN, no 401, unlike BFL's gated base FLUX.2-klein repo). (The famous Nunchaku "4.4s" number is
+4090/int4 and does NOT transfer.)
+**Decision-rule branch taken: nunchaku NVFP4 variants exist for DokiDex models (incl. the default base) AND the
+Blackwell runtime install is authoritatively verified (v1.2.1, Jan 25 2026 — Grace Blackwell support landed v1.1.0,
+NVFP4 is the v1.x target; GitHub-API-verified release matrix) → wire the gated install (wheel + node) + the verified
+NVFP4 weights + catalog rows + the additive recipe overrides + graceful degradation. TDD.**
+**Shipped (mirrors the Foley/InstantID/InfiniteTalk node+wheel sidecar):** a `-Nunchaku` switch on `setup.ps1` that,
+in order (the node imports nunchaku at load, so **wheel FIRST**): (a) resolves the 3-candidate comfy-python, **PROBES
+the live torch minor + `torch.version.cuda` + cpXYZ** (NOT hardcoded; nunchaku is a compiled C++/CUDA ext with no
+fallback, so `torchX.Y` AND `cuXX.X` MUST match exactly) and pip-installs the matching `<cuTag>torch<tv>-<py>-win_amd64`
+v1.2.1 **release-asset wheel** (`+`→`%2B`) — v1.2.1 ships **both** `cu12.8` (torch 2.8–2.11) and `cu13.0` (torch
+2.9–2.11) matrices, so the CUDA tag is PROBED from `torch.version.cuda` (12.8→cu12.8, 13.x→cu13.0); **torch<2.8 has no
+wheel → it Warns** (no 404 URL) and a cu13 env never gets a cu12.8 wheel; (b) clones `nunchaku-tech/ComfyUI-nunchaku`
++ its requirements; (c) under **`-Models full`** `Get-Model`s the two **nunchaku svdq** NVFP4 weights (Z-Image-Turbo +
+Qwen) into `diffusion_models/` — wheel+node are **tier-independent** so a future NVFP4 model is one `Get-Model` away
+even on `-Models lean`. Every step is `$cpy`/`Test-Path`-guarded with a `Warn` fallback (graceful degradation, same
+posture as the other sidecars).
+**Recipe override:** **Z-Image-Turbo NVFP4 = ONE additive line** (`svdq-*z-image-turbo.safetensors` → the Turbo band
+8/1/euler/simple, dropping the BASE curated negative like the cfg-1 distill it is); **Qwen NVFP4 = ONE additive line**
+(`svdq-*qwen-image.safetensors -and -notlike '*lightning*'` → the base band 20/4/euler/simple as the GGUF), keyed off
+the svdq name so neither collides with the `.gguf`/`*base*`-discriminated Qwen-Edit path; the 4/8-step **Lightning** fp4
+distills are explicitly **excluded** (they want cfg=1/low-step and are an on-demand add). **Klein NVFP4 needs ZERO
+doki-gen.ps1 recipe change** — the existing `flux-2-klein*` glob already matches `flux-2-klein-4b-nvfp4.safetensors`,
+and (no `-base-` infix) it takes the **distilled** branch (4 steps / cfg 1 / euler / Flux2); the negative-drop guard
+fires too. **Caveat (now noted in code):** BFL's nvfp4 card states **no inference config** and does **not** label the
+file distilled-vs-base (the `-base-` convention was Comfy-Org's repackage, not this repo), so the distilled routing is
+the **conservative, on-GPU-unverified** call (a 4-vs-base-step A/B is the labeled confirm).
+**Catalog:** three `model-catalog.json` rows (Z-Image-Turbo NVFP4 / Qwen NVFP4 / Klein native FP4) so all surface in
+the Studio picker / SwarmUI's native picker / via `-Model`. URLs HF-tree / GitHub-API / HEAD verified; AST-driven
+`setup-helpers` pins the node clone + the PROBED wheel-URL (now `$cuTag` + `torch.version.cuda` probe) + the weight
+entries + a **Z-Image-Turbo-present assert** (the svdq z-image-turbo URL IS wired — the inverse of the old phantom
+guard); `doki-gen` pins all three overrides + the additive/`-Kind`-guard contract. **Every existing path is
+byte-for-byte unchanged.**
+**On-GPU / LABELED confirms (render-unverified at rest — no GPU in CI):** (1) **which torch + CUDA build** the live
+comfy env has → which wheel (PROBED, not assumed); (2) **whether SwarmUI loads a single-file nunchaku `.safetensors`
+via its normal `-Model` picker or needs the node's own Nunchaku loader / a custom workflow** — if a workflow, the svdq
+Qwen/Z-Image NVFP4 weights become a `-Workflow` hook (like Foley) rather than a bare `-Model` swap, which would change
+the wiring (the one unknown that could turn the thin wire into authoring a workflow — resolve before promising the
+additive-override path end-to-end); (3) the exact **NVFP4 step/cfg band** + the distilled-vs-base call on Klein at fp4;
+(4) the **real Blackwell speedup** vs the bf16/GGUF path on this 32GB box.
+
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 
 ## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present

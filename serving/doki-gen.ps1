@@ -237,6 +237,11 @@ function Get-ModelFamilyOverride {
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
+        # NVFP4 caveat: flux-2-klein-4b-nvfp4.safetensors (BFL's OWN native FP4 sibling) also matches this glob and,
+        # lacking a '*base*' infix, falls to the distilled branch below. BFL's nvfp4 model card states NO inference
+        # config and does NOT label the file distilled-vs-base (the '-base-' naming convention was the Comfy-Org
+        # repackage's, not BFL's nvfp4 repo) — so the distilled classification of the nvfp4 file is the CONSERVATIVE
+        # assumption and is ON-GPU-UNVERIFIED (a 4-step-vs-base-step A/B is the labeled confirm). Kept conservative.
         if ($Model -like '*base*') { return @{ steps = 20; cfgscale = 5; sampler = 'euler'; scheduler = 'Flux2' } }
         else                       { return @{ steps = 4;  cfgscale = 1; sampler = 'euler'; scheduler = 'Flux2' } }
     }
@@ -252,6 +257,37 @@ function Get-ModelFamilyOverride {
     # the exact step/cfg within the doc-supported 20-50 / cfg 4 band + the live 32GB fit are the confirms; the
     # values below are additive (image-kind only) so every non-Qwen path stays byte-for-byte unchanged.
     if ($Model -like 'Qwen_Image-*.gguf') { return @{ steps = 20; cfgscale = 4; sampler = 'euler'; scheduler = 'simple' } }
+    # Qwen-Image BASE as a Nunchaku NVFP4 single-file checkpoint (svdq-fp4_*-qwen-image.safetensors, ~3x faster
+    # on Blackwell/RTX-50xx than the GGUF/bf16 path — see the gated setup.ps1 -Nunchaku block + docs/decisions.md).
+    # The NVFP4 variant is the SAME non-distilled t2i unet as the GGUF above, so it SHARES the base's sampler band
+    # (steps 20 / cfg 4 / euler / simple) — only the on-disk quant + the loader differ, not the recipe. The .gguf
+    # match above is extension-locked and does NOT catch the .safetensors NVFP4 file, so this is purely additive.
+    #   - Keyed on 'svdq-*qwen-image.safetensors' (the nunchaku-tech NVFP4 naming): svdq-fp4 = Blackwell NVFP4,
+    #     svdq-int4 = the pre-Blackwell INT4 build — both match here and want the same base knobs.
+    #   - EXCLUDES the 4-step/8-step Lightning fp4 files (*lightning*): those are low-step distills that want
+    #     cfg=1 / steps 4-8 instead, so they must NOT inherit this base steps=20/cfg=4 band. The default install
+    #     fetches only the non-Lightning base (svdq-fp4_r128-qwen-image.safetensors); add a Lightning branch here
+    #     only if a Lightning fp4 file is fetched. The '*base*'/.gguf discriminators that protect the Qwen-Edit
+    #     checkpoint still hold — svdq names contain neither, so no collision with the -Edit path.
+    # ON-GPU NOTE (render-unverified at rest — no GPU in CI): whether SwarmUI exposes the nunchaku loader as a
+    # plain -Model swap (this path) or needs a dedicated Nunchaku-loader custom workflow is the labeled on-GPU
+    # confirm; if it needs a workflow, Qwen NVFP4 becomes a -Workflow hook instead. The values here are additive
+    # (image-kind only) so every non-svdq path stays byte-for-byte unchanged.
+    if ($Model -like 'svdq-*qwen-image.safetensors' -and $Model -notlike '*lightning*') { return @{ steps = 20; cfgscale = 4; sampler = 'euler'; scheduler = 'simple' } }
+    # Z-Image-TURBO as a Nunchaku NVFP4 single-file checkpoint (svdq-*z-image-turbo.safetensors, nunchaku-ai/
+    # nunchaku-z-image-turbo — Z-Image-Turbo 4-bit support landed in nunchaku v1.1.0, perf-boosted in v1.2.0).
+    # This is the SAME architecture as DokiDex's #1 photoreal + real-time-canvas BASE (Z-Image-Turbo, the -Fast
+    # image tier), so it MUST inherit the TURBO recipe, NOT the Z-Image BASE default. The -Fast image recipe above
+    # uses steps 8 / cfg 1 / euler / simple (and carries NO curated negative — Turbo is a low-step distill), so the
+    # svdq Turbo checkpoint reuses exactly those knobs; this override drops the BASE's 35/4.5/dpmpp_2m+karras+negative.
+    #   - Keyed on 'svdq-*z-image-turbo.safetensors': matches the svdq-fp4 (Blackwell NVFP4) build the install
+    #     fetches plus the int4 / r32 / r256 rank siblings in the same repo — all the same Turbo arch, same knobs.
+    #   - The '-turbo' suffix is load-bearing: the plain Z-Image BASE default (z_image_bf16.safetensors) is NOT an
+    #     svdq file and does NOT contain 'z-image-turbo', so it still returns @{} (its 35/4.5 path stays byte-for-byte).
+    # ON-GPU NOTE (render-unverified at rest — no GPU in CI): like the Qwen svdq above, whether SwarmUI exposes the
+    # nunchaku loader as a plain -Model swap (this path) or needs a dedicated Nunchaku-loader workflow is the labeled
+    # on-GPU confirm. The values here are additive (image-kind only) so every non-svdq path stays byte-for-byte unchanged.
+    if ($Model -like 'svdq-*z-image-turbo.safetensors') { return @{ steps = 8; cfgscale = 1; sampler = 'euler'; scheduler = 'simple' } }
     return @{}
 }
 
@@ -282,10 +318,13 @@ function Build-GenBody {
         # Klein checkpoint hand-picked under -Edit/-Video keeps that kind's own recipe knobs untouched.
         $ov = Get-ModelFamilyOverride -Model $Model -Kind $Kind
         foreach ($kv in $ov.GetEnumerator()) { $body[$kv.Key] = $kv.Value }
-        # FLUX.2 drives a real CFG via euler/Flux2 but ships no curated negative -> drop the Z-Image negative
-        # so it isn't silently carried onto a FLUX.2 image gen (a user -Negative still sets it below). Gated to
-        # the image kind to match the override above (non-image recipes keep their own negative handling).
-        if ($Kind -eq 'image' -and $Model -like 'flux-2-klein*' -and $body.ContainsKey('negativeprompt')) { $body.Remove('negativeprompt') }
+        # Low-step distilled checkpoints carry no curated negative -> drop the Z-Image BASE negative so it isn't
+        # silently carried onto them (a user -Negative still sets it below). Two families qualify: FLUX.2 Klein
+        # (euler/Flux2, real CFG but ships no negative) and the Nunchaku Z-Image-TURBO NVFP4 (svdq-*z-image-turbo,
+        # the cfg-1 Turbo distill — the -Fast Turbo recipe omits the negative, so its NVFP4 sibling must too).
+        # Qwen svdq is deliberately NOT here: it runs at a real cfg 4 and keeps the curated negative (see its note).
+        # Gated to the image kind to match the override above (non-image recipes keep their own negative handling).
+        if ($Kind -eq 'image' -and ($Model -like 'flux-2-klein*' -or $Model -like 'svdq-*z-image-turbo.safetensors') -and $body.ContainsKey('negativeprompt')) { $body.Remove('negativeprompt') }
     }
     if ($Seed -ge 0) { $body.seed = $Seed }   # >=0 = reproducible; omit (-1) lets SwarmUI pick a random seed
     # an init image turns text2image into img2img / image-edit; creativity 0 = keep the input faithfully,

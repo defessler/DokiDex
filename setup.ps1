@@ -19,6 +19,7 @@ param(
     [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
     [switch]$FaceId,    # optional sidecar: InstantID face-identity reference (SDXL — reuses the anime Illustrious/Animagine base, no FLUX needed)
     [switch]$InfiniteTalk,  # optional sidecar: audio-driven talking-video via MeiGen InfiniteTalk on the Wan2.1-I2V-14B base — NOTE pulls an ~82GB Wan2.1 base NOT otherwise on disk
+    [switch]$Nunchaku,  # optional sidecar: Nunchaku NVFP4 speed runtime (wheel + ComfyUI-nunchaku node) — ~3x faster on Blackwell/RTX-50xx for the Z-Image-Turbo (the default base) + Qwen-Image NVFP4 svdq variants. +Models full fetches them. (FLUX.2 Klein NVFP4 is BFL-native FP4, fetched under -Models full, not here.)
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
     [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
@@ -529,6 +530,16 @@ if ($Models -eq "full") {
     $flux2 = "https://huggingface.co/Comfy-Org/flux2-klein-4B/resolve/main/split_files"
     Get-Model "$flux2/diffusion_models/flux-2-klein-4b.safetensors"      (Join-Path $diff "flux-2-klein-4b.safetensors")
     Get-Model "$flux2/diffusion_models/flux-2-klein-base-4b.safetensors" (Join-Path $diff "flux-2-klein-base-4b.safetensors")
+    # FLUX.2 Klein 4B NVFP4 (~2.46GB): BFL's OWN NATIVE FP4 checkpoint — NOT a Nunchaku svdq quant. BFL's model
+    # card cites native ComfyUI + Diffusers FP4 with NO Nunchaku/SVDQuant, and nunchaku's changelog has zero FLUX.2
+    # entries, so it loads via ComfyUI's native FLUX.2 FP4 path and needs NO nunchaku wheel/node (hence it lives
+    # here under -Models full, NOT the gated -Nunchaku block). The nvfp4 repo is BFL's OWN and is NON-GATED
+    # (302->xet CDN, no 401 — unlike BFL's gated base FLUX.2-klein repo): the ONLY place a black-forest-labs resolve
+    # URL is permitted (the plain Klein checkpoints above stay on the Comfy-Org repackage). It routes via the
+    # existing 'flux-2-klein*' family override in doki-gen.ps1; with no '-base-' infix it takes the distilled band
+    # (4 steps/cfg1/euler/Flux2) — a CONSERVATIVE, on-GPU-unverified call (BFL's nvfp4 card states no inference
+    # config and doesn't label distilled-vs-base; the '-base-' convention was Comfy-Org's, not this repo). HEAD-verified.
+    Get-Model "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-nvfp4/resolve/main/flux-2-klein-4b-nvfp4.safetensors" (Join-Path $diff "flux-2-klein-4b-nvfp4.safetensors")
 
     # Realism LoRA for `doki gen -Realism` — a photoreal Z-Image LoRA (Apache-2.0, public/non-gated HF
     # repo, scriptable resolve/ URL like the Wan-Lightning LoRAs above). Source ships the generic
@@ -799,6 +810,100 @@ if ($InfiniteTalk) {
     else { Warn "media-assets\InfiniteTalk.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
 
     Ok "InfiniteTalk ready -> node + weights installed (~82GB Wan2.1-I2V-14B base + adapter + wav2vec2). On-GPU LABELED: author the workflow JSON, confirm the 32GB fit (fp8 base + block-swap), source the fp8 repack, and pin the audio body-key. Run via  doki gen -InfiniteTalk -InitImage <portrait> -Audio <clip> '<prompt>'  once authored."
+}
+
+# 5h-quater. Nunchaku NVFP4 speed runtime (GATED sidecar, -Nunchaku) — mirrors the Foley/InstantID/InfiniteTalk
+#     node+wheel pattern. Nunchaku is NOT a model: it is a SPEED RUNTIME (the nunchaku-ai/nunchaku pip wheel + the
+#     ComfyUI-nunchaku node) that runs NVFP4-quantized model VARIANTS ~3x faster than BF16 on Blackwell/RTX-50xx.
+#     (Org note: the wheel/node org is nunchaku-ai — the original mit-han-lab/nunchaku name is stale/redirects.)
+#     Its value depends on whether a nunchaku NVFP4 variant exists for a model DokiDex runs. nunchaku DOES ship
+#     two relevant ones here: (1) Z-Image-TURBO (nunchaku-ai/nunchaku-z-image-turbo svdq-fp4 — added nunchaku
+#     v1.1.0, perf-boosted v1.2.0) — the HIGHEST-value add, since Z-Image-Turbo is DokiDex's #1 photoreal default
+#     + real-time-canvas base, so this accelerates the MAIN draft path on Blackwell; (2) Qwen-Image
+#     (nunchaku-ai/nunchaku-qwen-image svdq-fp4, the in-image-text model). FLUX.2 Klein NVFP4 is deliberately NOT
+#     here: it is BFL's OWN NATIVE FP4 checkpoint (native ComfyUI/Diffusers FP4 path, NO svdq- prefix, NO nunchaku
+#     dependency — nunchaku's changelog has zero FLUX.2 entries), so it ships under -Models full alongside the
+#     plain Klein checkpoints, not in this gated block (see docs/decisions.md). The famous Nunchaku "4.4s" number
+#     is 4090/int4 and does NOT transfer. ORDER MATTERS: the wheel must be in the comfy-python env BEFORE the node
+#     loads (the node imports nunchaku at load), so wheel FIRST, then node + its requirements, then (under -Models
+#     full) the NVFP4 weights. ON-GPU LABELED confirms (no GPU in CI): (1) which torch + CUDA build the live comfy
+#     env has -> which wheel (PROBED below, not hardcoded — nunchaku is a compiled C++/CUDA ext with no fallback,
+#     so torchX.Y AND cuXX.X MUST match exactly); (2) whether SwarmUI loads a single-file nunchaku .safetensors via
+#     its normal -Model picker or needs the node's own Nunchaku loader / a custom workflow (if so, the svdq
+#     Qwen/Z-Image NVFP4 weights become a -Workflow hook, not a bare -Model swap); (3) the real Blackwell speedup on 32GB.
+if ($Nunchaku) {
+    Info "Nunchaku NVFP4 speed runtime (nunchaku-ai wheel + ComfyUI-nunchaku node; Blackwell/RTX-50xx) — speeds up Z-Image-Turbo + Qwen-Image NVFP4 (Klein NVFP4 is BFL-native FP4, shipped under -Models full)"
+    Ensure-WinGet "Git.Git" "git"
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        # resolve the comfy-python (same 3-candidate probe Foley/InstantID/InfiniteTalk use).
+        $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
+            ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+        # 1) the WHEEL FIRST — pip-install the nunchaku C++/CUDA extension into the comfy env. The wheel MUST match
+        #    the env's python version, its installed torch minor, AND its CUDA build EXACTLY (compiled ext, no
+        #    fallback), so PROBE all three rather than hardcode. v1.2.1 ships TWO win_amd64 CUDA matrices:
+        #    cu12.8 (torch 2.8/2.9/2.10/2.11) and cu13.0 (torch 2.9/2.10/2.11), each x cp310/311/312/313 — so a
+        #    cu13 torch env needs the cu13.0 wheel or it import-fails. We read the live torch minor (e.g. '2.8'),
+        #    torch.version.cuda (-> cu12.8 vs cu13.0), and the cpXYZ tag, then assemble the release-asset URL
+        #    ('+' -> %2B). torch < 2.8 has NO matching wheel at all -> Warn (don't emit a guaranteed-404 URL).
+        if ($cpy) {
+            $tv = $null; $pyTag = $null; $cudaV = $null
+            try { $tv    = (& $cpy -c "import torch,re;print(re.match(r'(\d+\.\d+)', torch.__version__).group(1))").Trim() } catch {}
+            try { $pyTag = (& $cpy -c "import sys;print('cp%d%d' % sys.version_info[:2])").Trim() } catch {}
+            try { $cudaV = (& $cpy -c "import torch;print(torch.version.cuda or '')").Trim() } catch {}
+            # map torch.version.cuda -> the wheel's CUDA tag. '12.8'->cu12.8 ; '13.0' (or any 13.x)->cu13.0.
+            # Unknown/older CUDA falls back to cu12.8 (the broadest matrix) with a heads-up rather than guessing.
+            $cuTag = if ($cudaV -like '13.*') { 'cu13.0' } elseif ($cudaV -like '12.*') { 'cu12.8' } else { $null }
+            # torch<2.8 ships no nunchaku wheel in any CUDA matrix; cu13.0 additionally has no torch2.8 wheel.
+            $torchOk = $false
+            if ($tv -match '^(\d+)\.(\d+)$') { $torchOk = ([int]$Matches[1] -gt 2) -or ([int]$Matches[1] -eq 2 -and [int]$Matches[2] -ge 8) }
+            if (-not $torchOk -and $tv) {
+                Warn "comfy env has torch $tv, but nunchaku requires torch>=2.8 (v1.2.1 ships only torch 2.8-2.11 wheels). Upgrade torch in the comfy env, then re-run  setup.ps1 -Media -Nunchaku  (the NVFP4 runtime needs a torch>=2.8 build to install)."
+            } elseif ($tv -and $pyTag -and $cuTag) {
+                if (-not $cudaV) { Warn "could not read torch.version.cuda; defaulting the nunchaku wheel to $cuTag — if torch is a cu13 build, install the cu13.0 wheel from https://github.com/nunchaku-tech/nunchaku/releases/tag/v1.2.1 manually." }
+                $nver = "1.2.1"
+                $asset = "nunchaku-$nver+${cuTag}torch$tv-$pyTag-$pyTag-win_amd64.whl"
+                # '+' in the asset name -> %2B for the URL (PEP 427 build-tag; GitHub serves it URL-encoded).
+                $wheelUrl = "https://github.com/nunchaku-tech/nunchaku/releases/download/v$nver/nunchaku-$nver%2B${cuTag}torch$tv-$pyTag-$pyTag-win_amd64.whl"
+                Info "installing nunchaku wheel (torch $tv / CUDA $cudaV -> $cuTag / $pyTag): $asset ..."
+                try { Pip $cpy install $wheelUrl; Ok "nunchaku wheel installed ($asset)" }
+                catch { Warn "nunchaku wheel install failed for torch $tv / $cuTag / $pyTag ($($_.Exception.Message)). Pick the matching asset from https://github.com/nunchaku-tech/nunchaku/releases/tag/v$nver and  <comfy-python> -m pip install <url>  manually (or use the node's NunchakuWheelInstaller). NOTE cu13.0 has no torch2.8 wheel — upgrade torch if on cu13 + torch2.8." }
+            } else {
+                Warn "could not probe the comfy env's torch/python/CUDA (torch='$tv' py='$pyTag' cuda='$cudaV'); install the matching wheel from https://github.com/nunchaku-tech/nunchaku/releases/tag/v1.2.1 manually (the torchX.Y AND cuXX.X in the wheel name MUST match the env's torch minor + CUDA build exactly)."
+            }
+        } else {
+            Warn "comfy-python not found; install the nunchaku wheel + node deps manually once the ComfyUI backend exists (re-run setup.ps1 -Media -Nunchaku after it installs)."
+        }
+
+        # 2) the NODE — clone ComfyUI-nunchaku (the loader/runtime node) + its requirements. Cloned AFTER the wheel
+        #    so its load-time  import nunchaku  resolves. nunchaku-tech was GitHub-renamed to nunchaku-ai (both 200).
+        $nNode = Join-Path $nodes "ComfyUI-nunchaku"
+        if (-not (Test-Path $nNode)) { Info "installing ComfyUI-nunchaku node ..."; Git-Clone https://github.com/nunchaku-tech/ComfyUI-nunchaku $nNode } else { Ok "ComfyUI-nunchaku node present" }
+        $nReq = Join-Path $nNode "requirements.txt"
+        if ($cpy -and (Test-Path $nReq)) { Info "installing ComfyUI-nunchaku python deps ..."; try { Pip $cpy install -r $nReq; Ok "ComfyUI-nunchaku deps installed" } catch { Warn "ComfyUI-nunchaku deps: run  <comfy-python> -m pip install -r `"$nReq`"  manually ($($_.Exception.Message))" } }
+        elseif ($cpy) { Ok "ComfyUI-nunchaku has no requirements.txt (deps satisfied by the wheel)" }
+        else { Warn "ComfyUI-nunchaku deps: run  <comfy-python> -m pip install -r `"$nReq`"  manually" }
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -Nunchaku after it installs" }
+
+    # 3) the NVFP4 WEIGHTS — net-new nunchaku svdq weights, so gated on -Models full (like the Qwen GGUF). They go
+    #    in the same diffusion_models dir ($diff) as the z_image/klein checkpoints; ComfyUI-nunchaku loads them via
+    #    its own loader (the single-file-vs-loader-node routing is the on-GPU confirm in the header). Wired so a
+    #    future NVFP4 model is one Get-Model away even when -Models is lean (node+wheel are tier-independent above).
+    #    NOTE: FLUX.2 Klein NVFP4 is NOT here — it is BFL's OWN native FP4 (no nunchaku dep), so it ships under
+    #    -Models full next to the plain Klein checkpoints (5g). Only the two nunchaku svdq weights belong in -Nunchaku:
+    #      - Z-Image-Turbo NVFP4 (~3.91GB): nunchaku-ai/nunchaku-z-image-turbo svdq-fp4_r128 (HF-tree/HEAD verified;
+    #        4-bit Z-Image-Turbo landed nunchaku v1.1.0). Accelerates DokiDex's DEFAULT photoreal + real-time-canvas
+    #        base on Blackwell. The additive 'svdq-*z-image-turbo' branch in doki-gen.ps1 gives it the Turbo band
+    #        (steps 8/cfg 1/euler/simple), matching the -Fast Z-Image-Turbo recipe.
+    #      - Qwen-Image NVFP4 base (13.1GB): the svdq-fp4_r128 NON-Lightning base (matches the base t2i unet DokiDex
+    #        already ships as the GGUF). The additive svdq-* line in doki-gen.ps1 gives it steps 20/cfg 4/euler/simple.
+    if ($Models -eq "full") {
+        Get-Model "https://huggingface.co/nunchaku-ai/nunchaku-z-image-turbo/resolve/main/svdq-fp4_r128-z-image-turbo.safetensors" (Join-Path $diff "svdq-fp4_r128-z-image-turbo.safetensors")
+        Get-Model "https://huggingface.co/nunchaku-ai/nunchaku-qwen-image/resolve/main/svdq-fp4_r128-qwen-image.safetensors"        (Join-Path $diff "svdq-fp4_r128-qwen-image.safetensors")
+    } else { Info "nunchaku NVFP4 weights skipped (re-run with -Models full to fetch the Z-Image-Turbo + Qwen-Image NVFP4 variants); node + wheel installed so any NVFP4 model is one Get-Model away" }
+
+    Ok "Nunchaku ready -> NVFP4 runtime (wheel + node) installed$(if ($Models -eq 'full') { ' + Z-Image-Turbo/Qwen NVFP4 weights' }). Speeds up Z-Image-Turbo (the default base) + Qwen-Image on Blackwell (Klein NVFP4 is BFL-native FP4, under -Models full). ON-GPU LABELED: confirm the svdq loader is a plain -Model swap vs a custom workflow, the wheel/torch/CUDA match, and the real 32GB speedup."
 }
 
 # 5i. Configure MagicPrompt -> local prompt-rewriter (:8013) HEADLESSLY via its API

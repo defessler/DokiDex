@@ -333,6 +333,78 @@ try {
     $fp8Adapter = $entries | Where-Object { $_.Url -match '(?i)InfiniteTalk.*fp8|InfiniTetalk.*fp8' }
     Assert ($fp8Adapter.Count -eq 0) "InfiniteTalk: no phantom fp8 adapter URL (Kijai's tree is fp16-only; an fp8 BASE repack is the on-GPU sourcing step)"
 
+    Write-Host "`nNunchaku NVFP4 speed runtime (-Nunchaku): nunchaku-ai wheel-from-URL + ComfyUI-nunchaku node + the two nunchaku svdq NVFP4 weights"
+    # The GATED speed sidecar (-Nunchaku) installs the nunchaku NVFP4 RUNTIME (a pip wheel + the ComfyUI-nunchaku
+    # node), then under -Models full fetches the two nunchaku svdq NVFP4 VARIANTS: Z-Image-Turbo (nunchaku-ai svdq-fp4
+    # — the highest-value add, since Z-Image-Turbo is DokiDex's #1 photoreal default / real-time-canvas base, so this
+    # DOES accelerate the main path) + Qwen-Image (nunchaku-ai svdq-fp4 base). FLUX.2 Klein NVFP4 is NOT a nunchaku
+    # model (it is BFL's OWN native FP4 — see the -Models full block + its own assert below), so it is NOT in this
+    # block. Pin: (1) the node is cloned from the nunchaku-tech/ComfyUI-nunchaku repo, (2) the wheel is installed from
+    # a nunchaku-tech/nunchaku GitHub RELEASE asset URL (PROBED torch/CUDA/py, not hardcoded — the wheel name carries
+    # the cuXX.X + torch + cp tags), (3) the two svdq NVFP4 weights are wired Get-Model entries with the verified
+    # resolve URLs + non-colliding local filenames. URLs HF-tree / GitHub-API / HEAD verified this session.
+    $nClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)nunchaku-tech/ComfyUI-nunchaku' }, $true)
+    Assert ($nClone.Count -ge 1) "Nunchaku: setup.ps1 clones the nunchaku-tech/ComfyUI-nunchaku node (the NVFP4 loader/runtime node)"
+
+    # the wheel URL is BUILT (PROBED torch/py) off a nunchaku-tech/nunchaku GitHub release; pin the assembled
+    # $wheelUrl assignment targets the releases/download tree (not a hardcoded torch version) + the cu12.8 matrix.
+    $wheelAsn = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$wheelUrl' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $wheelAsn) "Nunchaku: setup.ps1 assembles a `$wheelUrl for the nunchaku pip wheel"
+    $wheelTxt = if ($wheelAsn) { $wheelAsn.Right.Extent.Text } else { '' }
+    Assert ($wheelTxt -match '(?i)github\.com/nunchaku-tech/nunchaku/releases/download') "Nunchaku: the wheel URL points at the nunchaku-tech/nunchaku GitHub release-asset tree"
+    # the CUDA tag must be PROBED ('$cuTag'), not hardcoded cu12.8 — v1.2.1 ships BOTH cu12.8 (torch 2.8-2.11) and
+    # cu13.0 (torch 2.9-2.11) win_amd64 wheels, so a cu13 torch env needs the cu13.0 wheel or import-fails. The URL
+    # interpolates a $cuTag built from torch.version.cuda (12.8->cu12.8, 13.0->cu13.0).
+    Assert ($wheelTxt -match '\$\{?cuTag\}?')                "Nunchaku: the wheel URL is keyed off the PROBED CUDA build (`$cuTag from torch.version.cuda), not a hardcoded cu12.8"
+    # the torch minor must be PROBED ('$tv'), not hardcoded — nunchaku is a compiled ext with no fallback
+    Assert ($wheelTxt -match '\$tv')                          "Nunchaku: the wheel URL is keyed off the PROBED torch version (`$tv), not a hardcoded torch minor"
+    $wheelProbe = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.Extent.Text -match '(?i)import torch' -and $x.Extent.Text -match '(?i)__version__' }, $true)
+    Assert ($wheelProbe.Count -ge 1) "Nunchaku: setup.ps1 PROBES the comfy env's installed torch version (no hardcoded 2.8)"
+    # and PROBES torch.version.cuda to choose cu12.8 vs cu13.0 (the compiled ext has no CUDA fallback)
+    $cudaProbe = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.Extent.Text -match '(?i)torch\.version\.cuda' }, $true)
+    Assert ($cudaProbe.Count -ge 1) "Nunchaku: setup.ps1 PROBES the comfy env's CUDA build (torch.version.cuda) to pick the cu12.8 vs cu13.0 wheel"
+
+    # (the NVFP4 weights — Get-Model entries off the verified resolve URLs)
+    # Klein NVFP4: RECLASSIFIED as BFL's OWN NATIVE NVFP4 checkpoint (no svdq- prefix; the model card cites native
+    # ComfyUI + Diffusers, NO Nunchaku/SVDQuant; nunchaku's changelog has ZERO FLUX.2 entries). It loads via
+    # ComfyUI's native FLUX.2 FP4 path, NOT the ComfyUI-nunchaku node, so it MOVED OUT of the gated -Nunchaku block
+    # into the regular -Models full Klein block (near the plain flux-2-klein downloads). $entries is mined globally
+    # by AST, so it's still picked up here regardless of which block it lives in. It is the NON-GATED nvfp4 sibling
+    # (302->CDN, no 401) — distinct from the 401-gated black-forest-labs/FLUX.2-klein base repo the Comfy-Org
+    # repackage exists to avoid; the nvfp4 file is the only place a black-forest-labs resolve URL is permitted.
+    $eKleinNv = $entries | Where-Object { $_.File -eq 'flux-2-klein-4b-nvfp4.safetensors' } | Select-Object -First 1
+    Assert ($null -ne $eKleinNv) "Klein NVFP4 (native FP4, -Models full): the FLUX.2 Klein 4B NVFP4 weight is a Get-Model entry"
+    Assert ($eKleinNv -and $eKleinNv.Url -match '^https://huggingface\.co/black-forest-labs/FLUX\.2-klein-4b-nvfp4/resolve/main/flux-2-klein-4b-nvfp4\.safetensors$') "Klein NVFP4: rides the verified NON-GATED black-forest-labs/FLUX.2-klein-4b-nvfp4 resolve URL"
+    # it routes via the existing doki-gen flux-2-klein* glob; no '-base-' infix -> the (conservative, on-GPU-
+    # unverified) DISTILLED branch. BFL's nvfp4 card states no inference config, so distilled-vs-base is an assumption.
+    Assert ($eKleinNv -and $eKleinNv.File -notmatch '(?i)-base-') "Klein NVFP4: no '-base-' infix -> the existing flux-2-klein* override applies the conservative distilled band (zero recipe change)"
+
+    # Qwen NVFP4: the nunchaku-ai/nunchaku-qwen-image svdq-fp4_r128 NON-Lightning base (matches the base t2i unet)
+    $eQwenNv = $entries | Where-Object { $_.File -eq 'svdq-fp4_r128-qwen-image.safetensors' } | Select-Object -First 1
+    Assert ($null -ne $eQwenNv) "Nunchaku: the Qwen-Image NVFP4 base weight is a Get-Model entry"
+    Assert ($eQwenNv -and $eQwenNv.Url -match '^https://huggingface\.co/nunchaku-ai/nunchaku-qwen-image/resolve/main/svdq-fp4_r128-qwen-image\.safetensors$') "Nunchaku: Qwen NVFP4 rides the verified nunchaku-ai/nunchaku-qwen-image svdq-fp4_r128 resolve URL"
+    # it is the NON-Lightning base (so the additive svdq-* override gives it the base 20/4 band, not a low-step cfg=1)
+    Assert ($eQwenNv -and $eQwenNv.File -notmatch '(?i)lightning') "Nunchaku: the fetched Qwen NVFP4 file is the NON-Lightning base (the low-step Lightning fp4 distills are a separate on-demand add)"
+
+    # Z-Image-Turbo NVFP4: nunchaku DOES ship a Z-Image-Turbo 4-bit weight (nunchaku-ai/nunchaku-z-image-turbo,
+    # added v1.1.0 / perf-boosted v1.2.0) — the single most valuable NVFP4 add since Z-Image-Turbo is DokiDex's
+    # #1 photoreal + real-time-canvas BASE. The svdq-fp4_r128 file must be a wired Get-Model entry off the
+    # HF-tree/HEAD-verified resolve URL (NOT absent — the earlier "no Z-Image nunchaku arch" claim was WRONG).
+    $eZTurboNv = $entries | Where-Object { $_.File -eq 'svdq-fp4_r128-z-image-turbo.safetensors' } | Select-Object -First 1
+    Assert ($null -ne $eZTurboNv) "Nunchaku: the Z-Image-Turbo NVFP4 weight IS a wired Get-Model entry (nunchaku v1.1.0 added Z-Image-Turbo 4-bit — the highest-value NVFP4 add for DokiDex's default base)"
+    Assert ($eZTurboNv -and $eZTurboNv.Url -match '^https://huggingface\.co/nunchaku-ai/nunchaku-z-image-turbo/resolve/main/svdq-fp4_r128-z-image-turbo\.safetensors$') "Nunchaku: Z-Image-Turbo NVFP4 rides the verified nunchaku-ai/nunchaku-z-image-turbo svdq-fp4_r128 resolve URL"
+    # it is the fp4 (Blackwell NVFP4) build, NOT an int4 pre-Blackwell rank variant, and NOT a Lightning distill
+    Assert ($eZTurboNv -and $eZTurboNv.File -match '(?i)fp4' -and $eZTurboNv.File -notmatch '(?i)int4|lightning') "Nunchaku: the fetched Z-Image-Turbo file is the svdq-fp4 (Blackwell NVFP4) build, not an int4/Lightning variant"
+
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
     Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"
