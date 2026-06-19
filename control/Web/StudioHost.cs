@@ -153,7 +153,7 @@ public static class StudioHost
             var endPath = SaveDataUrl(body.EndImage, "end");
             if (body.EndImage is not null && endPath is null) return Results.BadRequest(new { error = "bad end image" });
             var req = new GenRequest(body.Prompt.Trim(), kind,
-                Fast: body.Fast, Upscale: body.Upscale, Refine: body.Refine,
+                Fast: body.Fast, Quality: body.Quality, Upscale: body.Upscale, Refine: body.Refine,
                 Face: body.Face, Realism: body.Realism, Raw: body.Raw, InitImage: initPath,
                 Seed: body.Seed, Count: Math.Clamp(body.Count, 1, 9), Strength: body.Strength, MaskImage: maskPath, Aspect: body.Aspect,
                 Lyrics: body.Lyrics, Duration: body.Duration, Bpm: body.Bpm, Lora: body.Lora, Negative: body.Negative,

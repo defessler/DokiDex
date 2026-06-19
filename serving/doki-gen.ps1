@@ -74,7 +74,7 @@ function Expand-References {
 function Get-GenRecipe {
     param(
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
-        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [string]$Upscaler
+        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler
     )
     $r = switch ($Kind) {
         # DEFAULT image = Z-Image BASE (non-distilled) — the quality ceiling: a real CFG + working negative
@@ -90,7 +90,16 @@ function Get-GenRecipe {
             if ($Fast) { @{ model = 'ltxv-2b-0.9.8-distilled.safetensors'; textvideoframes = 97; steps = 8;  cfgscale = 1;   width = 768; height = 512; videofps = 24; videoformat = 'h264-mp4' } }
             else       { @{ model = 'wan2.2_ti2v_5B_fp16.safetensors';     textvideoframes = 49; steps = 20; cfgscale = 3.5; width = 832; height = 480; videofps = 24; videoformat = 'h264-mp4'; sampler = 'uni_pc'; scheduler = 'simple'; sigmashift = 8 } }
         }
-        'music' { @{ model = 'acestep_v1.5_turbo.safetensors'; textaudiobpm = 128; textaudioduration = 10; steps = 10; cfgscale = 1 } }
+        # music DEFAULT = ACE-Step 1.5 turbo (fast: 10 steps / CFG 1). Unlike image/video, turbo is the music
+        # default and hi-fi is OPT-IN -> -Quality (not -Fast) swaps to ACE-Step 1.5 XL base with the OFFICIAL
+        # ComfyUI example-workflow params: steps 50 / cfg 6 / euler / simple (template KSampler node id 3
+        # widgets_values=[50,6,"euler","simple"], ModelSamplingAuraFlow shift=3 left to SwarmUI's backend default).
+        # NOTE cfg=6 is the official XL-*base* value (a community 7.3 exists ONLY for the XL *SFT* finetune) —
+        # pending on-GPU confirmation. textaudiobpm/duration keep the DokiDex defaults (-Bpm/-Duration override).
+        'music' {
+            if ($Quality) { @{ model = 'acestep_v1.5_xl_base_bf16.safetensors'; textaudiobpm = 128; textaudioduration = 10; steps = 50; cfgscale = 6; sampler = 'euler'; scheduler = 'simple' } }
+            else           { @{ model = 'acestep_v1.5_turbo.safetensors';          textaudiobpm = 128; textaudioduration = 10; steps = 10; cfgscale = 1 } }
+        }
         'edit'  { @{ model = 'qwen_image_edit_2511_fp8mixed.safetensors'; steps = 20; cfgscale = 2.5 } }
         # image->video: generate a frame (Z-Image Turbo, fast seed) then animate it via the native videomodel
         # pipeline. The videosteps/videocfg/videoresolution trio is what makes the I2V step fire (per
@@ -254,7 +263,7 @@ function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley')][string]$Kind = 'image',
-        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Raw, [switch]$NoOpen,
+        [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Segment,
@@ -312,7 +321,7 @@ function Invoke-Gen {
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
     # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.
     if ($BodyOnly) {
-        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
+        $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
         $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
@@ -323,10 +332,10 @@ function Invoke-Gen {
     try { Invoke-WebRequest "$Base/" -TimeoutSec 4 -UseBasicParsing | Out-Null }
     catch { throw "SwarmUI not reachable at $Base — start media mode first:  .\doki.ps1 up media" }
 
-    $tag = "$Kind$(if ($Fast) { ' (fast)' })$(if ($Upscale) { ' +4x' })$(if ($Refine) { ' +refine' })$(if ($Realism) { ' +realism' })$(if ($Face) { ' +face' })"
+    $tag = "$Kind$(if ($Fast) { ' (fast)' })$(if ($Quality) { ' (hi-fi)' })$(if ($Upscale) { ' +4x' })$(if ($Refine) { ' +refine' })$(if ($Realism) { ' +realism' })$(if ($Face) { ' +face' })"
     Write-Host "[gen] $tag  <-  ""$Prompt""" -ForegroundColor Cyan
 
-    $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Upscaler $Upscaler
+    $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
     $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model) | ConvertTo-Json -Depth 6

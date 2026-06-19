@@ -44,9 +44,21 @@ $vidFast = Get-GenRecipe -Kind video -Fast
 Assert ($vidFast.model -eq 'ltxv-2b-0.9.8-distilled.safetensors')  "video -Fast -> LTXV distilled"
 Assert ($vidFast.steps -eq 8)                                      "video -Fast -> 8 steps"
 
+# music DEFAULT = ACE-Step turbo (fast, 10 steps / cfg 1). -Quality is the opt-in hi-fi swap (xl_base);
+# unlike image/video, turbo is the music DEFAULT and quality is opt-in (inverted -Fast semantics) -> a
+# dedicated -Quality switch, so the existing turbo default stays byte-for-byte unchanged.
 $mus = Get-GenRecipe -Kind music
-Assert ($mus.model -eq 'acestep_v1.5_turbo.safetensors')           "music -> ACE-Step"
+Assert ($mus.model -eq 'acestep_v1.5_turbo.safetensors')           "music -> ACE-Step turbo (fast default)"
 Assert ($mus.textaudioduration -eq 10)                             "music -> 10s default"
+Assert ($mus.steps -eq 10 -and $mus.cfgscale -eq 1)                "music (default) -> 10 steps / CFG 1 (turbo)"
+Assert (-not $mus.ContainsKey('sampler'))                          "music (default) -> no sampler key (turbo unchanged)"
+# -Quality -> ACE-Step 1.5 XL base with the OFFICIAL ComfyUI example-workflow params (steps 50 / cfg 6 /
+# euler / simple); bpm + duration defaults are preserved (still -Bpm/-Duration overridable downstream).
+$musQ = Get-GenRecipe -Kind music -Quality
+Assert ($musQ.model -eq 'acestep_v1.5_xl_base_bf16.safetensors')   "music -Quality -> ACE-Step 1.5 XL base"
+Assert ($musQ.steps -eq 50 -and $musQ.cfgscale -eq 6)              "music -Quality -> 50 steps / CFG 6 (official XL base)"
+Assert ($musQ.sampler -eq 'euler' -and $musQ.scheduler -eq 'simple') "music -Quality -> euler / simple"
+Assert ($musQ.textaudiobpm -eq 128 -and $musQ.textaudioduration -eq 10) "music -Quality -> keeps 128bpm / 10s defaults"
 
 $edt = Get-GenRecipe -Kind edit
 Assert ($edt.model -eq 'qwen_image_edit_2511_fp8mixed.safetensors') "edit -> Qwen-Image-Edit"
@@ -185,6 +197,35 @@ $mBody = Build-GenBody -Recipe (Get-GenRecipe -Kind music) -PromptFields (Get-Ge
 Assert ($mBody.textaudioduration -eq 45 -and $mBody.textaudiobpm -eq 90) "music -Duration/-Bpm -> override recipe defaults"
 $mDef = Build-GenBody -Recipe (Get-GenRecipe -Kind music) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's'
 Assert ($mDef.textaudioduration -eq 10 -and $mDef.textaudiobpm -eq 128) "music (no overrides) -> recipe defaults 10s / 128bpm"
+Assert ($mDef.model -eq 'acestep_v1.5_turbo.safetensors' -and $mDef.steps -eq 10 -and $mDef.cfgscale -eq 1) "music DEFAULT body -> turbo / 10 steps / cfg 1 (unchanged)"
+# -Quality body: the xl_base recipe (50/6/euler/simple) flows verbatim through the generic recipe merge.
+$mQBody = Build-GenBody -Recipe (Get-GenRecipe -Kind music -Quality) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's'
+Assert ($mQBody.model -eq 'acestep_v1.5_xl_base_bf16.safetensors' -and $mQBody.steps -eq 50 -and $mQBody.cfgscale -eq 6) "music -Quality body -> xl_base / 50 steps / cfg 6"
+Assert ($mQBody.sampler -eq 'euler' -and $mQBody.scheduler -eq 'simple') "music -Quality body -> euler / simple flow through to body"
+# -Quality still honours -Duration/-Bpm overrides (the music knobs are recipe-agnostic).
+$mQOv = Build-GenBody -Recipe (Get-GenRecipe -Kind music -Quality) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's' -Duration 60 -Bpm 100
+Assert ($mQOv.textaudioduration -eq 60 -and $mQOv.textaudiobpm -eq 100) "music -Quality -> -Duration/-Bpm still override"
+
+# --- doki.ps1 argv -> recipe seam: the ENTRYPOINT must declare [switch]$Quality AND forward it on -BodyOnly ---
+# The blocks above prove the pure helpers (and GenCliTests proves the C# argv emits -Quality), but NOTHING
+# else exercises doki.ps1 itself — the script the web host actually runs (`gen ... -BodyOnly` returns the
+# GenerateText2Image body JSON it injects a session_id into). If -Quality were dropped from doki.ps1's param
+# block or from its `Invoke-Gen -Quality:$Quality` forward, music would silently fall back to turbo with every
+# OTHER suite still green. So shell the real doki.ps1 (child pwsh, no GPU/network — -BodyOnly stops before any
+# SwarmUI call) and assert the emitted body carries the xl_base quality tier.
+$dokiPs1 = Join-Path $PSScriptRoot "..\doki.ps1"
+if (-not (Test-Path $dokiPs1)) { Write-Error "doki.ps1 not found at $dokiPs1"; exit 2 }
+$qOut = & pwsh -NoProfile -File $dokiPs1 gen "upbeat synthwave" -Music -Quality -BodyOnly 2>&1
+$qLine = @($qOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]   # the JSON body line
+$qBody = $null; try { $qBody = $qLine | ConvertFrom-Json } catch { }
+Assert ($null -ne $qBody) "doki.ps1 gen -Music -Quality -BodyOnly -> emits a parseable JSON body"
+Assert ($qBody -and $qBody.model -eq 'acestep_v1.5_xl_base_bf16.safetensors') "doki.ps1 forwards -Quality -> body carries xl_base model (not turbo)"
+Assert ($qBody -and $qBody.steps -eq 50 -and $qBody.cfgscale -eq 6) "doki.ps1 -Quality body -> 50 steps / cfg 6 (xl_base params reach the body)"
+# control: WITHOUT -Quality the same entrypoint must stay on the turbo default (the forward is opt-in, not always-on).
+$dOut = & pwsh -NoProfile -File $dokiPs1 gen "upbeat synthwave" -Music -BodyOnly 2>&1
+$dLine = @($dOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
+$dBody = $null; try { $dBody = $dLine | ConvertFrom-Json } catch { }
+Assert ($dBody -and $dBody.model -eq 'acestep_v1.5_turbo.safetensors') "doki.ps1 gen -Music (no -Quality) -> body stays on turbo default (opt-in, unchanged)"
 
 # --- Expand-Wildcards: __name__ -> a random line from <name>.txt, seed-reproducible, unknown left as-is ---
 $wcDir = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-wc-$([guid]::NewGuid().ToString('N'))"

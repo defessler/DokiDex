@@ -119,9 +119,10 @@ public partial class StudioViewModel : ObservableObject
         if (GenRequest.RequiresInitImage(kind) && string.IsNullOrWhiteSpace(InitImagePath))
         { StatusText = $"{kind} needs a source image — pick one first"; return; }
 
-        var req = new GenRequest(prompt, kind, Fast, Upscale, Raw,
-                                 string.IsNullOrWhiteSpace(InitImagePath) ? null : InitImagePath,
-                                 _doki.NewGenOutPath(kind), Refine, Face, Realism);
+        var req = new GenRequest(prompt, kind, Fast,
+                                 Upscale: Upscale, Raw: Raw,
+                                 InitImage: string.IsNullOrWhiteSpace(InitImagePath) ? null : InitImagePath,
+                                 OutPath: _doki.NewGenOutPath(kind), Refine: Refine, Face: Face, Realism: Realism);
         IsGenerating = true;
         StatusText = $"generating {kind}…  (needs media mode)";
         try

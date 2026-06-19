@@ -30,10 +30,20 @@ kit vs the existing DiT/unet models).
 FLUX.2 Klein, Qwen-Image (GGUF, needs the city96 ComfyUI-GGUF node + TE/VAE), Wan 2.2 A14B
 GGUF (dual-expert high/low-noise recipe DokiDex doesn't have), PuLID-Flux + InfiniteTalk
 (ComfyUI custom-node / sidecar integrations), TTS-Audio-Suite (a ComfyUI-node vs the
-standalone Chatterbox `:8004` architecture decision), Nunchaku NVFP4, and the music
-`xl_base` quality tier (unsourced cfg). Each needs multi-component/node integration, a
-recipe tuning pass, or an architecture decision that requires on-GPU verification — none a
-clean unit-testable slice. Full map in `docs/superpowers/specs/2026-06-18-ai-platform-models-workflows-research.md`.
+standalone Chatterbox `:8004` architecture decision), and Nunchaku NVFP4. Each needs
+multi-component/node integration, a recipe tuning pass, or an architecture decision that
+requires on-GPU verification — none a clean unit-testable slice. Full map in
+`docs/superpowers/specs/2026-06-18-ai-platform-models-workflows-research.md`.
+
+**Update — the music `xl_base` quality tier SHIPPED as a gated integration** (branch
+`feat/model-adds`; moved off the gated-follow-ups list above). It turned out to be a clean,
+unit-testable slice after all: an opt-in **`-Quality`** switch swaps the music default
+(ACE-Step 1.5 turbo) → **ACE-Step 1.5 XL base** (50 steps / cfg 6 / euler / simple), with
+the params **SOURCED from the official ComfyUI example template** `audio_ace_step1_5_xl_base.json`
+(KSampler `[50, 6, "euler", "simple"]`) — so cfg=6 is sourced, not the unsourced guess the
+prior note worried about. `xl_base` was already downloaded by `setup.ps1`, so no new asset;
+the **turbo default is unchanged** (byte-for-byte) and `xl_base` is opt-in only. On-GPU
+OUTPUT quality is the single labeled remaining confirm step.
 
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 

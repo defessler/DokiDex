@@ -204,6 +204,16 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Music_quality_emits_quality_switch_only_for_music_and_only_when_set()
+    {
+        // -Quality is the opt-in hi-fi music swap (turbo default -> ACE-Step 1.5 XL base); doki-gen.ps1's
+        // music arm selects xl_base on -Quality. The switch is music-only and off by default.
+        Assert.Contains("-Quality", GenCli.BuildArgs(new GenRequest("lofi", "music", Quality: true, OutPath: "o")));
+        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("lofi", "music", OutPath: "o")));         // opt-in
+        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("x", "image", Quality: true, OutPath: "o"))); // music-only
+    }
+
+    [Fact]
     public void Lora_passes_through_as_a_separate_value_arg_when_set()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "image", Lora: "anime:0.8,detail", OutPath: "o"));

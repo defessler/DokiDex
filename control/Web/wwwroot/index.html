@@ -143,6 +143,7 @@
         <label style="flex:1 1 100%">Lyrics <textarea id="lyrics" rows="2" placeholder="leave blank for an instrumental" class="kin" style="width:100%;resize:vertical"></textarea></label>
         <label>Duration <input id="duration" type="number" min="1" max="240" placeholder="10" class="kin" style="width:64px"> s</label>
         <label>BPM <input id="bpm" type="number" min="40" max="220" placeholder="128" class="kin" style="width:64px"></label>
+        <label title="hi-fi: ACE-Step XL base, 50 steps (slower). Off = fast turbo render (default)."><input id="musicQuality" type="checkbox"> hi-fi <span class="hint">(slower)</span></label>
       </div>
       <details id="lorabox" style="display:none;margin:4px 0">
         <summary class="hint" style="cursor:pointer">LoRAs (mix installed LoRAs with per-LoRA weights)</summary>
@@ -691,6 +692,7 @@
           const ly = document.getElementById('lyrics').value.trim(); if (ly) body.lyrics = ly;
           const du = parseInt(document.getElementById('duration').value); if (du>0) body.duration = du;
           const bp = parseInt(document.getElementById('bpm').value); if (bp>0) body.bpm = bp;
+          if (document.getElementById('musicQuality').checked) body.quality = true;
         }
         if ((state.kind==='image'||state.kind==='edit')) {
           const cns=collectControlNets(); if(cns.length) body.controlNets=cns;
