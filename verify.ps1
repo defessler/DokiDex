@@ -3,7 +3,7 @@
 #   chat/code (:8080) · autocomplete (:8012) · codebase RAG (:8090) · image + video (:7801)
 # Restores agent mode at the end. Run via:  .\verify.ps1   or   .\doki.ps1 verify
 # -Json emits the results as JSON to stdout (no colored grid) for a machine/panel to consume.
-param([switch]$Json)
+param([switch]$Json, [switch]$Gated)
 $ErrorActionPreference = "Continue"
 $root = $PSScriptRoot
 $results = [ordered]@{}
@@ -285,6 +285,43 @@ if (-not ((Test-Path $cwfPath) -and (Test-Path $foleyModel))) {
             }
         }
     } catch { $results["Wan->Foley audio"] = "FAIL  $($_.Exception.Message)" }
+}
+
+# 8. GATED integrations (-Gated) — the 9 session-shipped sidecars that ALL still need an on-GPU pass. This block
+#    ONLY runs under `doki verify -Gated`, so the default `doki verify` executes byte-for-byte as before. For each
+#    gated integration it checks what is checkable WITHOUT a GPU (the node clone dir + the weight files on disk) via
+#    the SAME shared registry the source-derived coverage test pins (tests\gated-registry.ps1), maps the pure status
+#    -> PASS/SKIP using the existing prefix convention (so the tally + exit code need NO change), and prints the
+#    labeled on-GPU TODO. Absent multi-GB weights degrade to SKIP 'not installed', NEVER a FAIL; the live
+#    node-load/render stays SKIP-by-default (an on-GPU step the user runs by hand).
+#    The status switch matches on the $GatedStatus.* TOKENS the classifier returns (not prose literals), so a
+#    wording change in Get-GatedStatus can't silently fall through to a mislabel.
+if ($Gated) {
+    Write-Host "[verify] gated integrations (-Gated; on-disk presence + the on-GPU TODO) ..."
+    . (Join-Path $root "tests\gated-registry.ps1")
+    foreach ($name in $GatedRegistry.Keys) {
+        $entry  = $GatedRegistry[$name]
+        $status = Get-GatedStatus $entry { param($p) Test-Path $p }
+        $full   = if ($entry.Models -eq 'full') { ' -Models full' } else { '' }
+        switch ($status) {
+            $GatedStatus.Ready {
+                # 'ready' = node + all weights present. Some entries (the Demucs/Sam/Train venv sidecars) have NO
+                # labeled on-GPU render step — their own OnGpu says so — so DON'T tell the user a render is still
+                # TODO for them; only the render-gated integrations get the "live render is on-GPU TODO" tail.
+                $renderGated = $entry.OnGpu -notmatch 'no labeled on-GPU step'
+                $results["gated: $name"] = if ($renderGated) {
+                    "PASS  installed (node+weights); live render is on-GPU TODO"
+                } else {
+                    "PASS  installed (node+weights); no on-GPU step"
+                }
+            }
+            $GatedStatus.WorkflowTodo { $results["gated: $name"] = "SKIP  installed; workflow is on-GPU TODO" }
+            $GatedStatus.Partial      { $results["gated: $name"] = "SKIP  partial (some weights missing; re-run setup.ps1 -$($entry.Flag)$full)" }
+            default                   { $results["gated: $name"] = "SKIP  not installed (run setup.ps1 -$($entry.Flag)$full)" }
+        }
+        Write-Host ("    {0,-30} {1}" -f $name, $status) -ForegroundColor DarkGray
+        Write-Host ("      on-GPU: {0}" -f $entry.OnGpu) -ForegroundColor DarkGray
+    }
 }
 
 # restore default resting state

@@ -14,6 +14,7 @@ param(
     [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen", "index")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg,
     [switch]$Clear,  # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
+    [switch]$Gated,  # `doki verify -Gated` — also report the gated sidecars' on-disk presence + their on-GPU TODO (default verify runs unchanged)
     # `doki gen "<idea>" ...` — text->media via SwarmUI (needs `doki up media`). Kind: -Video | -Music | -Edit
     # | -I2v (animate a still: add -InitImage) | -Foley (video + synced SFX); default = still image (Z-Image
     # Base, quality). Modifiers: -Fast (Z-Image Turbo draft / LTXV video), -Upscale (4x-UltraSharp pixel
@@ -378,7 +379,7 @@ switch ($Command) {
         }
         else { TailLogs $Arg }
     }
-    "verify" { & (Join-Path $root "verify.ps1") }
+    "verify" { & (Join-Path $root "verify.ps1") -Gated:$Gated }
     "index" {
         # (re)build the codebase RAG index (serving/memory-mcp/code_index.py) that backs the code_search MCP
         # tool. CPU-only via the :8090 embed server — never touches the GPU.
@@ -400,7 +401,7 @@ switch ($Command) {
         $failed = 0
         # 1. PowerShell suites — installer failure-recovery helpers + the `status json` contract
         #    the panel parses. Each runs in a child pwsh so its `exit` can't tear down this run.
-        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\doki-statusjson.test.ps1", "tests\doki-gen.test.ps1")) {
+        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\doki-statusjson.test.ps1", "tests\doki-gen.test.ps1", "tests\verify-gated.test.ps1")) {
             $tp = Join-Path $root $rel
             if (Test-Path $tp) {
                 Write-Host "== $(Split-Path $tp -Leaf) ==" -ForegroundColor Cyan
