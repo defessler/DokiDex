@@ -123,6 +123,54 @@ attribute, scrfd/det = detection) — (community mirror, not byte-verified — o
 auto-download); (3) the ControlNet target **subfolder** the node's loader expects. **Every existing path is
 byte-for-byte unchanged** (the `faceid` kind/recipe is purely additive; no default/URL/catalog row changed).
 
+**Update — InfiniteTalk audio-driven talking-video SHIPPED as INSTALL-WIRING ONLY (workflow JSON deferred to on-GPU authoring).**
+Mirrors the InstantID posture exactly, with one new wiring axis (audio) and one large new cost (an ~82GB base).
+**Node:** the real ComfyUI integration is **Kijai's `ComfyUI-WanVideoWrapper`**, NOT a standalone MeiGen node — the
+MeiGen-AI/InfiniteTalk `comfyui` branch is itself "based on ComfyUI-WanVideoWrapper" (verified). Its requirements
+are heavier than InstantID's (accelerate/sageattention/...), installed via the same 3-candidate comfy-python probe.
+**Weights, three groups (all HF-tree-verified):** (A) the **InfiniteTalk fp16 ADAPTER** — Kijai's repackaged
+single-file form `Wan2_1-InfiniTetalk-Single_fp16.safetensors` (5.13GB; the upstream **"InfiniTetalk" typo is REAL**
+and copied byte-for-byte) + the optional multi-person variant; the only genuinely new SMALL file (the official
+MeiGen repo is a 169GB tree, not pullable whole; no fp8 adapter exists on Kijai's tree — fp16 only). (B) the
+**chinese-wav2vec2-base** audio encoder (`TencentGameMate`, the HF/transformers `.bin` path — the 1.14GB fairseq
+`.pt` is skipped). (C) **THE ~82GB BLOCKER** — the **Wan2.1-I2V-14B-480P** base (7 diffusion shards ~65.6GB +
+UMT5-xxl TE 11.4GB + open-clip ViT-H 4.77GB + VAE 508MB). **CRITICAL DISK-STATE FINDING:** DokiDex ships Wan **2.2**
+(5B ti2v + A14B-T2V GGUF + VAEs) but NOT the Wan2.1-I2V-14B base, and the 2.2 models do **NOT** substitute —
+InfiniteTalk's adapter injects into that specific 2.1 14B UNet. So `-InfiniteTalk` pulls an ~82GB NEW base that
+**dwarfs every other DokiDex weight** (flagged in the setup header exactly like the InstantID note flags PuLID's
+missing FLUX base). An **fp8/GGUF Wan2.1-I2V-14B repack** would shrink it (the Kijai wrapper supports fp8 Wan I2V
+bases) but that exact file was not verifiable at rest — it is an on-GPU sourcing step.
+**Decision-rule branch taken: install URLs verified, but NO authoritative SwarmUI-API workflow JSON is sourceable ->
+wire ONLY the gated install + the kind alias + this note; do NOT commit a blind workflow JSON.** Kijai's
+`example_workflows` (`wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json`, ...) are ComfyUI **UI-graph** exports
+(top-level `id`/`nodes`/`links`/`groups`), not SwarmUI's flat API-prompt `CustomWorkflows` format; the
+MeiGen-AI `examples/` JSONs are **CLI inference configs**, not ComfyUI workflows at all. So the runnable
+`media-assets\InfiniteTalk.json` is the **on-GPU authoring step** (load the UI-graph live -> convert to API-prompt
+-> rewire base/wav2vec/adapter paths -> wire the image+audio inputs to SwarmUI's injection points), and until then
+the `-InfiniteTalk` block installs node+weights and the workflow copy is a `Test-Path` Warn (identical to the
+Foley/InstantID copies). Cite: `github.com/kijai/ComfyUI-WanVideoWrapper/tree/main/example_workflows`;
+`github.com/MeiGen-AI/InfiniteTalk/tree/comfyui`.
+**Ergonomics:** a new `infinitetalk` kind (`doki gen -InfiniteTalk`) -> `comfyuicustomworkflow=InfiniteTalk`,
+requiring **BOTH** a portrait (`-InitImage`, fails loudly like `-Edit`/`-FaceId`) **AND** a driving audio clip
+(`-Audio <wav/mp3>`, a NEW fail-loud guard). Audio is the one genuinely new input vs InstantID: a `[string]$Audio`
+param threads `doki.ps1 -> Invoke-Gen -> Build-GenBody`, base64'd and parked under a **provisional `inputaudio`**
+body key — the exact custom-workflow audio body-key is itself an on-GPU confirm (it only binds once
+`InfiniteTalk.json` exists and names its audio-load node).
+**FEASIBILITY — brutally honest: 32GB is marginal-to-tight and UNCONFIRMED, and meaningfully WORSE than every
+existing DokiDex video path** (i2v rides Wan2.2-**5B**, Foley rides the lighter **Wan2.2-5B** fp16 base; InfiniteTalk
+rides the FULL Wan2.1 **14B**). Native fp16 14B OOMs on 32GB before activations. The feasible path — **fp8 base + block-swap/StepSwap
+offload** (DokiDex already leans on StepSwap for the Wan2.2-14B GGUF pair) **+ the wrapper's 81-frame / 25-overlap
+chunking at 25fps** — is plausible but NOT guaranteed and can only be settled by a **live render**. So the WHOLE
+feature is **on-GPU-gated**: node + ~82GB base + adapter installed at rest; workflow authored + 32GB fit + the
+fp8-base sourcing + the audio body-key are ALL the labeled on-GPU confirms. **We do NOT claim it runs in 32GB.**
+**PATH-ROUTING is one more on-GPU confirm:** the InfiniteTalk base TE/clip-vision/VAE land under the **raw ComfyUI
+backend tree** (`dlbackend\comfy\ComfyUI\models\...`), NOT SwarmUI's own `Models\...` where DokiDex's other media
+weights live. Whether SwarmUI bridges those two folder namespaces for the WanVideoWrapper node is unverified at
+rest — the wrapper may specifically resolve against the ComfyUI tree via its own `folder_paths` (as the Foley node
+does), so the placement is left as-is and the routing is flagged as a labeled on-GPU confirm (not changed blind).
+**Every existing path is byte-for-byte unchanged** (the `infinitetalk` kind/recipe + the additive `-Audio` plumbing
+are purely additive; no default/URL/catalog row changed).
+
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 
 ## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present

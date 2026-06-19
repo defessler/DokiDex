@@ -18,6 +18,7 @@ param(
     [switch]$Sam,       # optional sidecar: Segment-Anything point segmentation (semantic click->mask in the edit canvas)
     [switch]$Train,     # optional sidecar: in-app LoRA training (kohya sd-scripts)
     [switch]$FaceId,    # optional sidecar: InstantID face-identity reference (SDXL — reuses the anime Illustrious/Animagine base, no FLUX needed)
+    [switch]$InfiniteTalk,  # optional sidecar: audio-driven talking-video via MeiGen InfiniteTalk on the Wan2.1-I2V-14B base — NOTE pulls an ~82GB Wan2.1 base NOT otherwise on disk
     [switch]$Vision,    # optional: vision model (Qwen3-VL-8B) -> lights up the studio Describe/Verify surfaces
     [switch]$LlmCandidates,  # optional: download the coder/heavy bake-off candidates (Qwen3.6 / Qwen3-Coder-Next) for eval
     [switch]$Managed,   # invoked by the all-in-one app: the panel IS this self-contained exe (baked in),
@@ -689,6 +690,115 @@ if ($FaceId) {
     else { Warn "media-assets\InstantID.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
 
     Ok "InstantID ready -> node + weights installed. Run via  doki gen -FaceId -InitImage <face.png> '<prompt>'  (or the lower-level  doki gen -Workflow InstantID -InitImage <face.png>) once the workflow JSON is authored on-GPU."
+}
+
+# 5h-ter. InfiniteTalk audio-driven talking-video (GATED sidecar, -InfiniteTalk) — the REAL ComfyUI integration
+#     is Kijai's WanVideoWrapper (NOT a standalone MeiGen node: the MeiGen `comfyui` branch is itself "based on
+#     ComfyUI-WanVideoWrapper"). Mirrors the Foley/InstantID install (node clone + comfy-python pip + Get-Model
+#     weights), but is MUCH heavier than InstantID in TWO ways flagged here exactly like InstantID flags PuLID's
+#     missing FLUX base:
+#       (1) THE ~82GB BLOCKER — InfiniteTalk's adapter injects into the Wan2.1-I2V-**14B** UNet specifically.
+#           DokiDex ships Wan **2.2** (5B ti2v + A14B-T2V GGUF + VAEs, 5f ~lines 490-510) but NOT the Wan2.1
+#           I2V-14B base, and the 2.2 models do NOT substitute (different arch). So -InfiniteTalk pulls an ~82GB
+#           NEW base (diffusion shards + UMT5-xxl TE + open-clip ViT-H + VAE) that DWARFS every other DokiDex
+#           weight. An fp8/GGUF Wan2.1-I2V-14B repack would shrink this but must be sourced/verified ON-GPU
+#           (the Kijai wrapper supports fp8 Wan I2V bases; that exact file was not verifiable at rest).
+#       (2) 32GB FIT IS UNCONFIRMED — InfiniteTalk rides the FULL 14B base (worse than every existing DokiDex
+#           video path: i2v is Wan2.2-5B, Foley rides the lighter Wan2.2-5B fp16 base). Native fp16 14B OOMs on
+#           32GB; the feasible path
+#           (fp8 base + block-swap/StepSwap offload + 81-frame/25-overlap chunking) is plausible but NOT
+#           guaranteed and can only be settled by a live render. Treat the WHOLE feature as on-GPU-gated.
+#     WORKFLOW IS NOT SHIPPED: the only example_workflows on Kijai's repo
+#     (wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json etc.) are ComfyUI UI-GRAPH exports (top-level
+#     id/nodes/links/groups), NOT SwarmUI's flat API-prompt CustomWorkflows format; the MeiGen examples/ JSONs are
+#     CLI inference configs, not ComfyUI workflows at all. So the runnable media-assets\InfiniteTalk.json is the
+#     ON-GPU authoring step (load the UI-graph live -> convert to API-prompt -> rewire base/wav2vec/adapter paths
+#     -> wire the image+audio inputs to SwarmUI's injection points; see docs/decisions.md). Until then this installs
+#     node+weights only and Warns the workflow is absent (same Test-Path posture as the Foley/InstantID copies).
+#     Cite: github.com/kijai/ComfyUI-WanVideoWrapper/tree/main/example_workflows ; github.com/MeiGen-AI/InfiniteTalk/tree/comfyui.
+if ($InfiniteTalk) {
+    Info "InfiniteTalk audio-driven talking-video (Kijai/ComfyUI-WanVideoWrapper) — NOTE pulls an ~82GB Wan2.1-I2V-14B base NOT otherwise on disk; 32GB fit is on-GPU-unconfirmed"
+    Ensure-WinGet "Git.Git" "git"
+    $nodes = Join-Path $swarm "dlbackend\comfy\ComfyUI\custom_nodes"
+    if (Test-Path $nodes) {
+        # 1) the node (Kijai's WanVideoWrapper — the real InfiniteTalk/MultiTalk integration; heavier than
+        #    InstantID: its requirements pull accelerate/sageattention etc.).
+        $wvNode = Join-Path $nodes "ComfyUI-WanVideoWrapper"
+        if (-not (Test-Path $wvNode)) { Info "installing WanVideoWrapper node ..."; Git-Clone https://github.com/kijai/ComfyUI-WanVideoWrapper $wvNode } else { Ok "WanVideoWrapper node present" }
+        # 2) its python deps (same 3-candidate comfy-python probe Foley/InstantID use, with the $cpy/else Warn
+        #    fallback). This requirements.txt is heavier than InstantID's (accelerate, sageattention, ...).
+        $cpy = @("dlbackend\comfy\python_embeded\python.exe", "dlbackend\comfy\venv\Scripts\python.exe", "dlbackend\comfy\ComfyUI\venv\Scripts\python.exe") |
+            ForEach-Object { Join-Path $swarm $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+        $wvReq = Join-Path $wvNode "requirements.txt"
+        if ($cpy -and (Test-Path $wvReq)) { Info "installing WanVideoWrapper python deps (accelerate/sageattention/...) ..."; & $cpy -m pip install -r $wvReq | Out-Null; Ok "WanVideoWrapper deps installed" }
+        else { Warn "WanVideoWrapper deps: run  <comfy-python> -m pip install -r `"$wvReq`"  manually" }
+
+        $cmodels = Join-Path $swarm "dlbackend\comfy\ComfyUI\models"
+
+        # 3A) the InfiniteTalk ADAPTER (the only genuinely new SMALL file) — Kijai's repackaged fp16 single-file
+        #     form (the official MeiGen-AI/InfiniteTalk repo is a 169GB full tree, NOT pullable whole). NOTE the
+        #     upstream typo "InfiniTetalk" in the single filename is REAL — copied byte-for-byte. No fp8 variant
+        #     exists on Kijai's tree (fp16 only). -> diffusion_models.
+        #     The default -InfiniteTalk path is SINGLE-portrait (the `doki gen -InfiniteTalk -InitImage <portrait>`
+        #     hook drives ONE speaker), so we fetch ONLY the Single adapter. The ~5.12GB Multi-person adapter
+        #     (Wan2_1-InfiniteTalk-Multi_fp16.safetensors, same $itk tree) is a separate MANUAL add for the
+        #     multi-speaker case — drop it in $itDir yourself if you need it; the default install won't pull
+        #     5GB the single-portrait wiring never references.
+        $itDir = Join-Path $cmodels "diffusion_models"; New-Item -ItemType Directory -Force $itDir | Out-Null
+        $itk = "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/InfiniteTalk"
+        Get-Model "$itk/Wan2_1-InfiniTetalk-Single_fp16.safetensors" (Join-Path $itDir "Wan2_1-InfiniTetalk-Single_fp16.safetensors")  # 5.13 GB (the upstream "InfiniTetalk" typo is intentional)
+
+        # 3B) the audio encoder chinese-wav2vec2-base (TencentGameMate, HF/transformers path — the .bin works for
+        #     the transformers loader; the 1.14GB fairseq .pt form is NOT needed, skipped). NOTE: Kijai's wrapper
+        #     sometimes wants the PR-revision safetensors (refs/pr/1 model.safetensors) — confirm ON-GPU which the
+        #     installed wrapper version expects. -> Models\wav2vec2\chinese-wav2vec2-base.
+        $w2vDir = Join-Path $cmodels "wav2vec2\chinese-wav2vec2-base"; New-Item -ItemType Directory -Force $w2vDir | Out-Null
+        $w2v = "https://huggingface.co/TencentGameMate/chinese-wav2vec2-base/resolve/main"
+        Get-Model "$w2v/pytorch_model.bin"           (Join-Path $w2vDir "pytorch_model.bin")            # 380 MB
+        Get-Model "$w2v/config.json"                 (Join-Path $w2vDir "config.json")                  # ~2 KB
+        Get-Model "$w2v/preprocessor_config.json"    (Join-Path $w2vDir "preprocessor_config.json")     # 160 B
+
+        # 3C) the BASE — Wan2.1-I2V-14B-480P — THE ~82GB BLOCKER, NOT on disk (DokiDex ships Wan 2.2, not this
+        #     2.1 I2V-14B). InfiniteTalk's adapter injects into THIS specific 14B UNet; the on-disk 2.2 5B/A14B-T2V
+        #     models do NOT substitute. Diffusion = 7 shards (~65.6GB) + UMT5-xxl TE (11.4GB) + open-clip ViT-H
+        #     (4.77GB) + VAE (508MB). An fp8/GGUF repack would shrink this but must be sourced/verified ON-GPU.
+        #     -> diffusion_models (shards) + the wrapper-expected TE/clip/VAE dirs.
+        # ON-GPU PATH-ROUTING CONFIRM: these base TE/clip-vision/VAE files land under the RAW ComfyUI backend tree
+        # ($cmodels = dlbackend\comfy\ComfyUI\models\...), NOT SwarmUI's own Models\... where DokiDex's other media
+        # weights live. Whether SwarmUI bridges those two folder namespaces for the WanVideoWrapper node is on-GPU
+        # (the wrapper may specifically resolve against the ComfyUI tree via its own folder_paths — like the Foley
+        # node does — so the placement is left here deliberately; confirm it resolves once the workflow is authored).
+        $teDir  = Join-Path $cmodels "text_encoders";  New-Item -ItemType Directory -Force $teDir  | Out-Null
+        $clipDir= Join-Path $cmodels "clip_vision";    New-Item -ItemType Directory -Force $clipDir| Out-Null
+        $vaeDir = Join-Path $cmodels "vae";            New-Item -ItemType Directory -Force $vaeDir | Out-Null
+        $w21 = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P/resolve/main"
+        # the 7 diffusion shards (~65.6 GB) — unrolled to explicit literal URLs/filenames (not a -f loop) so each
+        # rides the standard Get-Model atomic .part-promote and lands a UNIQUE local name (the dupe-guard checks).
+        Get-Model "$w21/diffusion_pytorch_model-00001-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00001-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model-00002-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00002-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model-00003-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00003-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model-00004-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00004-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model-00005-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00005-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model-00006-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00006-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model-00007-of-00007.safetensors" (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model-00007-of-00007.safetensors")
+        Get-Model "$w21/diffusion_pytorch_model.safetensors.index.json"                       (Join-Path $itDir "Wan2_1-I2V-14B-480P_diffusion_pytorch_model.safetensors.index.json")
+        Get-Model "$w21/models_t5_umt5-xxl-enc-bf16.pth"                                       (Join-Path $teDir "Wan2_1_umt5-xxl-enc-bf16.pth")        # 11.4 GB
+        Get-Model "$w21/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth"               (Join-Path $clipDir "Wan2_1_open-clip-xlm-roberta-large-vit-huge-14.pth")  # 4.77 GB
+        Get-Model "$w21/Wan2.1_VAE.pth"                                                        (Join-Path $vaeDir "Wan2_1_VAE.pth")                     # 508 MB
+    } else { Warn "ComfyUI backend not found yet; re-run setup.ps1 -Media -InfiniteTalk after it installs" }
+
+    # 4) workflow registration — GATED on the JSON existing. No authoritative SwarmUI-API InfiniteTalk.json is
+    #    sourceable (Kijai's example_workflows are UI-graphs; MeiGen's examples/ are CLI configs) — it is the
+    #    on-GPU authoring step (see the header comment + docs/decisions.md). Until media-assets\InfiniteTalk.json
+    #    is authored + validated on a live GPU, copy nothing and Warn (same Test-Path posture as Foley/InstantID).
+    #    Once committed it rides the existing  doki gen -InfiniteTalk -InitImage <portrait> -Audio <clip>  hook
+    #    (comfyuicustomworkflow=InfiniteTalk), no C#/recipe change.
+    $itWf  = Join-Path $root "media-assets\InfiniteTalk.json"
+    $itCwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\InfiniteTalk.json"
+    if (Test-Path $itWf) { New-Item -ItemType Directory -Force (Split-Path $itCwf) | Out-Null; Copy-Item $itWf $itCwf -Force; Ok "InfiniteTalk workflow installed" }
+    else { Warn "media-assets\InfiniteTalk.json not present (the runnable SwarmUI workflow is the on-GPU authoring step — see docs/decisions.md); node + weights installed, workflow skipped" }
+
+    Ok "InfiniteTalk ready -> node + weights installed (~82GB Wan2.1-I2V-14B base + adapter + wav2vec2). On-GPU LABELED: author the workflow JSON, confirm the 32GB fit (fp8 base + block-swap), source the fp8 repack, and pin the audio body-key. Run via  doki gen -InfiniteTalk -InitImage <portrait> -Audio <clip> '<prompt>'  once authored."
 }
 
 # 5i. Configure MagicPrompt -> local prompt-rewriter (:8013) HEADLESSLY via its API

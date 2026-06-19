@@ -83,9 +83,20 @@ try {
     Assert (-not (Test-Path "$d1.part"))         "skip: no .part created on the skip path"
 
     # failure (unreachable url) -> no dest, no orphan .part
+    # ROBUSTNESS: a missing file:// URL makes curl exit 37, and on PowerShell 7.4/7.5 — where
+    # $PSNativeCommandUseErrorActionPreference defaults to $true — a native non-zero exit under this file's
+    # $ErrorActionPreference='Stop' throws a NativeCommandExitException INSIDE Get-Model (at the curl line, before
+    # its own $LASTEXITCODE guard can Warn+return), which would abort the whole try{} and skip EVERY AST block
+    # below (InstantID/Wan/FLUX2/Qwen/InfiniteTalk model-add asserts). setup.ps1 itself is immune because it sets
+    # $PSNativeCommandUseErrorActionPreference=$false globally (line ~29); the test harness never did. Mirror that
+    # native-error posture for JUST this deliberate-failure call (restoring it after) AND catch defensively, so the
+    # curl/native-exit quirk records its intended outcome and the suite CONTINUES. Get-Model itself is untouched.
     $d2 = Join-Path $work "got2.bin"
     $badUrl = ([Uri](Join-Path $work "does-not-exist.bin")).AbsoluteUri
-    Get-Model $badUrl $d2
+    $prevNativeEAP = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+    try { Get-Model $badUrl $d2 } catch { $script:msgs.Add("WARN deliberate-failure Get-Model threw: $($_.Exception.Message)") }
+    finally { $PSNativeCommandUseErrorActionPreference = $prevNativeEAP }
     Assert (-not (Test-Path $d2))                "failure: leaves no (truncated) dest file"
     Assert (-not (Test-Path "$d2.part"))         "failure: cleans up its own .part"
 
@@ -244,6 +255,83 @@ try {
     # PuLID-Flux guard: the picked SDXL path must NEVER pull FLUX.1-dev (the rejected ~22GB base) or a PuLID weight.
     $fluxPull = $entries | Where-Object { $_.Url -match '(?i)flux\.?1-dev|pulid' }
     Assert ($fluxPull.Count -eq 0) "InstantID: the SDXL face-ID path pulls NO FLUX.1-dev / PuLID weights (PuLID-Flux is deferred)"
+
+    Write-Host "`nInfiniteTalk audio-driven talking-video (-InfiniteTalk): Kijai WanVideoWrapper node + adapter (`$itk) + wav2vec2 (`$w2v) + the ~82GB Wan2.1-I2V-14B base (`$w21)"
+    # The GATED talking-video sidecar (-InfiniteTalk) clones Kijai/ComfyUI-WanVideoWrapper (the REAL ComfyUI
+    # integration; the MeiGen `comfyui` branch is itself based on it) and Get-Models THREE weight groups: (A) the
+    # InfiniteTalk fp16 ADAPTER off a $itk base (the only new SMALL file; the single-file name carries the REAL
+    # upstream "InfiniTetalk" typo), (B) the chinese-wav2vec2-base audio encoder off a $w2v base, and (C) the
+    # ~82GB Wan2.1-I2V-14B base off a $w21 base (7 diffusion shards + UMT5-xxl TE + open-clip ViT-H + VAE) — the
+    # base DokiDex does NOT otherwise ship (it has Wan 2.2, a different arch the adapter can't inject into). Like
+    # InstantID, this block registers NO workflow JSON (no authoritative SwarmUI-API InfiniteTalk.json is
+    # sourceable — Kijai's example_workflows are UI-graphs, MeiGen's examples/ are CLI configs), so the runnable
+    # media-assets\InfiniteTalk.json is the on-GPU authoring step (see docs/decisions.md). Sizes/URLs HF-tree-verified.
+    $wvClone = $ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.CommandAst] -and
+        $x.GetCommandName() -eq 'Git-Clone' -and
+        $x.Extent.Text -match '(?i)kijai/ComfyUI-WanVideoWrapper' }, $true)
+    Assert ($wvClone.Count -ge 1) "InfiniteTalk: setup.ps1 clones the kijai/ComfyUI-WanVideoWrapper node (the real InfiniteTalk/MultiTalk integration, not a standalone MeiGen node)"
+
+    # the three base-URL vars, each pinned to its verified HF resolve/main tree
+    $itBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$itk' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $itBase) "InfiniteTalk: setup.ps1 defines an `$itk Kijai WanVideo_comfy/InfiniteTalk base URL var"
+    $itUrl = if ($itBase) { $itBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($itUrl -match '^https://huggingface\.co/Kijai/WanVideo_comfy/resolve/main/InfiniteTalk$') "InfiniteTalk: `$itk = Kijai WanVideo_comfy resolve/main/InfiniteTalk URL"
+
+    $w2vBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$w2v' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $w2vBase) "InfiniteTalk: setup.ps1 defines a `$w2v chinese-wav2vec2-base base URL var"
+    $w2vUrl = if ($w2vBase) { $w2vBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($w2vUrl -match '^https://huggingface\.co/TencentGameMate/chinese-wav2vec2-base/resolve/main$') "InfiniteTalk: `$w2v = TencentGameMate/chinese-wav2vec2-base resolve/main URL"
+
+    $w21Base = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$w21' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $w21Base) "InfiniteTalk: setup.ps1 defines a `$w21 Wan2.1-I2V-14B-480P base URL var (the ~82GB base)"
+    $w21Url = if ($w21Base) { $w21Base.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($w21Url -match '^https://huggingface\.co/Wan-AI/Wan2\.1-I2V-14B-480P/resolve/main$') "InfiniteTalk: `$w21 = Wan-AI/Wan2.1-I2V-14B-480P resolve/main URL"
+
+    # (A) the adapter — ONLY the fp16 Single (with the REAL upstream "InfiniTetalk" typo) is fetched by default.
+    # The default -InfiniteTalk hook is single-portrait, so the ~5.12GB multi-person Multi adapter is a separate
+    # MANUAL add (not pulled by the default install) — pin that it is NOT a Get-Model entry so we don't silently
+    # re-introduce a 5GB download the single-portrait wiring never uses.
+    $itkAdapter = $entries | Where-Object { $_.File -eq 'Wan2_1-InfiniTetalk-Single_fp16.safetensors' } | Select-Object -First 1
+    Assert ($null -ne $itkAdapter)                "InfiniteTalk: the fp16 Single adapter is a Get-Model entry"
+    Assert ($itkAdapter -and $itkAdapter.Url -match '(?i)\$itk/' -and $itkAdapter.Url -match 'InfiniTetalk') "InfiniteTalk: the Single adapter hangs off `$itk and preserves the real 'InfiniTetalk' upstream typo byte-for-byte"
+    $itkMulti = $entries | Where-Object { $_.File -match '(?i)InfiniteTalk-Multi' }
+    Assert ($itkMulti.Count -eq 0) "InfiniteTalk: the optional multi-person Multi adapter is NOT fetched by default (separate manual add; the single-portrait path never uses it)"
+
+    # (B) the wav2vec2 encoder bits ride $w2v; the 1.14GB fairseq .pt is intentionally NOT pulled (HF/transformers path)
+    foreach ($spec in @(
+        @{ File = 'pytorch_model.bin';        Suffix = '/pytorch_model.bin' },
+        @{ File = 'config.json';              Suffix = '/config.json' },
+        @{ File = 'preprocessor_config.json'; Suffix = '/preprocessor_config.json' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File -and $_.Url -match '(?i)\$w2v/' } | Select-Object -First 1
+        Assert ($null -ne $e)                     "InfiniteTalk: wav2vec2 $($spec.File) is a Get-Model entry off `$w2v"
+        $full = ($e.Url -replace '(?i)\$w2v', $w2vUrl).Trim('"')
+        Assert ($full -eq ($w2vUrl + $spec.Suffix)) "InfiniteTalk: wav2vec2 $($spec.File) resolves to the expected TencentGameMate path"
+    }
+    $fairseq = $entries | Where-Object { $_.Url -match '(?i)fairseq' }
+    Assert ($fairseq.Count -eq 0) "InfiniteTalk: the 1.14GB fairseq .pt form is NOT pulled (the HF/transformers .bin path is used instead)"
+
+    # (C) the ~82GB Wan2.1 base — 7 diffusion shards off $w21 + the UMT5 TE + open-clip + VAE
+    $w21Shards = $entries | Where-Object { $_.Url -match '(?i)\$w21/' -and $_.Url -match 'diffusion_pytorch_model-\d{5}-of-00007\.safetensors' }
+    Assert ($w21Shards.Count -eq 7) "InfiniteTalk: the Wan2.1-I2V-14B diffusion base is fetched as all 7 shards off `$w21 (got $($w21Shards.Count))"
+    foreach ($spec in @(
+        @{ Suffix = '/models_t5_umt5-xxl-enc-bf16.pth';                         Label = 'UMT5-xxl text encoder' },
+        @{ Suffix = '/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth'; Label = 'open-clip ViT-H image encoder' },
+        @{ Suffix = '/Wan2.1_VAE.pth';                                          Label = 'Wan2.1 VAE' }
+    )) {
+        $e = $entries | Where-Object { $_.Url -match '(?i)\$w21/' -and $_.Url.Replace('$w21','').Replace('"','') -eq $spec.Suffix } | Select-Object -First 1
+        Assert ($null -ne $e) "InfiniteTalk: the Wan2.1 base $($spec.Label) ($($spec.Suffix)) is a Get-Model entry off `$w21"
+    }
+    # InfiniteTalk has NO fp8 variant on Kijai's tree (fp16 only) — guard we didn't invent a phantom fp8 adapter URL.
+    $fp8Adapter = $entries | Where-Object { $_.Url -match '(?i)InfiniteTalk.*fp8|InfiniTetalk.*fp8' }
+    Assert ($fp8Adapter.Count -eq 0) "InfiniteTalk: no phantom fp8 adapter URL (Kijai's tree is fp16-only; an fp8 BASE repack is the on-GPU sourcing step)"
 
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }

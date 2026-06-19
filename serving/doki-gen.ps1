@@ -9,7 +9,7 @@
 
 # switches -> exactly one kind, with an ambiguity guard (so `gen -Video -Music` fails loudly, not silently).
 function Resolve-GenKind {
-    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId)
+    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$InfiniteTalk)
     $picked = @()
     if ($Video) { $picked += 'video' }
     if ($Music) { $picked += 'music' }
@@ -17,7 +17,8 @@ function Resolve-GenKind {
     if ($I2v)   { $picked += 'i2v'   }
     if ($Foley) { $picked += 'foley' }
     if ($FaceId) { $picked += 'faceid' }
-    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId (got: $($picked -join ', '))" }
+    if ($InfiniteTalk) { $picked += 'infinitetalk' }
+    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -InfiniteTalk (got: $($picked -join ', '))" }
     if ($picked.Count -eq 1) { return $picked[0] }
     return 'image'
 }
@@ -74,7 +75,7 @@ function Expand-References {
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler
     )
     $r = switch ($Kind) {
@@ -132,6 +133,13 @@ function Get-GenRecipe {
         # workflow JSON wires the init image to InstantID's FaceAnalysis/LoadImage node. GATED: needs the -FaceId
         # install (node + weights) AND the on-GPU-authored CustomWorkflows\InstantID.json (see docs/decisions.md).
         'faceid' { @{ comfyuicustomworkflow = 'InstantID' } }
+        # audio-driven talking-video via the InfiniteTalk custom ComfyUI workflow (MeiGen InfiniteTalk on the
+        # Wan2.1-I2V-14B base, run through Kijai's WanVideoWrapper): the portrait rides the init-image channel
+        # (-InitImage <portrait>) and the driving voice rides the -Audio channel (-Audio <wav/mp3>). Ergonomic
+        # alias for -Workflow InfiniteTalk; the workflow JSON wires the portrait + audio to the wrapper's image/
+        # audio-load nodes. GATED: needs the -InfiniteTalk install (node + ~82GB base + adapter + wav2vec2) AND
+        # the on-GPU-authored CustomWorkflows\InfiniteTalk.json (the audio body-key is pinned there) — see docs/decisions.md.
+        'infinitetalk' { @{ comfyuicustomworkflow = 'InfiniteTalk' } }
     }
     # -Upscale = pure 4x-UltraSharp post pass (control% 0 regenerates NO detail). -Refine = a real hi-res-fix:
     # same upscaler but control% 0.35 regenerates coherent detail, + tiling to cap VRAM on the DiT model.
@@ -225,7 +233,7 @@ function Get-GenPromptFields {
 function Get-ModelFamilyOverride {
     param(
         [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image'
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
@@ -253,13 +261,13 @@ function Build-GenBody {
         [Parameter(Mandatory)][hashtable]$Recipe,
         [Parameter(Mandatory)][hashtable]$PromptFields,
         [Parameter(Mandatory)][string]$SessionId,
-        [string]$InitImageB64, [string]$MaskImageB64,
+        [string]$InitImageB64, [string]$MaskImageB64, [string]$AudioB64,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [int]$Duration = 0, [int]$Bpm = 0, [string]$Negative,
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -284,6 +292,10 @@ function Build-GenBody {
     # higher = more variation (the -Strength "vary" dial). Defaults to 0 when no strength is given.
     if ($InitImageB64) { $body.initimage = $InitImageB64; $body.initimagecreativity = $(if ($Strength -ge 0) { $Strength } else { 0 }) }
     if ($MaskImageB64) { $body.maskimage = $MaskImageB64 }   # white = the inpaint region (edit canvas)
+    # InfiniteTalk driving audio (base64). The custom-workflow audio-input body key is the on-GPU authoring
+    # confirm (it only binds once CustomWorkflows\InfiniteTalk.json names its audio-load node); `inputaudio` is
+    # the provisional key, to be pinned against the authored workflow. Carried only when an audio clip is given.
+    if ($AudioB64) { $body.inputaudio = $AudioB64 }
     if ($Aspect) {   # aspect-ratio preset -> width/height (caller passes it only for image/edit)
         switch ($Aspect) {
             '16:9' { $body.width = 1344; $body.height = 768 }
@@ -344,7 +356,7 @@ function Build-GenBody {
 function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'infinitetalk')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
@@ -352,18 +364,27 @@ function Invoke-Gen {
         [string]$ControlNets,
         [string]$EndImage, [switch]$Reference, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [string]$InitImage, [string]$MaskImage, [string]$Out,
+        [string]$InitImage, [string]$MaskImage, [string]$Audio, [string]$Out,
         [string]$Base = 'http://127.0.0.1:7801'
     )
     if ($Kind -eq 'edit' -and -not $InitImage) { throw "-Edit needs -InitImage <path-to-image>" }
     # InstantID is meaningless without a reference face, which rides the init-image channel — fail loudly up
     # front (mirrors -Edit) rather than POSTing an InstantID workflow with no face for SwarmUI to choke on.
     if ($Kind -eq 'faceid' -and -not $InitImage) { throw "-FaceId requires -InitImage <reference face>" }
+    # InfiniteTalk needs BOTH a portrait (init-image channel) AND a driving audio clip — fail loudly up front on
+    # either (mirrors -Edit/-FaceId) rather than POSTing a talking-video workflow with a missing input.
+    if ($Kind -eq 'infinitetalk' -and -not $InitImage) { throw "-InfiniteTalk requires -InitImage <portrait>" }
+    if ($Kind -eq 'infinitetalk' -and -not $Audio)     { throw "-InfiniteTalk requires -Audio <wav/mp3>" }
     if ($Upscale -and $Kind -notin @('image', 'edit')) { throw "-Upscale only applies to image/edit gens (got $Kind)" }
     if ($Refine -and $Kind -notin @('image', 'edit')) { throw "-Refine only applies to image/edit gens (got $Kind)" }
     if ($Face -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Face only applies to image/edit/i2v gens (got $Kind)" }
     if ($Realism -and $Kind -notin @('image', 'edit', 'i2v')) { throw "-Realism only applies to image/edit/i2v gens (got $Kind)" }
     if ($MaskImage -and $Kind -ne 'edit') { throw "-MaskImage only applies to -Edit gens (got $Kind)" }
+    # -Audio rides ONLY the infinitetalk kind (its driving voice). Without this guard, Build-GenBody injects the
+    # provisional `inputaudio` key whenever -Audio is set, so `doki gen -Video -Audio x.wav` would silently smuggle
+    # a stray audio key into a Wan video body — symmetric with the -MaskImage guard above. Fire BEFORE the audio
+    # file-read so a real clip on the wrong kind is rejected too (not waved through by the existence check).
+    if ($Audio -and $Kind -ne 'infinitetalk') { throw "-Audio only applies to -InfiniteTalk gens (got $Kind)" }
     $initB64 = $null
     if ($InitImage) {
         if (-not (Test-Path -LiteralPath $InitImage)) { throw "init image not found: $InitImage" }
@@ -373,6 +394,14 @@ function Invoke-Gen {
     if ($MaskImage) {
         if (-not (Test-Path -LiteralPath $MaskImage)) { throw "mask image not found: $MaskImage" }
         $maskB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $MaskImage).Path))
+    }
+    # InfiniteTalk driving audio: base64 the wav/mp3 here (Build-GenBody stays pure). The exact SwarmUI body key
+    # for a custom-workflow audio input is the on-GPU authoring confirm (it only matters once InfiniteTalk.json
+    # exists + names its audio-load node), so Build-GenBody parks it under a provisional `inputaudio` key.
+    $audioB64 = $null
+    if ($Audio) {
+        if (-not (Test-Path -LiteralPath $Audio)) { throw "audio clip not found: $Audio" }
+        $audioB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Audio).Path))
     }
     # ControlNet units arrive as a JSON array with image PATHS; read each to base64 here (Build-GenBody is pure).
     $controlNetsB64 = ''
@@ -408,7 +437,7 @@ function Invoke-Gen {
     if ($BodyOnly) {
         $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
         $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
-        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind
+        $b = Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId 'pending' -InitImageB64 $initB64 -MaskImageB64 $maskB64 -AudioB64 $audioB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind
         $b.Remove('session_id')   # placeholder only; the web host injects the real session_id after GetNewSession
         return ($b | ConvertTo-Json -Depth 6 -Compress)
     }
@@ -423,7 +452,7 @@ function Invoke-Gen {
     $recipe = Get-GenRecipe -Kind $Kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Upscaler $Upscaler
     $fields = Get-GenPromptFields -Kind $Kind -Idea $Prompt -Raw:$Raw -Face:$Face -Realism:$Realism -Lyrics $lyricsArg -Lora $loraArg -Segment $segmentArg
     $sid = (Invoke-RestMethod "$Base/API/GetNewSession" -Method Post -Body '{}' -ContentType 'application/json').session_id
-    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind) | ConvertTo-Json -Depth 6
+    $body = (Build-GenBody -Recipe $recipe -PromptFields $fields -SessionId $sid -InitImageB64 $initB64 -MaskImageB64 $maskB64 -AudioB64 $audioB64 -Seed $Seed -Count $Count -Strength $Strength -Aspect $aspectArg -Duration $durationArg -Bpm $bpmArg -Negative $Negative -ControlNets $controlNetsB64 -EndImageB64 $endB64 -Reference $referenceArg -RefWeight $RefWeight -Interpolate $interpolateArg -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $tileArg -Model $Model -Kind $Kind) | ConvertTo-Json -Depth 6
     $resp = Invoke-RestMethod "$Base/API/GenerateText2Image" -Method Post -ContentType 'application/json' -TimeoutSec 600 -Body $body
     $artifacts = @($resp.images)
     if (-not $artifacts) { throw "SwarmUI returned no artifact ($($resp | ConvertTo-Json -Depth 4 -Compress))" }

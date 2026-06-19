@@ -22,6 +22,7 @@ param(
     # animate-still otherwise), -Raw (skip the :8013 rewriter), -Out <file>, -NoOpen.
     [switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley,
     [switch]$FaceId,   # InstantID face-identity transfer (SDXL) — pass the reference face as -InitImage; needs setup.ps1 -FaceId + the on-GPU InstantID workflow
+    [switch]$InfiniteTalk,   # audio-driven talking-video (MeiGen InfiniteTalk on Wan2.1-I2V-14B) — portrait via -InitImage, audio via -Audio; needs setup.ps1 -InfiniteTalk + the on-GPU InfiniteTalk workflow (~82GB base)
     [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
     [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
     [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
@@ -29,7 +30,8 @@ param(
     [string]$ControlNets,
     [string]$EndImage, [switch]$Reference, [double]$RefWeight = 0.6,
     [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-    [string]$InitImage, [string]$MaskImage, [string]$Out
+    [string]$InitImage, [string]$MaskImage, [string]$Out,
+    [string]$Audio   # -InfiniteTalk audio clip (wav/mp3) — the driving voice; required for -InfiniteTalk alongside -InitImage <portrait>
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -383,10 +385,10 @@ switch ($Command) {
         & python (Join-Path $serving "memory-mcp\code_index.py") $root
     }
     "gen" {
-        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-FaceId] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Raw] [-Out <file>] [-NoOpen]" }
+        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-FaceId|-InfiniteTalk] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
-        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -FaceId:$FaceId
-        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlNets $ControlNets -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $Tile -Model $Model -InitImage $InitImage -MaskImage $MaskImage -Out $Out -BodyOnly:$BodyOnly
+        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -FaceId:$FaceId -InfiniteTalk:$InfiniteTalk
+        $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlNets $ControlNets -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $Tile -Model $Model -InitImage $InitImage -MaskImage $MaskImage -Audio $Audio -Out $Out -BodyOnly:$BodyOnly
         if ($BodyOnly) { $genResult } else { $null = $genResult }   # -BodyOnly prints the GenerateText2Image body JSON for the web host (live-progress WS path)
     }
     "test" {

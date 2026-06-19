@@ -22,12 +22,16 @@ Assert ((Resolve-GenKind -Edit)  -eq 'edit')  "-Edit  -> edit"
 Assert ((Resolve-GenKind -I2v)   -eq 'i2v')   "-I2v   -> i2v"
 Assert ((Resolve-GenKind -Foley) -eq 'foley') "-Foley -> foley"
 Assert ((Resolve-GenKind -FaceId) -eq 'faceid') "-FaceId -> faceid (InstantID face-identity)"
+Assert ((Resolve-GenKind -InfiniteTalk) -eq 'infinitetalk') "-InfiniteTalk -> infinitetalk (audio-driven talking-video)"
 $ambiguous = $false
 try { Resolve-GenKind -Video -Music | Out-Null } catch { $ambiguous = $true }
 Assert $ambiguous                             "-Video -Music -> throws (ambiguous)"
 $ambiguous2 = $false
 try { Resolve-GenKind -FaceId -Foley | Out-Null } catch { $ambiguous2 = $true }
 Assert $ambiguous2                            "-FaceId -Foley -> throws (ambiguous)"
+$ambiguous3 = $false
+try { Resolve-GenKind -InfiniteTalk -I2v | Out-Null } catch { $ambiguous3 = $true }
+Assert $ambiguous3                            "-InfiniteTalk -I2v -> throws (ambiguous)"
 
 # --- Get-GenRecipe: the docs/wiki/11-media-recipes.md table, 1:1 ---
 $img = Get-GenRecipe -Kind image
@@ -122,6 +126,56 @@ Assert $faceidOk                                           "-FaceId WITH -InitIm
 $fbBody = $null; try { $fbBody = $fb | ConvertFrom-Json } catch {}
 Assert ($fbBody -and $fbBody.comfyuicustomworkflow -eq 'InstantID') "-FaceId -InitImage -BodyOnly -> body carries comfyuicustomworkflow=InstantID + the init image"
 Remove-Item -LiteralPath $faceTmp -Force -ErrorAction SilentlyContinue
+
+# infinitetalk = the InfiniteTalk custom-workflow alias (audio-driven talking-video on Wan2.1-I2V-14B). Maps to
+# comfyuicustomworkflow=InfiniteTalk; the portrait rides the init-image channel and the voice rides -Audio.
+$itk = Get-GenRecipe -Kind infinitetalk
+Assert ($itk.comfyuicustomworkflow -eq 'InfiniteTalk') "infinitetalk -> InfiniteTalk custom workflow (the talking-video alias)"
+
+# --- Invoke-Gen: -InfiniteTalk REQUIRES BOTH -InitImage <portrait> AND -Audio <clip> up front (mirrors the
+# -Edit/-FaceId init-image guard, plus a NEW audio guard). Both must fire loudly BEFORE any SwarmUI contact, so
+# the throw paths return before the probe; the positive path uses real temp files + -BodyOnly (no /API call).
+$itNoInit = $false; $itErr = $null
+try { Invoke-Gen -Prompt 'a person speaking' -Kind infinitetalk -Audio 'x.wav' | Out-Null } catch { $itNoInit = $true; $itErr = "$($_.Exception.Message)" }
+Assert $itNoInit                                          "-InfiniteTalk with NO -InitImage -> throws (a portrait is mandatory)"
+Assert ($itErr -match 'requires\s+-InitImage')            "-InfiniteTalk missing -InitImage -> the error names 'requires -InitImage'"
+$itPortrait = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-it-img-$([guid]::NewGuid().ToString('N')).png"
+Set-Content -LiteralPath $itPortrait -Value 'not-a-real-image-just-bytes' -NoNewline
+$itNoAudio = $false; $itErr2 = $null
+try { Invoke-Gen -Prompt 'a person speaking' -Kind infinitetalk -InitImage $itPortrait | Out-Null } catch { $itNoAudio = $true; $itErr2 = "$($_.Exception.Message)" }
+Assert $itNoAudio                                         "-InfiniteTalk with portrait but NO -Audio -> throws (the driving voice is mandatory)"
+Assert ($itErr2 -match 'requires\s+-Audio')               "-InfiniteTalk missing -Audio -> the error names 'requires -Audio' (the NEW audio guard)"
+$itAudio = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-it-aud-$([guid]::NewGuid().ToString('N')).wav"
+Set-Content -LiteralPath $itAudio -Value 'not-a-real-wav-just-bytes' -NoNewline
+$itOk = $true
+try { $ib = Invoke-Gen -Prompt 'a person speaking' -Kind infinitetalk -InitImage $itPortrait -Audio $itAudio -BodyOnly } catch { $itOk = $false }
+Assert $itOk                                              "-InfiniteTalk WITH -InitImage + -Audio -> does NOT throw (both inputs supplied)"
+$ibBody = $null; try { $ibBody = $ib | ConvertFrom-Json } catch {}
+Assert ($ibBody -and $ibBody.comfyuicustomworkflow -eq 'InfiniteTalk') "-InfiniteTalk -BodyOnly -> body carries comfyuicustomworkflow=InfiniteTalk"
+Assert ($ibBody -and $ibBody.initimage)                   "-InfiniteTalk -BodyOnly -> body carries the portrait (init image)"
+Assert ($ibBody -and $ibBody.inputaudio)                  "-InfiniteTalk -BodyOnly -> body carries the driving audio (provisional inputaudio key; pinned on-GPU)"
+Remove-Item -LiteralPath $itPortrait, $itAudio -Force -ErrorAction SilentlyContinue
+
+# --- Invoke-Gen: -Audio is gated to the infinitetalk kind (mirrors the -MaskImage/-Edit kind-guard). Without
+# this, Build-GenBody would inject the provisional `inputaudio` key into ANY body whenever -Audio is given, so
+# `doki gen -Video -Audio x.wav` would silently smuggle a stray audio key into a Wan video body. The guard must
+# fire loudly BEFORE any SwarmUI contact (same posture as -MaskImage/-Upscale), and must NOT block the one kind
+# that legitimately consumes audio (infinitetalk), which is already proven to reach -BodyOnly above.
+$audWrongKind = $false; $audErr = $null
+try { Invoke-Gen -Prompt 'a koi swimming' -Kind video -Audio 'x.wav' | Out-Null } catch { $audWrongKind = $true; $audErr = "$($_.Exception.Message)" }
+Assert $audWrongKind                                      "-Video -Audio -> throws (audio only applies to -InfiniteTalk, not a Wan video body)"
+Assert ($audErr -match '(?i)-Audio only applies to .*-InfiniteTalk') "-Video -Audio -> the error names '-Audio only applies to -InfiniteTalk' (clear, up-front)"
+Assert ($audErr -match '(?i)got\s+video')                 "-Video -Audio -> the error reports the offending kind (got video)"
+# the audio guard must NOT block infinitetalk (its own -InitImage/-Audio guards already passed -BodyOnly above);
+# re-prove the happy path returns a body, i.e. the new kind-guard permits the one audio-consuming kind.
+$itPortrait2 = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-it-img2-$([guid]::NewGuid().ToString('N')).png"
+$itAudio2    = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-it-aud2-$([guid]::NewGuid().ToString('N')).wav"
+Set-Content -LiteralPath $itPortrait2 -Value 'not-a-real-image-just-bytes' -NoNewline
+Set-Content -LiteralPath $itAudio2    -Value 'not-a-real-wav-just-bytes'   -NoNewline
+$audRightKind = $true
+try { Invoke-Gen -Prompt 'a person speaking' -Kind infinitetalk -InitImage $itPortrait2 -Audio $itAudio2 -BodyOnly | Out-Null } catch { $audRightKind = $false }
+Assert $audRightKind                                      "-InfiniteTalk -InitImage -Audio -> does NOT throw the audio kind-guard (infinitetalk legitimately consumes audio)"
+Remove-Item -LiteralPath $itPortrait2, $itAudio2 -Force -ErrorAction SilentlyContinue
 
 $up = Get-GenRecipe -Kind image -Upscale
 Assert ($up.refinermethod -eq 'PostApply' -and $up.refinerupscalemethod -eq 'model-4x-UltraSharp.pth') "image -Upscale -> 4x-UltraSharp refiner"
