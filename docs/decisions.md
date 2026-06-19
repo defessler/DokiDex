@@ -1,5 +1,42 @@
 # Decision log
 
+## 2026-06-19 — Chat surface built out P2→Pn + shipped (v0.7.0); anime SDXL pack added; remaining model-adds gated
+
+Drove `feat/chat-phases` through the design's full phase plan via ultracode (per-phase
+build + adversarial-review + fix workflows, TDD, each a verified green commit): **P2** SSE
+token streaming (cancellable read bounded by the request token; in-band `event: error`
+since you can't 503 after headers flush); **P3** lorebook-lite (keyword-triggered
+`[World Info]` injection; `ChatPrompt.Build` + `ActivateLore` share one `RecentTurns`
+window so activation scans exactly the turns the prompt sends); **P4** voice readback
+(per-assistant-bubble TTS reuse of `/api/speak`); **P5** vision-in-chat (attach a Library
+image — incl. edit/inpaint stills — → multimodal turn forced to the Vision tier via the
+tested `Chat.VisionModel`); **Pn.1** tool-calling (a bounded 4-hop / 4-min agent loop +
+ONE curated in-process tool `search_library`; `ParseToolCalls` synthesizes unique ids,
+the echoed assistant turn carries `content:null`, the per-hop transcript shaping is pure +
+tested). Web-search / code-RAG / generate-from-chat are deferred as future gated tools
+(external integration / GPU handoff). Suite **376 → 452** green throughout; Debug+Release
+clean each commit.
+
+**Model-adds — shipped the one cleanly-wireable add:** the **anime SDXL pack**
+(Illustrious-XL v1.0 + Animagine XL 4.0) as gated `-Models full` downloads + matching
+`model-catalog.json` rows so they surface in the Studio picker (and via SwarmUI's native
+picker + the `-Model` override; `ModelManager` resolves by filename). URLs HF-tree +
+live-HEAD verified; an AST-driven `setup-helpers` test pins the entries. Self-contained
+SDXL checkpoints route through the existing image recipe — no recipe/node work needed.
+On-GPU load + image quality is the labeled remaining step (first full checkpoints in the
+kit vs the existing DiT/unet models).
+
+**Remaining model-adds = gated follow-ups (NOT blind-shipped, per verify-before-ship):**
+FLUX.2 Klein, Qwen-Image (GGUF, needs the city96 ComfyUI-GGUF node + TE/VAE), Wan 2.2 A14B
+GGUF (dual-expert high/low-noise recipe DokiDex doesn't have), PuLID-Flux + InfiniteTalk
+(ComfyUI custom-node / sidecar integrations), TTS-Audio-Suite (a ComfyUI-node vs the
+standalone Chatterbox `:8004` architecture decision), Nunchaku NVFP4, and the music
+`xl_base` quality tier (unsourced cfg). Each needs multi-component/node integration, a
+recipe tuning pass, or an architecture decision that requires on-GPU verification — none a
+clean unit-testable slice. Full map in `docs/superpowers/specs/2026-06-18-ai-platform-models-workflows-research.md`.
+
+Released as **v0.7.0** (`feat/chat-phases` → `main`).
+
 ## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present
 
 Three adversarial **deep-research** passes (~335 agents, ~8.1M tokens, 46 claims confirmed / 8 refuted vs
