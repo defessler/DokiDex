@@ -35,8 +35,13 @@ public static class ChatPrompt
     // (chronological, most-recent-wins) -> user turn. historyTurnBudget bounds how many prior turns ride along
     // (caps max_tokens growth); <= 0 drops all history. activeLore is the P3 keyword-triggered "World Info"
     // injection (already activated by Lorebook.Activate); a null/empty list preserves the EXACT prior output.
+    //
+    // P5 vision-in-chat: when imageDataUrl is supplied (non-empty), the NEW user turn's content becomes the OpenAI
+    // multimodal content ARRAY — { type="text", text } + { type="image_url", image_url={ url } } — EXACTLY the
+    // shape Vision.cs/LocalLlm.ChatVisionAsync send (same llama-swap vision path). When null/empty the user turn
+    // stays the plain-string content, preserving the EXACT pre-P5 output. History turns are always plain strings.
     public static List<object> Build(PersonaCard? card, IReadOnlyList<ChatTurn> history, string userMessage,
-        int historyTurnBudget, IReadOnlyList<LoreEntry>? activeLore = null)
+        int historyTurnBudget, IReadOnlyList<LoreEntry>? activeLore = null, string? imageDataUrl = null)
     {
         var msgs = new List<object> { new { role = "system", content = SystemBundle(card) } };
 
@@ -53,7 +58,15 @@ public static class ChatPrompt
         foreach (var t in RecentTurns(history, historyTurnBudget))
             msgs.Add(new { role = NormalizeRole(t.Role), content = t.Content.Trim() });
 
-        msgs.Add(new { role = "user", content = userMessage ?? "" });
+        var text = userMessage ?? "";
+        if (string.IsNullOrWhiteSpace(imageDataUrl))
+            msgs.Add(new { role = "user", content = text });
+        else
+            msgs.Add(new { role = "user", content = new object[]
+            {
+                new { type = "text", text },
+                new { type = "image_url", image_url = new { url = imageDataUrl } },
+            }});
         return msgs;
     }
 

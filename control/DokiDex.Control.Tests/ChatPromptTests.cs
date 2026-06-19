@@ -29,6 +29,18 @@ public class ChatPromptTests
     // Read role+content off a ChatTurn (RecentTurns returns turns, not the anonymous message objects above).
     private static (string role, string content) Read2(ChatTurn t) => (t.Role, t.Content);
 
+    // Read role + the RAW content object (string OR the multimodal object[]) off whatever the builder emits.
+    private static (string role, object content) ReadRaw(object msg)
+    {
+        var t = msg.GetType();
+        var role = t.GetProperty("role")!.GetValue(msg) as string ?? "";
+        var content = t.GetProperty("content")!.GetValue(msg)!;
+        return (role, content);
+    }
+
+    // Read a single property by name off an anonymous object via reflection.
+    private static object? Prop(object o, string name) => o.GetType().GetProperty(name)?.GetValue(o);
+
     [Fact]
     public void Card_only_yields_one_system_turn_then_the_user_turn()
     {
@@ -146,6 +158,79 @@ public class ChatPromptTests
         Assert.Equal(("user", "first user"), Read(msgs[2]));
         Assert.Equal(("assistant", "first reply"), Read(msgs[3]));
         Assert.Equal(("user", "the new turn"), Read(msgs[4]));
+    }
+
+    // ---- P5 vision-in-chat: when an imageDataUrl is supplied, the new USER turn's content becomes the OpenAI
+    //      multimodal array EXACTLY like Vision.cs builds it (text + image_url), and the plain-string path is
+    //      preserved EXACTLY when no image is supplied. ----
+
+    [Fact]
+    public void Image_data_url_makes_the_user_turn_a_multimodal_text_plus_image_url_array()
+    {
+        const string dataUrl = "data:image/png;base64,AAAA";
+        var msgs = ChatPrompt.Build(Card(system: "You are Doki."), new List<ChatTurn>(), "what is this?",
+            historyTurnBudget: 20, imageDataUrl: dataUrl);
+
+        // system + the single multimodal user turn.
+        Assert.Equal(2, msgs.Count);
+        Assert.Equal("system", Read(msgs[0]).role);
+
+        var (role, content) = ReadRaw(msgs[1]);
+        Assert.Equal("user", role);
+
+        // The content is the 2-element object[]: { type="text", text=<message> }, { type="image_url", image_url={ url } }.
+        var arr = Assert.IsAssignableFrom<object[]>(content);
+        Assert.Equal(2, arr.Length);
+
+        Assert.Equal("text", Prop(arr[0], "type"));
+        Assert.Equal("what is this?", Prop(arr[0], "text"));
+
+        Assert.Equal("image_url", Prop(arr[1], "type"));
+        var imageUrl = Prop(arr[1], "image_url")!;
+        Assert.Equal(dataUrl, Prop(imageUrl, "url"));
+    }
+
+    [Fact]
+    public void Image_turn_still_follows_system_and_trimmed_history()
+    {
+        var hist = new List<ChatTurn> { U("first user"), A("first reply") };
+        var msgs = ChatPrompt.Build(Card(), hist, "look",
+            historyTurnBudget: 20, imageDataUrl: "data:image/jpeg;base64,ZZ");
+
+        // system + 2 history turns (plain strings) + the multimodal user turn.
+        Assert.Equal(4, msgs.Count);
+        Assert.Equal("system", Read(msgs[0]).role);
+        Assert.Equal(("user", "first user"), Read(msgs[1]));
+        Assert.Equal(("assistant", "first reply"), Read(msgs[2]));
+
+        var (role, content) = ReadRaw(msgs[3]);
+        Assert.Equal("user", role);
+        Assert.IsAssignableFrom<object[]>(content);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Null_or_blank_image_data_url_keeps_the_plain_string_user_content(string? dataUrl)
+    {
+        var msgs = ChatPrompt.Build(Card(), new List<ChatTurn>(), "hi there",
+            historyTurnBudget: 20, imageDataUrl: dataUrl);
+
+        Assert.Equal(2, msgs.Count);
+        var (role, content) = ReadRaw(msgs[1]);
+        Assert.Equal("user", role);
+        Assert.Equal("hi there", Assert.IsType<string>(content));   // EXACT plain-string content preserved
+    }
+
+    [Fact]
+    public void No_image_argument_preserves_the_exact_default_string_output()
+    {
+        // The default (no imageDataUrl arg) must be byte-for-byte the pre-P5 output: plain-string user content.
+        var withDefault = ChatPrompt.Build(Card(), new List<ChatTurn>(), "go", historyTurnBudget: 20);
+        var (role, content) = ReadRaw(withDefault[1]);
+        Assert.Equal("user", role);
+        Assert.Equal("go", Assert.IsType<string>(content));
     }
 
     // ---- RecentTurns: the shared "recent non-empty turns within budget" window (single source of truth used by

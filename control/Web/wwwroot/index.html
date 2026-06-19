@@ -80,6 +80,16 @@
     .bub .tts{background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:0 0 0 6px;line-height:1;vertical-align:baseline}
     .bub .tts:hover{color:var(--cyan)}
     .bub .tts:disabled{cursor:default;opacity:.7}
+    /* P5 attach-image: pending thumbnail chip in the composer + the gallery picker grid */
+    #chatImageChip{display:none;align-items:center;gap:8px;margin-top:6px}
+    #chatImageChip img{height:44px;width:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border)}
+    #chatImageChip .x{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;line-height:1;padding:0 2px}
+    #chatImageChip .x:hover{color:var(--cyan)}
+    #chatImagePicker{display:none;margin-top:6px;max-height:34vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--surface2);padding:8px}
+    #chatImagePicker .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px}
+    #chatImagePicker .pcell{cursor:pointer;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--surface3)}
+    #chatImagePicker .pcell img{display:block;width:100%;height:72px;object-fit:cover}
+    #chatImagePicker .pcell:hover{border-color:var(--cyan)}
   </style>
 </head>
 <body>
@@ -265,8 +275,12 @@
       <div class="row" style="align-items:flex-start;margin-top:8px">
         <textarea id="chatInput" placeholder="Message…  (Ctrl+Enter to send)" style="flex:1;min-height:72px"></textarea>
       </div>
+      <!-- P5 attach-image: a pending gallery image (name only) sent with the next turn → vision model. -->
+      <div id="chatImageChip"><img id="chatImageThumb" alt=""><span class="hint" id="chatImageName"></span><button class="x" type="button" title="Remove image" onclick="clearChatImage()">×</button></div>
+      <div id="chatImagePicker"><p class="hint" id="chatImagePickerHint" style="margin:0 0 6px">Pick a Library image…</p><div class="pgrid" id="chatImageGrid"></div></div>
       <div class="mods" style="align-items:center;margin-top:6px">
         <label title="fast = the interactive coder model; quality = the heavy model (slower, stronger), swapped in on demand">Speed <select id="chatTier" class="kin" style="width:auto"><option value="fast">fast</option><option value="quality">quality · slower</option></select></label>
+        <button class="ghost" type="button" onclick="toggleChatImagePicker()" title="Attach one Library image so the assistant can see it (uses the vision model)">+ image</button>
         <button class="primary" onclick="sendChat()">Send</button>
         <button class="ghost" onclick="newChat()">New</button>
         <span class="hint" id="chatHint"></span>
@@ -1372,7 +1386,7 @@
       try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
     }
     function newChat(){ _chatMsgs=[]; _chatConv=null; document.getElementById('chatLog').innerHTML='';
-      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; }
+      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); }
     function renderChatGuard(){
       const el=document.getElementById('chatGuard'); if(!el) return;
       if(state.llmActive){ el.innerHTML=''; return; }
@@ -1390,12 +1404,47 @@
       renderChatGuard();   // clear the stale MEDIA banner immediately, don't wait for the next pollStatus tick
       return ok;
     }
+    // ---- P5 attach-image: one pending Library image (gallery NAME) rides the next turn → vision model server-side ----
+    // _chatImage holds the selected gallery item's NAME (never markup); the backend (Chat.ResolveImage) turns it into
+    // a data URL and forces the Vision tier. Names render via textContent only. Cleared after each send.
+    let _chatImage=null;
+    function setChatImage(name){
+      _chatImage=name||null;
+      const chip=document.getElementById('chatImageChip');
+      if(!_chatImage){ chip.style.display='none'; return; }
+      document.getElementById('chatImageThumb').src='/api/gallery/media/'+encodeURIComponent(_chatImage);
+      document.getElementById('chatImageName').textContent=_chatImage;
+      chip.style.display='flex';
+      document.getElementById('chatImagePicker').style.display='none';
+    }
+    function clearChatImage(){ setChatImage(null); }
+    async function toggleChatImagePicker(){
+      const p=document.getElementById('chatImagePicker');
+      if(p.style.display!=='none' && p.style.display!==''){ p.style.display='none'; return; }
+      const grid=document.getElementById('chatImageGrid'), hint=document.getElementById('chatImagePickerHint');
+      p.style.display='block'; grid.innerHTML=''; hint.textContent='Pick a Library image…';
+      try{
+        // Reuse GET /api/gallery; fetch ALL kinds (the server applies an EXACT kind-equality filter, which would
+        // drop 'edit' stills) and filter to the still-image kinds client-side — same pattern as loadLibrary.
+        const items=await (await fetch('/api/gallery?view=active')).json();
+        const imgs=(items||[]).filter(it=>it.kind==='image'||it.kind==='edit');
+        if(!imgs.length){ hint.textContent='No Library images yet.'; return; }
+        imgs.slice(0,60).forEach(it=>{
+          const cell=$(`<div class="pcell" role="button" tabindex="0"></div>`);
+          const img=document.createElement('img'); img.loading='lazy'; img.alt='';
+          img.src='/api/gallery/media/'+encodeURIComponent(it.name);
+          cell.title=it.name; cell.appendChild(img);
+          cell.onclick=()=>setChatImage(it.name);
+          grid.appendChild(cell);
+        });
+      }catch{ hint.textContent='could not load the Library'; }
+    }
     // Non-streaming POST /api/chat — kept as the P2 transport fallback (real 503 contract).
-    async function sendChatOnce(text,fresh){
+    async function sendChatOnce(text,fresh,image){
       const hint=document.getElementById('chatHint');
       const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
-          message:text, tier:document.getElementById('chatTier').value})});
+          message:text, tier:document.getElementById('chatTier').value, image:image||null})});
       const j=await r.json();
       if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
       _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
@@ -1406,6 +1455,8 @@
       const log=document.getElementById('chatLog');
       const text=inp.value.trim(); if(!text) return;
       if(!await ensureLlm()){ hint.textContent='chat needs AGENT mode'; return; }
+      // P5: snapshot + clear the pending image now so the chip isn't left dangling across the async send.
+      const image=_chatImage; clearChatImage();
       appendBubble('user',text); _chatMsgs.push({role:'user',content:text}); inp.value=''; hint.textContent='thinking…';
       const fresh = !_chatConv;
       // P2 streaming: append an empty assistant bubble, read SSE frames off res.body, append each token live.
@@ -1413,8 +1464,8 @@
       try{
         const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({conversation:_chatConv, persona:document.getElementById('chatPersona').value,
-            message:text, tier:document.getElementById('chatTier').value})});
-        if(!res.ok || !res.body){ bub.remove(); await sendChatOnce(text,fresh); return; }   // transport failure before any token → fall back
+            message:text, tier:document.getElementById('chatTier').value, image:image||null})});
+        if(!res.ok || !res.body){ bub.remove(); await sendChatOnce(text,fresh,image); return; }   // transport failure before any token → fall back
         const reader=res.body.getReader(), dec=new TextDecoder(); let buf='', errored=false, done=false;
         // Parse ONE SSE frame (an event/data block). Appends a token via textContent (never innerHTML).
         const handleFrame=frame=>{
@@ -1438,12 +1489,12 @@
         // lands in the bubble and the accumulated reply, instead of being silently dropped.
         if(!done){ buf+=dec.decode(); drain(); }
         if(errored){ return; }
-        if(!got){ bub.remove(); await sendChatOnce(text,fresh); return; }   // empty stream → fall back to the one-shot path
+        if(!got){ bub.remove(); await sendChatOnce(text,fresh,image); return; }   // empty stream → fall back to the one-shot path
         _chatMsgs.push({role:'assistant',content:acc}); hint.textContent='';
         if(fresh) loadThreads();
       }catch{
         // streaming transport threw: fall back to the non-streaming POST if no token landed, else surface a hint.
-        if(!got){ bub.remove(); try{ await sendChatOnce(text,fresh); }catch{ hint.textContent='request failed'; } }
+        if(!got){ bub.remove(); try{ await sendChatOnce(text,fresh,image); }catch{ hint.textContent='request failed'; } }
         else { _chatMsgs.push({role:'assistant',content:acc}); hint.textContent=''; if(fresh) loadThreads(); }
       }
     }

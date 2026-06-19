@@ -12,8 +12,12 @@ namespace DokiDex.Web;
 // speed/quality LlmTiers tier. Messages is an optional client-supplied transcript for stateless callers
 // (symmetry with how Director takes raw input) — when present and the server has no stored thread, it seeds
 // history; the server otherwise persists history itself in ChatStore so the SPA need not resend the transcript.
+// Image (P5 vision-in-chat, optional) = a GALLERY IMAGE NAME (resolved server-side to a data: URL via
+// GalleryService.ImageDataUrl). When present + resolvable, the turn is answered by the VISION model (the tier is
+// forced to LlmTiers.Vision regardless of the requested speed Tier); an unresolvable name is ignored (text-only).
 public sealed record ChatRequest(
-    string? Conversation, string? Persona, string? Message, string? Tier, IReadOnlyList<ChatTurn>? Messages = null);
+    string? Conversation, string? Persona, string? Message, string? Tier, IReadOnlyList<ChatTurn>? Messages = null,
+    string? Image = null);
 
 // The persona-chat orchestrator (mirrors Director/Rewriter shape): load the card + the conversation, assemble
 // the prompt via the pure ChatPrompt.Build, run the multi-turn LLM call, persist BOTH turns, and return a
@@ -55,7 +59,14 @@ public static class Chat
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
 
         var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore);
+
+        // P5 vision-in-chat: resolve an attached gallery image to a data: URL. When it resolves we (a) attach it as
+        // the multimodal user-turn content and (b) FORCE the Vision model/tier (vision needs the VL block regardless
+        // of the requested speed tier). An unresolvable/absent image => text-only with the originally requested tier.
+        var imageDataUrl = ResolveImage(body.Image);
+        model = VisionModel(imageDataUrl, model);
+
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl);
 
         var temperature = 0.8;
         var maxTokens = 1024;
@@ -102,7 +113,13 @@ public static class Chat
 
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
         var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore);
+
+        // P5 vision-in-chat (same rule as SendAsync): a resolvable gallery image attaches as multimodal content and
+        // forces the Vision model/tier; an unresolvable/absent image streams text-only on the requested tier.
+        var imageDataUrl = ResolveImage(body.Image);
+        model = VisionModel(imageDataUrl, model);
+
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl);
 
         // Hand the conversation id to the endpoint up front (so the SPA can capture it before any token).
         yield return StreamEvent.Meta(conv.Id);
@@ -133,6 +150,24 @@ public static class Chat
             conv = conv with { Messages = appended };
             ChatStore.Save(conv);   // graceful: a save failure does not undo the reply the user already streamed
         }
+    }
+
+    // P5 acceptance crux, as ONE pure decision (shared by both send paths): when a multimodal image RESOLVED
+    // (non-empty data URL), force the Vision model regardless of the requested speed tier (vision needs the VL
+    // block); with no/unresolvable image, leave the requested model untouched (text-only on the asked tier).
+    // Pure + total => unit-tested, so the "image => Vision" rule can't silently drift in just one of SendAsync/StreamAsync.
+    internal static string? VisionModel(string? imageDataUrl, string? requestedModel)
+        => string.IsNullOrEmpty(imageDataUrl) ? requestedModel : LlmTiers.Vision;
+
+    // P5: resolve an optional gallery IMAGE NAME to a data: URL for a multimodal turn. Null/blank name, an unknown
+    // name, or a non-image artifact => null (the turn proceeds text-only). Graceful — never throws: a bad name is
+    // simply ignored, exactly like /api/describe rejects an unresolvable name. GalleryService.ImageDataUrl is
+    // path-scoped (no traversal) and returns null for anything that isn't a real image in the gallery root.
+    private static string? ResolveImage(string? imageName)
+    {
+        if (string.IsNullOrWhiteSpace(imageName)) return null;
+        try { return new GalleryService().ImageDataUrl(imageName.Trim()); }
+        catch { return null; }
     }
 
     // Pure history-source choice (no GPU/disk): the persisted transcript wins when the stored thread already has

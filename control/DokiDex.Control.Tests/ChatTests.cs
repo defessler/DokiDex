@@ -71,4 +71,22 @@ public class ChatTests
         var history = new List<ChatTurn> { U("the dragon roared") };
         Assert.Null(Chat.ActivateLore(lorebookName, history, "tell me more"));
     }
+
+    [Fact]
+    public void VisionModel_forces_the_Vision_tier_when_an_image_is_attached()
+    {
+        // P5 crux: a resolved (non-empty) image data URL overrides whatever speed tier was requested.
+        Assert.Equal(LlmTiers.Vision, Chat.VisionModel("data:image/png;base64,AAAA", LlmTiers.Fast));
+        Assert.Equal(LlmTiers.Vision, Chat.VisionModel("data:image/png;base64,AAAA", null));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void VisionModel_returns_the_requested_model_verbatim_when_there_is_no_image(string? imageDataUrl)
+    {
+        // No/unresolvable image => the originally requested model is left untouched (text-only on the asked tier).
+        Assert.Equal(LlmTiers.Quality, Chat.VisionModel(imageDataUrl, LlmTiers.Quality));
+        Assert.Null(Chat.VisionModel(imageDataUrl, null));
+    }
 }
