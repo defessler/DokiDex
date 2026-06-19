@@ -483,6 +483,18 @@ if ($Models -eq "full") {
     Get-Model "$w22/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors" (Join-Path $diff "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors")
     Get-Model "$w22/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"  (Join-Path $diff "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors")
     Get-Model "$w22/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors"                  (Join-Path $diff "wan2.2_ti2v_5B_fp16.safetensors")    # fast preview; no fp8 exists
+
+    # Quality-video tier: Wan 2.2 T2V A14B GGUF dual-expert (Q4_K_M, ~9.65GB each — the size cut vs the fp8
+    # ~13.3GB experts above that OOM'd). This is the ONLY zero-OOM 14B route (docs\decisions.md 2026-06-14/16):
+    # at Q4_K_M the high+low pair (~19.3GB) fits 32GB in SwarmUI's StepSwap. serving\doki-gen.ps1's video arm
+    # uses these on `doki gen -Video -Quality` (base = HIGH-noise, Refiner Model = LOW-noise, StepSwap @ 0.5).
+    # QuantStack tree is NOT flat — the resolve URL includes the HighNoise/ or LowNoise/ subfolder. Same TE
+    # (umt5_xxl) + VAE (wan2.2_vae) as the 5B/14B below — NOT re-downloaded. GATED on-GPU: the city96
+    # ComfyUI-GGUF node + live 32GB fit + the `refinermodel` body key are the labeled remaining confirms.
+    $t2vgguf = "https://huggingface.co/QuantStack/Wan2.2-T2V-A14B-GGUF/resolve/main"
+    Get-Model "$t2vgguf/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf" (Join-Path $diff "Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf")
+    Get-Model "$t2vgguf/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf"   (Join-Path $diff "Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf")
+
     Get-Model "$w22/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"              (Join-Path $te   "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
     Get-Model "$w22/vae/wan2.2_vae.safetensors"                                        (Join-Path $vae  "wan2.2_vae.safetensors")             # used by the Wan 2.2 5B AND 14B models (WanFoley node 101 loads this)
     Get-Model "$w22/vae/wan_2.1_vae.safetensors"                                       (Join-Path $vae  "wan_2.1_vae.safetensors")            # for the Wan 2.1 1.3B floor (NOT the 5B — corrected)

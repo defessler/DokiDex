@@ -86,9 +86,28 @@ function Get-GenRecipe {
         }
         # Wan 2.2 5B is native 720p/24fps; sigmashift 8 + uni_pc/simple are its tuned flow settings (the
         # config the missing sigma-shift left off). -Fast picks the distilled LTXV near-real-time model.
+        # -Quality = the GATED Wan 2.2 A14B GGUF dual-expert quality tier (the 5B default stays byte-for-byte;
+        # the quality arm is opt-in only). SwarmUI has NO auto-pairing for the two noise experts — it reuses
+        # its image-refiner StepSwap as a noise-level step-swap: base = HIGH-noise expert, Refiner Model =
+        # LOW-noise expert, RefinerMethod=StepSwap, RefinerControlPercentage=0.5 (the high expert is retuned to
+        # run only the first ~50% of steps, then hands off to the low expert). This dual-expert WIRING is
+        # AUTHORITATIVELY doc-sourced from SwarmUI's docs/Video Model Support.md; cfg=5 is its T2V 14B doc
+        # reference; sigmashift=8 is the doc default carried from the 5B. The refinermethod/refinercontrolpercentage
+        # body keys are CONFIRMED in-repo (the image upscale path emits them); `refinermodel` is DERIVED via
+        # SwarmUI's CleanTypeName from the source display name "Refiner Model" (lowercase letters only).
+        #   ON-GPU / GATED (NOT verified at rest — no GPU in CI): (1) the `refinermodel` body key must be
+        #   confirmed against a running SwarmUI's /API/ListT2IParameters; (2) steps + sampler/scheduler are NOT
+        #   doc-sourced for the non-distilled 14B (SwarmUI's doc omits them) — uni_pc/simple + 20 steps carried
+        #   from the 5B as the starting point, to be tuned live; (3) the 32GB fit of the dual ~9.65GB Q4_K_M
+        #   experts in StepSwap + (4) the city96 ComfyUI-GGUF node install / GGUF arch auto-detect.
         'video' {
-            if ($Fast) { @{ model = 'ltxv-2b-0.9.8-distilled.safetensors'; textvideoframes = 97; steps = 8;  cfgscale = 1;   width = 768; height = 512; videofps = 24; videoformat = 'h264-mp4' } }
-            else       { @{ model = 'wan2.2_ti2v_5B_fp16.safetensors';     textvideoframes = 49; steps = 20; cfgscale = 3.5; width = 832; height = 480; videofps = 24; videoformat = 'h264-mp4'; sampler = 'uni_pc'; scheduler = 'simple'; sigmashift = 8 } }
+            if ($Fast)         { @{ model = 'ltxv-2b-0.9.8-distilled.safetensors'; textvideoframes = 97; steps = 8;  cfgscale = 1;   width = 768; height = 512; videofps = 24; videoformat = 'h264-mp4' } }
+            # refinerupscale=1 (explicit, no resize): here the refiner group is reused for a noise-EXPERT
+            # StepSwap (a denoising handoff from the high- to the low-noise expert), NOT the hi-res upscale the
+            # image -Upscale/-Refine path uses it for — so it must NOT inherit that path's refinerupscale=2.
+            # (Whether SwarmUI's StepSwap even reads refinerupscale is part of the on-GPU confirm.)
+            elseif ($Quality)  { @{ model = 'Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf'; refinermethod = 'StepSwap'; refinermodel = 'Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf'; refinercontrolpercentage = 0.5; refinerupscale = 1; textvideoframes = 49; steps = 20; cfgscale = 5; width = 832; height = 480; videofps = 24; videoformat = 'h264-mp4'; sampler = 'uni_pc'; scheduler = 'simple'; sigmashift = 8 } }
+            else               { @{ model = 'wan2.2_ti2v_5B_fp16.safetensors';     textvideoframes = 49; steps = 20; cfgscale = 3.5; width = 832; height = 480; videofps = 24; videoformat = 'h264-mp4'; sampler = 'uni_pc'; scheduler = 'simple'; sigmashift = 8 } }
         }
         # music DEFAULT = ACE-Step 1.5 turbo (fast: 10 steps / CFG 1). Unlike image/video, turbo is the music
         # default and hi-fi is OPT-IN -> -Quality (not -Fast) swaps to ACE-Step 1.5 XL base with the OFFICIAL

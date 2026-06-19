@@ -16,7 +16,7 @@ public sealed record GenRequest(
     string Prompt,
     string Kind,                       // image | video | music | edit | i2v | foley
     bool Fast = false,
-    bool Quality = false,      // music: opt-in hi-fi swap (turbo default -> ACE-Step 1.5 XL base); music kind only
+    bool Quality = false,      // opt-in hi-fi swap: music (turbo -> ACE-Step 1.5 XL base) or video (5B -> Wan 2.2 A14B GGUF dual-expert)
     bool Upscale = false,
     bool Raw = false,
     string? InitImage = null,
@@ -87,9 +87,10 @@ public static class GenCli
         var a = new List<string> { "gen", r.Prompt };
         if (KindSwitch.TryGetValue(r.Kind, out var sw)) a.Add(sw);
         if (r.Fast) a.Add("-Fast");
-        // -Quality is the music-only hi-fi opt-in (doki-gen.ps1 swaps turbo -> ACE-Step 1.5 XL base); the
-        // recipe ignores it for other kinds, so don't emit a doomed switch there.
-        if (r.Quality && r.Kind is "music") a.Add("-Quality");
+        // -Quality is the hi-fi opt-in for music (turbo -> ACE-Step 1.5 XL base) AND video (Wan 2.2 5B ->
+        // the gated A14B GGUF dual-expert tier). doki-gen.ps1's music/video arms select the quality recipe on
+        // -Quality; the recipe ignores it for image/edit/i2v/foley, so don't emit a doomed switch there.
+        if (r.Quality && r.Kind is "music" or "video") a.Add("-Quality");
         if (r.Upscale && GenRequest.UpscaleApplies(r.Kind)) a.Add("-Upscale");
         if (r.Refine && GenRequest.UpscaleApplies(r.Kind)) a.Add("-Refine");
         // engine selector only matters when a post-pass runs (image/edit + -Upscale/-Refine); else it's dropped

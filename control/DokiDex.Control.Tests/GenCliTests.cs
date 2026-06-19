@@ -224,7 +224,21 @@ public class GenCliTests
         // music arm selects xl_base on -Quality. The switch is music-only and off by default.
         Assert.Contains("-Quality", GenCli.BuildArgs(new GenRequest("lofi", "music", Quality: true, OutPath: "o")));
         Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("lofi", "music", OutPath: "o")));         // opt-in
-        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("x", "image", Quality: true, OutPath: "o"))); // music-only
+        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("x", "image", Quality: true, OutPath: "o"))); // image still drops it
+    }
+
+    [Fact]
+    public void Video_quality_emits_quality_switch_for_the_a14b_gguf_tier()
+    {
+        // -Quality now also gates the GATED Wan 2.2 A14B GGUF dual-expert VIDEO tier (doki-gen.ps1's video arm
+        // swaps the 5B default -> the high/low-noise GGUF experts via StepSwap). The switch is music-or-video;
+        // it stays off by default (5B / turbo unchanged) and is still dropped for image/edit/i2v/foley.
+        Assert.Contains("-Quality", GenCli.BuildArgs(new GenRequest("a koi", "video", Quality: true, OutPath: "o")));
+        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("a koi", "video", OutPath: "o")));        // opt-in (5B default)
+        // music keeps emitting it; the other kinds still drop it (no doomed switch)
+        Assert.Contains("-Quality", GenCli.BuildArgs(new GenRequest("lofi", "music", Quality: true, OutPath: "o")));
+        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("x", "edit", Quality: true, InitImage: "s", OutPath: "o")));
+        Assert.DoesNotContain("-Quality", GenCli.BuildArgs(new GenRequest("x", "i2v", Quality: true, OutPath: "o")));
     }
 
     [Fact]

@@ -164,6 +164,31 @@ try {
         $full = ($e.Url -replace '(?i)\$flux2', $flux2Url).Trim('"')
         Assert ($full -match $hfResolve) "FLUX.2 Klein: $($spec.File) resolves to a well-formed HF resolve/main/*.safetensors URL"
     }
+    Write-Host "`nWan 2.2 A14B GGUF (-Models full): QuantStack T2V high/low-noise Q4_K_M experts (the gated quality-video tier)"
+    # The GATED quality-video tier swaps the 5B default -> the Wan 2.2 T2V A14B GGUF dual-expert pair (Q4_K_M,
+    # ~9.65GB each) wired in SwarmUI's StepSwap. Pin BOTH experts by local filename, that they ride a $t2vgguf
+    # QuantStack base (NOT a flat repo — the resolve URL includes the HighNoise/ or LowNoise/ subfolder), and
+    # that $t2vgguf is a well-formed HF resolve/main URL. The GGUF filenames are HF-tree-verified (2026-06-19).
+    $t2vgBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$t2vgguf' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $t2vgBase) "Wan A14B GGUF: setup.ps1 defines a `$t2vgguf base URL var"
+    $t2vgUrl = if ($t2vgBase) { $t2vgBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($t2vgUrl -match '^https://huggingface\.co/QuantStack/Wan2\.2-T2V-A14B-GGUF/resolve/main$') "Wan A14B GGUF: `$t2vgguf = QuantStack T2V-A14B-GGUF resolve/main URL"
+    foreach ($spec in @(
+        @{ File = 'Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf'; Sub = 'HighNoise' },
+        @{ File = 'Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf';  Sub = 'LowNoise' }
+    )) {
+        $e = $entries | Where-Object { $_.File -eq $spec.File } | Select-Object -First 1
+        Assert ($null -ne $e)                       "Wan A14B GGUF: $($spec.File) is wired as a Get-Model entry"
+        Assert ($e -and $e.Url -match '(?i)\$t2vgguf/') "Wan A14B GGUF: $($spec.File) URL hangs off the `$t2vgguf QuantStack base"
+        # the resolve URL must include the expert's subfolder (the QuantStack tree is NOT flat)
+        Assert ($e -and $e.Url -match "(?i)\$t2vgguf/$($spec.Sub)/") "Wan A14B GGUF: $($spec.File) URL includes its $($spec.Sub)/ subfolder (non-flat tree)"
+        # resolved full URL is a well-formed HF resolve/main/*.gguf URL
+        $full = ($e.Url -replace '(?i)\$t2vgguf', $t2vgUrl).Trim('"')
+        Assert ($full -match '^https://huggingface\.co/[^/]+/[^/]+/resolve/main/.+\.gguf$') "Wan A14B GGUF: $($spec.File) resolves to a well-formed HF resolve/main/*.gguf URL"
+    }
+
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
     Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"

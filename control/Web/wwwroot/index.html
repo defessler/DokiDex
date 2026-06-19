@@ -164,6 +164,7 @@
         <span id="endName" class="hint"></span>
         <label>Interpolate <select id="interp" class="kin" style="width:auto"><option value="">off</option><option>RIFE</option><option>FILM</option><option>GIMM</option></select></label>
         <label>×<select id="interpMult" class="kin" style="width:auto"><option>2</option><option>4</option></select></label>
+        <label id="videoQualityLabel" style="display:none" title="quality: Wan 2.2 A14B dual-expert (GGUF Q4) — bigger, sharper, slower. Off = fast Wan 2.2 TI2V-5B (default)."><input id="videoQuality" type="checkbox"> quality <span class="hint">(slower)</span></label>
       </div>
       <details id="controlbox" style="display:none;margin:4px 0">
         <summary class="hint" style="cursor:pointer">ControlNet (guide structure from an image)</summary>
@@ -497,7 +498,7 @@
       updateRefLabel();
     }
     function updateMusicBox(){ document.getElementById('musicbox').style.display = state.kind==='music' ? '' : 'none'; }
-    function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; }
+    function updateCameraBox(){ document.getElementById('camerabox').style.display = (state.kind==='video'||state.kind==='i2v') ? '' : 'none'; document.getElementById('videoQualityLabel').style.display = state.kind==='video' ? '' : 'none'; }
     function updateControlBox(){ document.getElementById('controlbox').style.display = (state.kind==='image'||state.kind==='edit') ? '' : 'none'; }
     function updateRefLabel(){ document.getElementById('refLabel').style.display = (state.initImage && (state.kind==='image'||state.kind==='edit')) ? '' : 'none'; }
     // ControlNet stacking: 1-3 units, each {model, pre, strength, image}. unit 0's image is also fed by the sketch.
@@ -704,6 +705,7 @@
           }
           if (_endImage) body.endImage = _endImage;
           const ip=document.getElementById('interp').value; if(ip){ body.interpolate=ip; body.interpolateMult=+document.getElementById('interpMult').value; }
+          if (state.kind==='video' && document.getElementById('videoQuality').checked) body.quality = true;
         }
         if (state.initImage) body.initImage = state.initImage;
         if (state.initImage && (state.kind==='image'||state.kind==='edit') && document.getElementById('refMode').checked) body.reference = true;

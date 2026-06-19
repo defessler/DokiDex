@@ -45,6 +45,30 @@ prior note worried about. `xl_base` was already downloaded by `setup.ps1`, so no
 the **turbo default is unchanged** (byte-for-byte) and `xl_base` is opt-in only. On-GPU
 OUTPUT quality is the single labeled remaining confirm step.
 
+**Update — the Wan 2.2 A14B GGUF quality-VIDEO tier SHIPPED as a gated integration** (moved off
+the gated-follow-ups list above), mirroring the music `-Quality` discipline. An opt-in **`-Quality`**
+on `doki gen -Video` swaps the **Wan 2.2 5B** default → the **Wan 2.2 T2V A14B GGUF dual-expert**
+pair (Q4_K_M, ~9.65GB each — the size cut vs the fp8 ~13.3GB experts that OOM'd 2026-06-14). The
+dual-expert wiring is **AUTHORITATIVELY doc-sourced** from SwarmUI's `docs/Video Model Support.md`:
+SwarmUI has no auto-pairing — it reuses its image-refiner **StepSwap** as a noise-level step-swap,
+so **base = HIGH-noise expert**, **Refiner Model = LOW-noise expert**, `refinermethod=StepSwap`,
+`refinercontrolpercentage=0.5`; `cfg=5` is the doc's T2V-14B reference, `sigmashift=8` the doc
+default carried from the 5B. Wired on **both** PS (`Get-GenRecipe` video arm `elseif ($Quality)`)
+and C# (one gate widened: `GenArgs.cs` `r.Kind is "music" or "video"`) with **parity tests** (a
+`doki.ps1 -Video -Quality -BodyOnly` seam test catches a dropped forward). Gated `-Models full`
+downloads (QuantStack `Wan2.2-T2V-A14B-GGUF`, HighNoise/ + LowNoise/ subfolders) + `model-catalog.json`
+rows; TE (umt5_xxl) + VAE (wan2.2_vae) already on disk (NOT re-fetched). The **5B default + `-Fast`
+LTXV stay byte-for-byte unchanged** (the arm is `elseif ($Quality)` only). Suite **454 → 455 (+1 C# test)**
+green; PS recipe 155 / setup-helpers 46 green.
+**On-GPU / GATED remaining confirms (NOT verified at rest — no GPU in CI):** (1) the **`refinermodel`**
+body key is DERIVED via `CleanTypeName` from the source display name "Refiner Model" — confirm against
+a live `/API/ListT2IParameters`; (2) **steps + sampler/scheduler** for the non-distilled 14B are NOT
+doc-sourced (uni_pc/simple + 20 steps carried from the 5B as the start point, tune live); (3) the live
+**32GB fit** of the dual ~9.65GB Q4_K_M experts held across StepSwap; (4) the **city96 ComfyUI-GGUF
+node** install / GGUF arch auto-detect. Decision-rule branch taken: dual-expert wiring IS doc-sourced
+→ wire it fully (gated downloads + catalog + `-Quality` arm on both sides, TDD), with the three derived/
+unsourced items labeled as the on-GPU step.
+
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 
 ## 2026-06-18 — Platform research (3 passes) → native chat surface shipped (Chat P0); ACE-Step 1.5 / Qwen-Image-Edit confirmed already-present

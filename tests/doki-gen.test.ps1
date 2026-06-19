@@ -44,6 +44,32 @@ $vidFast = Get-GenRecipe -Kind video -Fast
 Assert ($vidFast.model -eq 'ltxv-2b-0.9.8-distilled.safetensors')  "video -Fast -> LTXV distilled"
 Assert ($vidFast.steps -eq 8)                                      "video -Fast -> 8 steps"
 
+# video -Quality = the GATED Wan 2.2 A14B GGUF dual-expert tier (quality video). SwarmUI wires the two
+# noise experts via its image-refiner StepSwap: base = HIGH-noise expert, Refiner Model = LOW-noise expert,
+# RefinerMethod=StepSwap, RefinerControlPercentage=0.5 (the high expert runs only the first ~50% of steps).
+# The dual-expert STRUCTURE is doc-sourced from SwarmUI's docs/Video Model Support.md; the refinermodel body
+# key is derived (CleanTypeName of "Refiner Model") and steps/sampler are on-GPU (see doki-gen.ps1 comment).
+# Like image/video, -Fast wins over -Quality; the default (no switch) stays the 5B byte-for-byte (pinned above).
+$vidQ = Get-GenRecipe -Kind video -Quality
+Assert ($vidQ.model -eq 'Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf')   "video -Quality -> Wan 2.2 A14B HIGH-noise GGUF (base expert)"
+Assert ($vidQ.refinermethod -eq 'StepSwap')                        "video -Quality -> RefinerMethod=StepSwap (noise-level step-swap)"
+Assert ($vidQ.refinermodel -eq 'Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf') "video -Quality -> Refiner Model = LOW-noise GGUF (low expert)"
+Assert ($vidQ.refinercontrolpercentage -eq 0.5)                    "video -Quality -> Refiner Control% = 0.5 (high expert does first ~50% of steps)"
+# StepSwap here is a noise-EXPERT handoff (a denoising step-swap), NOT the hi-res upscale the image
+# -Upscale/-Refine path reuses the same refiner group for — so the refiner must NOT inherit an upscale
+# factor: refinerupscale=1 (explicit, no resize), unlike the image path's refinerupscale=2.
+Assert ($vidQ.refinerupscale -eq 1)                                "video -Quality -> Refiner Upscale = 1 (StepSwap is a noise handoff, not a hi-res upscale)"
+Assert ($vidQ.cfgscale -eq 5)                                      "video -Quality -> CFG 5 (SwarmUI doc reference for T2V 14B)"
+Assert ($vidQ.sigmashift -eq 8)                                    "video -Quality -> sigma shift 8 (carried from the 5B / doc default)"
+Assert ($vidQ.textvideoframes -eq 49 -and $vidQ.videofps -eq 24)   "video -Quality -> 49 frames @ 24fps"
+Assert ($vidQ.width -eq 832 -and $vidQ.height -eq 480)             "video -Quality -> 832x480"
+Assert ($vidQ.videoformat -eq 'h264-mp4')                          "video -Quality -> h264-mp4"
+# -Fast wins over -Quality (the precedence the arm encodes: if($Fast) first, elseif($Quality))
+Assert ((Get-GenRecipe -Kind video -Fast -Quality).model -eq 'ltxv-2b-0.9.8-distilled.safetensors') "video -Fast -Quality -> -Fast wins (LTXV)"
+# the DEFAULT video path is byte-for-byte unchanged by adding the -Quality arm (no refiner on the 5B default)
+Assert (-not $vid.ContainsKey('refinermethod'))                    "video (default) -> no refiner fields (5B unchanged)"
+Assert (-not $vid.ContainsKey('refinermodel'))                     "video (default) -> no refinermodel (5B unchanged)"
+
 # music DEFAULT = ACE-Step turbo (fast, 10 steps / cfg 1). -Quality is the opt-in hi-fi swap (xl_base);
 # unlike image/video, turbo is the music DEFAULT and quality is opt-in (inverted -Fast semantics) -> a
 # dedicated -Quality switch, so the existing turbo default stays byte-for-byte unchanged.
@@ -257,6 +283,15 @@ Assert ($mQBody.sampler -eq 'euler' -and $mQBody.scheduler -eq 'simple') "music 
 $mQOv = Build-GenBody -Recipe (Get-GenRecipe -Kind music -Quality) -PromptFields (Get-GenPromptFields -Kind music -Idea 'x') -SessionId 's' -Duration 60 -Bpm 100
 Assert ($mQOv.textaudioduration -eq 60 -and $mQOv.textaudiobpm -eq 100) "music -Quality -> -Duration/-Bpm still override"
 
+# --- video -Quality body: the A14B GGUF dual-expert recipe flows verbatim through the generic recipe merge ---
+$vQBody = Build-GenBody -Recipe (Get-GenRecipe -Kind video -Quality) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's' -Kind video
+Assert ($vQBody.model -eq 'Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf') "video -Quality body -> HIGH-noise GGUF base expert"
+Assert ($vQBody.refinermethod -eq 'StepSwap' -and $vQBody.refinermodel -eq 'Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf') "video -Quality body -> StepSwap + LOW-noise Refiner Model flow through to body"
+Assert ($vQBody.refinercontrolpercentage -eq 0.5 -and $vQBody.cfgscale -eq 5) "video -Quality body -> control% 0.5 + cfg 5"
+# the DEFAULT video body stays the 5B (no refiner keys) — proves the new arm is opt-in only
+$vDefBody = Build-GenBody -Recipe (Get-GenRecipe -Kind video) -PromptFields (Get-GenPromptFields -Kind video -Idea 'x') -SessionId 's' -Kind video
+Assert ($vDefBody.model -eq 'wan2.2_ti2v_5B_fp16.safetensors' -and -not $vDefBody.ContainsKey('refinermodel')) "video DEFAULT body -> Wan 2.2 5B / no refinermodel (unchanged)"
+
 # --- doki.ps1 argv -> recipe seam: the ENTRYPOINT must declare [switch]$Quality AND forward it on -BodyOnly ---
 # The blocks above prove the pure helpers (and GenCliTests proves the C# argv emits -Quality), but NOTHING
 # else exercises doki.ps1 itself — the script the web host actually runs (`gen ... -BodyOnly` returns the
@@ -277,6 +312,20 @@ $dOut = & pwsh -NoProfile -File $dokiPs1 gen "upbeat synthwave" -Music -BodyOnly
 $dLine = @($dOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
 $dBody = $null; try { $dBody = $dLine | ConvertFrom-Json } catch { }
 Assert ($dBody -and $dBody.model -eq 'acestep_v1.5_turbo.safetensors') "doki.ps1 gen -Music (no -Quality) -> body stays on turbo default (opt-in, unchanged)"
+
+# VIDEO mirror: -Quality must forward through doki.ps1 for kind=video too (a dropped forward would silently
+# fall back to the 5B with every other suite still green). Shell the real doki.ps1 -BodyOnly (no GPU/network).
+$vqOut = & pwsh -NoProfile -File $dokiPs1 gen "a koi swimming" -Video -Quality -BodyOnly 2>&1
+$vqLine = @($vqOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
+$vqBody = $null; try { $vqBody = $vqLine | ConvertFrom-Json } catch { }
+Assert ($null -ne $vqBody) "doki.ps1 gen -Video -Quality -BodyOnly -> emits a parseable JSON body"
+Assert ($vqBody -and $vqBody.model -eq 'Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf') "doki.ps1 forwards -Quality for video -> body carries the A14B HIGH-noise GGUF (not the 5B)"
+Assert ($vqBody -and $vqBody.refinermodel -eq 'Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf') "doki.ps1 -Video -Quality body -> Refiner Model = LOW-noise GGUF (dual-expert reaches the body)"
+# control: WITHOUT -Quality the same entrypoint stays on the Wan 2.2 5B default (opt-in, unchanged)
+$vdOut = & pwsh -NoProfile -File $dokiPs1 gen "a koi swimming" -Video -BodyOnly 2>&1
+$vdLine = @($vdOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
+$vdBody = $null; try { $vdBody = $vdLine | ConvertFrom-Json } catch { }
+Assert ($vdBody -and $vdBody.model -eq 'wan2.2_ti2v_5B_fp16.safetensors') "doki.ps1 gen -Video (no -Quality) -> body stays on the Wan 2.2 5B default (unchanged)"
 
 # --- Expand-Wildcards: __name__ -> a random line from <name>.txt, seed-reproducible, unknown left as-is ---
 $wcDir = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-wc-$([guid]::NewGuid().ToString('N'))"
