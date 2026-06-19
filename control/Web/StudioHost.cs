@@ -371,18 +371,23 @@ public static class StudioHost
         api.MapGet("/chats", () => Results.Json(ChatStore.List()));
         api.MapGet("/chats/{id}", (string id) =>
             ChatStore.Load(id) is { } conv ? Results.Json(conv) : Results.NotFound());
-        // Deleting a conversation also drops its KB chunks from doc_index.db so a deleted-with-docs thread's
+        // Deleting a conversation also drops its PRIVATE KB chunks from doc_index.db so a deleted-with-docs thread's
         // vectors don't accumulate forever (the disk-leak fix). BEST-EFFORT: the cleanup runs AFTER the thread
-        // file is removed and can NEVER fail the delete — a down embed/index just leaves the rows for a later
-        // reset. KbId == the conversation id in the first slice; we read the stored KbId before deleting so a
-        // later named-KB slice still cleans the right scope.
+        // file is removed and can NEVER fail the delete — a down embed/index just leaves the rows for a later reset.
+        // ADDITIVE named-KB rule: the conversation's OWN private per-conversation scope (chunks stored under the
+        // thread id — the v0.14/v0.15 per-conversation KB) is ALWAYS dropped, EVEN if the thread was later attached to
+        // a named library. A shared NAMED library (a kb-* id) is NEVER dropped by a conversation delete — other threads
+        // may still use it — so the cleanup target is always conv.Id (KbStore.ScopeToCleanupOnConversationDelete),
+        // never conv.KbId. A named library is dropped only via DELETE /api/kbs/{id}. This closes the
+        // private->named->delete orphan leak where a named-attached thread's private chunks were previously skipped.
         api.MapDelete("/chats/{id}", async (string id, CancellationToken ct) =>
         {
             var conv = ChatStore.Load(id);
             if (conv is null) return Results.NotFound();
-            var kbId = string.IsNullOrWhiteSpace(conv.KbId) ? id : conv.KbId!;
+            // The cleanup scope is ALWAYS this thread's own private scope (conv.Id), never a shared kb-* library.
+            var cleanupScope = KbStore.ScopeToCleanupOnConversationDelete(conv);
             if (!ChatStore.Delete(id)) return Results.NotFound();
-            try { await DocSearch.DeleteAsync(kbId, ct); } catch { /* never fail the delete on a KB-cleanup hiccup */ }
+            try { await DocSearch.DeleteAsync(cleanupScope, ct); } catch { /* never fail the delete on a KB-cleanup hiccup */ }
             return Results.Ok();
         });
 
@@ -520,6 +525,141 @@ public static class StudioHost
                 catch { /* leave KbId as-is on a cleanup hiccup; retrieval still degrades gracefully */ }
             }
             return Results.Ok();
+        });
+
+        // ==== NAMED CROSS-CONVERSATION KB LIBRARY (the AnythingLLM "workspace" pattern) — ADDITIVE over the
+        // per-conversation KB above. A KB's docs live in doc_index.db under its server-generated KbRecord.Id as the
+        // kb_id, ingested/searched/removed through the EXACT SAME DocSearch methods (ZERO doc_index.py / DocSearch.cs
+        // change). The handler bodies below are the /chats/{id}/docs bodies generalized to a kb_id: same 413/SafeName/
+        // empty guards verbatim, KbStore.Load 404-guard instead of ChatStore.Load, and NO "clear KbId on last remove"
+        // step (that conversation-coupling stays only on the /chats path). ====
+
+        // KB library CRUD — the persona/lorebook 4-verb shape (id-keyed like /chats).
+        api.MapGet("/kbs", () => Results.Json(KbStore.List()));
+        api.MapPost("/kbs", (KbCreateRequest body) =>
+        {
+            var name = (body?.Name ?? "").Trim();
+            if (name.Length == 0) return Results.BadRequest(new { error = "missing KB name" });
+            var rec = KbStore.NewKb(name);
+            return KbStore.Save(rec) ? Results.Json(rec) : Results.BadRequest(new { error = "could not create KB" });
+        });
+        // Deleting a NAMED KB drops its chunks from doc_index.db (best-effort, mirrors DELETE /chats/{id}). A thread
+        // still pointing at it KEEPS conv.KbId = the (now-deleted) kb-* id, so its next retrieval searches the
+        // now-empty named scope and finds nothing — RetrieveDocs injects no context and plain chat proceeds unchanged.
+        // This is GRACEFUL-EMPTY, NOT a fall-back to the thread's own private docs (conv.KbId still names the deleted
+        // library, not conv.Id); the SPA reflects the detach client-side, and a fresh detach/attach re-points KbId.
+        api.MapDelete("/kbs/{id}", async (string id, CancellationToken ct) =>
+        {
+            if (KbStore.Load(id) is null) return Results.NotFound();
+            if (!KbStore.Delete(id)) return Results.NotFound();
+            try { await DocSearch.DeleteAsync(id, ct); } catch { /* never fail the delete on a chunk-cleanup hiccup */ }
+            return Results.Ok();
+        });
+
+        // KB doc management — the /chats/{id}/docs bodies with kbId = the KB id. KbStore.Load is the 404-guard.
+        api.MapPost("/kbs/{id}/docs", async (string id, DocAttachRequest body, HttpRequest req, CancellationToken ct) =>
+        {
+            if (req.ContentLength is long len && len > DocSearch.MaxDocBytes)
+                return Results.Json(new { error = $"document too large ({len} bytes) — split it or attach a smaller file." }, statusCode: 413);
+
+            if (KbStore.Load(id) is null) return Results.NotFound();
+
+            var source = (body?.Source ?? "").Trim();
+            var text = body?.Text ?? "";
+            if (source.Length == 0 || RecipeStore.SafeName(System.IO.Path.GetFileNameWithoutExtension(source)) is null)
+                return Results.BadRequest(new { error = "bad or missing source filename" });
+            if (string.IsNullOrWhiteSpace(text))
+                return Results.BadRequest(new { error = "empty document text" });
+
+            var tooBig = DocSearch.ValidateIngest(text);
+            if (tooBig is not null) return Results.Json(new { error = tooBig }, statusCode: 413);
+
+            var r = await DocSearch.IngestAsync(id, source, text, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+            return Results.Json(new { source, chunks = r.Chunks });
+        });
+
+        api.MapPost("/kbs/{id}/docs/file", async (string id, HttpRequest req, CancellationToken ct) =>
+        {
+            if (req.ContentLength is long clen && clen > DocSearch.MaxDocBytes)
+                return Results.Json(new { error = $"document too large ({clen} bytes) — split it or attach a smaller file." }, statusCode: 413);
+
+            if (KbStore.Load(id) is null) return Results.NotFound();
+
+            if (!req.HasFormContentType) return Results.BadRequest(new { error = "expected multipart/form-data" });
+
+            IFormCollection form;
+            try
+            {
+                form = await req.ReadFormAsync(
+                    new FormOptions { MultipartBodyLengthLimit = DocSearch.MaxUploadBytes }, ct);
+            }
+            catch (System.IO.InvalidDataException)
+            {
+                return Results.Json(new { error = $"document too large — split it or attach a smaller file (max {DocSearch.MaxDocBytes} bytes)." }, statusCode: 413);
+            }
+            var file = form.Files["file"];
+            if (file is null || file.Length == 0) return Results.BadRequest(new { error = "no file uploaded" });
+
+            var rawSource = ((string?)form["source"] ?? file.FileName ?? "").Trim();
+            var source = System.IO.Path.GetFileName(rawSource);
+            if (source.Length == 0 || RecipeStore.SafeName(System.IO.Path.GetFileNameWithoutExtension(source)) is null)
+                return Results.BadRequest(new { error = "bad or missing source filename" });
+
+            byte[] bytes;
+            using (var ms = new MemoryStream())
+            {
+                await file.CopyToAsync(ms, ct);
+                bytes = ms.ToArray();
+            }
+            if (bytes.LongLength > DocSearch.MaxDocBytes)
+                return Results.Json(new { error = $"document too large ({bytes.LongLength} bytes) — split it or attach a smaller file." }, statusCode: 413);
+
+            var r = await DocSearch.IngestBinAsync(id, source, bytes, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+
+            var note = r.Chunks == 0
+                ? "no text found — looks like a scanned/image PDF (OCR not yet supported)."
+                : null;
+            return Results.Json(new { source, chunks = r.Chunks, note });
+        });
+
+        api.MapGet("/kbs/{id}/docs", async (string id, CancellationToken ct) =>
+        {
+            if (KbStore.Load(id) is null) return Results.NotFound();
+            var srcs = await DocSearch.SourcesAsync(id, ct);
+            return Results.Json(srcs.Select(s => new { source = s.source, chunks = s.chunks }));
+        });
+
+        api.MapDelete("/kbs/{id}/docs/{source}", async (string id, string source, CancellationToken ct) =>
+        {
+            if (KbStore.Load(id) is null) return Results.NotFound();
+            // No "clear KbId on last remove" — a named library has no owning conversation to detach.
+            return await DocSearch.RemoveAsync(id, source, ct) ? Results.Ok() : Results.NotFound();
+        });
+
+        // Attach a conversation to a NAMED KB (or detach back to its per-conversation scope). Pass a kb-* id to point
+        // the thread at a shared library; pass "" / null to detach. Detach RESTORES the thread's own private KB when
+        // that scope actually has docs (KbId -> conv.Id, so RetrieveDocs injects them — not just lists them), else
+        // goes to the clean no-KB state (KbId -> null), so the v0.14/v0.15 per-conversation behavior resumes
+        // byte-for-byte. The has-private-docs probe is best-effort: if SourcesAsync hiccups it returns empty, so a
+        // detach degrades to the clean no-KB state rather than failing — the resolution itself is the pure,
+        // unit-tested KbStore.ResolveDetachKbId.
+        api.MapPost("/chats/{id}/kb", async (string id, ChatKbRequest body, CancellationToken ct) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+            var kbId = (body?.KbId ?? "").Trim();
+            if (kbId.Length == 0)
+            {
+                // Detach: restore the conversation's own private scope IF it has docs (so they're retrieved, not just
+                // shown), else go fully clean. The private scope is the thread id (conv.Id), distinct from any kb-* id.
+                var hasPrivateDocs = (await DocSearch.SourcesAsync(conv.Id, ct)).Count > 0;
+                var resolved = KbStore.ResolveDetachKbId(conv, hasPrivateDocs);
+                return ChatStore.Save(conv with { KbId = resolved }) ? Results.Ok() : Results.BadRequest(new { error = "could not detach KB" });
+            }
+            if (KbStore.Load(kbId) is null) return Results.NotFound();
+            return ChatStore.Save(conv with { KbId = kbId }) ? Results.Ok() : Results.BadRequest(new { error = "could not attach KB" });
         });
 
         // ---- pending image-gen queued FROM CHAT (the generate_image tool's durable side; the create view surfaces

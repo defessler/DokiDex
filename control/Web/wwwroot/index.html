@@ -110,6 +110,19 @@
     .kbrow{display:flex;align-items:center;gap:8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px}
     .kbrow .kbname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .kbrow .kbchunks{color:var(--dim);font-family:"Cascadia Mono",Consolas,monospace;font-size:10px}
+    /* CROSS-CONVERSATION KB LIBRARY (named "workspaces"): build a KB once, attach to any chat (the AnythingLLM pattern) */
+    #kbLibList{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+    .kblib{border:1px solid var(--border);border-radius:7px;background:var(--surface2);overflow:hidden}
+    .kblib>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;padding:7px 11px;font-size:12px}
+    .kblib>summary::-webkit-details-marker{display:none}
+    .kblib>summary .libname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+    .kblib>summary .libid{color:var(--dim);font-family:"Cascadia Mono",Consolas,monospace;font-size:10px}
+    .kblib>summary .libattached{font-size:10px;color:#06121a;background:var(--cyan);border-radius:999px;padding:1px 8px;font-weight:600;font-family:"Cascadia Mono",Consolas,monospace}
+    .kblib .libbody{padding:4px 11px 11px;border-top:1px solid var(--border)}
+    /* the chat panel's attach picker + which-KB indicator */
+    #kbScopeRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+    #kbScope{font-size:11px;color:var(--dim);font-family:"Cascadia Mono",Consolas,monospace;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 10px}
+    #kbScope.named{color:#06121a;background:var(--cyan);border-color:var(--cyan);font-weight:600}
   </style>
 </head>
 <body>
@@ -311,6 +324,16 @@
       <details id="kbPanel" style="margin:4px 0 8px">
         <summary class="hint" style="cursor:pointer">+ knowledge base (chat with your documents)<span class="kbflag" title="RAG is active — relevant chunks of attached docs are injected each turn">RAG ON</span></summary>
         <div style="margin-top:6px">
+          <!-- SCOPE: keep the thread's own per-conversation KB (the v0.14/v0.15 default) OR point it at a named,
+               cross-conversation library. The pill is a clear indicator of which KB is actually attached. -->
+          <div id="kbScopeRow">
+            <label class="hint">Knowledge base
+              <select id="kbAttach" class="kin" style="width:auto" onchange="attachConvKb(this.value)">
+                <option value="">this conversation (private docs)</option>
+              </select>
+            </label>
+            <span id="kbScope" title="the knowledge base this conversation actually retrieves from">private to this chat</span>
+          </div>
           <p class="hint" id="kbHint" style="margin:0 0 6px">Attach .txt/.md/.pdf/.docx docs to this conversation — relevant passages are auto-retrieved and injected each turn. (Scanned/image PDFs have no text layer; OCR is not yet supported.)</p>
           <div id="kbDocs"></div>
           <textarea id="kbText" class="kin" style="width:100%;min-height:60px;display:block" placeholder="paste document text… (or upload a .txt/.md below)"></textarea>
@@ -320,6 +343,21 @@
             <button class="ghost" onclick="attachDoc()">Attach</button>
             <span class="hint" id="kbStatus"></span>
           </div>
+        </div>
+      </details>
+      <!-- CROSS-CONVERSATION KB LIBRARY: named "workspaces" you build once and attach to any chat (the AnythingLLM
+           pattern). ADDITIVE over the per-conversation KB above — managed here, attached via the picker in the chat
+           panel. Mirrors the persona/lorebook management shape. -->
+      <details id="kbLibPanel" style="margin:4px 0 8px">
+        <summary class="hint" style="cursor:pointer">+ knowledge libraries (reusable, cross-conversation)</summary>
+        <div style="margin-top:6px">
+          <p class="hint" style="margin:0 0 6px">Build a named knowledge base once (drop docs in) and attach it to any conversation from the picker above. A library's docs are shared by every chat attached to it.</p>
+          <div class="row" style="align-items:center;gap:8px">
+            <input id="newKbName" class="kin" style="width:220px" placeholder="library name (e.g. Product Docs)">
+            <button class="ghost" onclick="createKb()">+ Create library</button>
+            <span class="hint" id="newKbHint"></span>
+          </div>
+          <div id="kbLibList"></div>
         </div>
       </details>
       <div id="chatLog"></div>
@@ -468,7 +506,7 @@
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
-      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKb(); renderChatGuard(); document.getElementById('chatInput').focus(); }
+      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKbLibraries(); loadKb(); renderChatGuard(); document.getElementById('chatInput').focus(); }
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];
@@ -1346,6 +1384,16 @@
     //   DELETE /api/chats/{id}/docs/{source}
     // Attached docs drive a subtle "RAG ON" flag on the panel summary so the user knows retrieval is active.
     let _kbDocs=[];
+    // The thread's CURRENT KbId as the server reports it (conv.kbId). NAMED if it's in _kbLibraries (a kb-* library id);
+    // otherwise it's the per-conversation private scope (null, or == the conv id — the v0.14/v0.15 behavior). This is
+    // only an INDICATOR + the attach-picker selection; the private-doc box below always manages /chats/{id}/docs
+    // byte-for-byte (the conversation's own scope), exactly as before.
+    let _chatKbId=null;
+    // The named library this conversation is attached to (a KbRecord), or null when it runs on its own private KB.
+    function attachedLibrary(){
+      if(!_chatKbId) return null;
+      return (_kbLibraries||[]).find(k=>k.id===_chatKbId) || null;
+    }
     // Reflect the attached-doc count on the panel: the cyan "RAG ON" flag + the doc list. No-doc threads look exactly
     // as before (flag hidden, empty list). Mirrors the chat-mode lock reconcilers — single source of truth for UI.
     function renderKb(){
@@ -1358,8 +1406,33 @@
         const x=document.createElement('button'); x.className='xbtn'; x.textContent='remove'; x.onclick=()=>removeDoc(d.source);
         row.appendChild(nm); row.appendChild(ch); row.appendChild(x); wrap.appendChild(row);
       });
+      renderKbScope();
     }
-    // Load the attached-doc list for the current thread. A brand-new (unsent) chat has no id yet → empty KB.
+    // The which-KB indicator + the private-doc box visibility. Attached to a NAMED library → a cyan pill naming it and
+    // the private-doc box hides (those docs live in the library, managed in the library panel). On the private scope →
+    // a dim "private to this chat" pill and the doc box shows (the unchanged per-conversation UX).
+    function renderKbScope(){
+      const lib=attachedLibrary();
+      const pill=document.getElementById('kbScope');
+      if(pill){
+        if(lib){ pill.textContent='library: '+lib.name; pill.title='retrieving from the shared library "'+lib.name+'"'; pill.classList.add('named'); }
+        else{ pill.textContent='private to this chat'; pill.title='retrieving only from docs attached to this conversation'; pill.classList.remove('named'); }
+      }
+      // Keep the picker selection in sync (a named id selects it; anything else = the private option).
+      const sel=document.getElementById('kbAttach'); if(sel) sel.value=lib?lib.id:'';
+      // The private-doc editor only applies to the per-conversation scope; hide it when a named library is attached.
+      const docWrap=document.getElementById('kbDocs');
+      const hideEditor=!!lib;
+      ['kbText'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display=hideEditor?'none':'block'; });
+      const editRow=document.querySelector('#kbPanel .mods'); if(editRow) editRow.style.display=hideEditor?'none':'flex';
+      const hint=document.getElementById('kbHint');
+      if(hint) hint.textContent = hideEditor
+        ? ('This conversation reads from the shared library "'+lib.name+'". Manage its docs in “knowledge libraries” below, or switch the picker back to keep private docs.')
+        : 'Attach .txt/.md/.pdf/.docx docs to this conversation — relevant passages are auto-retrieved and injected each turn. (Scanned/image PDFs have no text layer; OCR is not yet supported.)';
+      if(docWrap) docWrap.style.display=hideEditor?'none':'flex';
+    }
+    // Load the attached-doc list for the current thread. A brand-new (unsent) chat has no id yet → empty KB. Also
+    // refreshes the attach picker + scope indicator from the thread's conv.kbId.
     async function loadKb(){
       _kbDocs=[];
       if(_chatConv){
@@ -1423,6 +1496,164 @@
         await loadKb();
       }catch{ status.textContent='remove request failed'; }
     }
+    // ==== CROSS-CONVERSATION KB LIBRARY (named "workspaces") — ADDITIVE over the per-conversation KB above. Endpoints:
+    //   GET/POST /api/kbs · DELETE /api/kbs/{id} · GET/POST /api/kbs/{id}/docs[/file] · DELETE /api/kbs/{id}/docs/{src}
+    //   POST /api/chats/{id}/kb {kbId}  -> attach the open conversation to a named library ("" detaches to private).
+    // The library's doc-management mirrors the per-conversation box verbatim, just scoped to a kb-* id. ====
+    let _kbLibraries=[];
+    // Load the named libraries; fills BOTH the attach picker (in the chat panel) and the management list.
+    async function loadKbLibraries(){
+      try{ const list=await (await fetch('/api/kbs')).json(); _kbLibraries=Array.isArray(list)?list:[]; }
+      catch{ _kbLibraries=[]; }
+      renderKbAttachPicker(); renderKbLibraries(); renderKbScope();
+    }
+    // Fill the chat-panel "Knowledge base" picker: the private option + every named library. Selection is reconciled
+    // to the thread's current kbId by renderKbScope.
+    function renderKbAttachPicker(){
+      const sel=document.getElementById('kbAttach'); if(!sel) return; const cur=sel.value;
+      sel.innerHTML='<option value="">this conversation (private docs)</option>';
+      _kbLibraries.forEach(k=>{ const o=document.createElement('option'); o.value=k.id; o.textContent=k.name; sel.appendChild(o); });
+      sel.value=cur;
+    }
+    // POST /api/chats/{id}/kb to attach the OPEN conversation to a named library (id) or detach (""). Requires a saved
+    // thread (an id exists only after the first turn) — mirrors the private-doc "send a message first" guard.
+    async function attachConvKb(kbId){
+      if(!_chatConv){
+        document.getElementById('kbStatus').textContent='send a message first to start this conversation, then attach a library';
+        renderKbScope();   // snap the picker back to its true (private) state
+        return;
+      }
+      try{
+        const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/kb',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({kbId:kbId||''})});
+        if(!r.ok){ document.getElementById('kbStatus').textContent='could not change knowledge base'; renderKbScope(); return; }
+        _chatKbId=kbId||null;
+        document.getElementById('kbStatus').textContent = kbId ? 'attached library' : 'back to private docs';
+        await loadKb();   // refresh the doc box / pill for the new scope
+      }catch{ document.getElementById('kbStatus').textContent='attach request failed'; renderKbScope(); }
+    }
+    async function createKb(){
+      const h=document.getElementById('newKbHint');
+      const name=(document.getElementById('newKbName').value||'').trim();
+      if(!name){ h.textContent='name the library first'; return; }
+      h.textContent='creating…';
+      try{
+        const r=await fetch('/api/kbs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ h.textContent=(j&&j.error)||'could not create library'; return; }
+        document.getElementById('newKbName').value=''; h.textContent='created '+esc(name);
+        await loadKbLibraries();
+      }catch{ h.textContent='create request failed'; }
+    }
+    async function deleteKb(id, name){
+      if(!confirm('Delete the library "'+name+'" and all its documents? Conversations attached to it fall back to their own private docs.')) return;
+      try{
+        const r=await fetch('/api/kbs/'+encodeURIComponent(id),{method:'DELETE'});
+        if(!r.ok){ document.getElementById('newKbHint').textContent='delete failed'; return; }
+        // If the open thread was attached to it, the server-side row is gone; reflect the fallback to private locally.
+        if(_chatKbId===id) _chatKbId=null;
+        await loadKbLibraries(); await loadKb();
+      }catch{ document.getElementById('newKbHint').textContent='delete request failed'; }
+    }
+    // Render the management list: one collapsible card per library, each with its doc list + an attach/upload editor
+    // (the per-conversation box, scoped to the library id). The "attached" pill marks the one the open thread uses.
+    function renderKbLibraries(){
+      const wrap=document.getElementById('kbLibList'); if(!wrap) return; wrap.innerHTML='';
+      if(_kbLibraries.length===0){
+        const p=document.createElement('p'); p.className='hint'; p.style.margin='6px 0 0'; p.textContent='No libraries yet — create one above.'; wrap.appendChild(p); return;
+      }
+      _kbLibraries.forEach(k=>{
+        const det=document.createElement('details'); det.className='kblib';
+        const sum=document.createElement('summary');
+        const nm=document.createElement('span'); nm.className='libname'; nm.textContent=k.name; nm.title=k.name;
+        const idb=document.createElement('span'); idb.className='libid'; idb.textContent=k.id;
+        sum.appendChild(nm); sum.appendChild(idb);
+        if(_chatKbId===k.id){ const a=document.createElement('span'); a.className='libattached'; a.textContent='attached'; sum.appendChild(a); }
+        const del=document.createElement('button'); del.className='xbtn'; del.textContent='delete'; del.onclick=(e)=>{ e.preventDefault(); deleteKb(k.id, k.name); };
+        sum.appendChild(del);
+        det.appendChild(sum);
+        const body=document.createElement('div'); body.className='libbody';
+        const docs=document.createElement('div'); docs.className='kbdocs'; docs.id='libdocs-'+k.id; docs.style.cssText='display:flex;flex-direction:column;gap:5px;margin:6px 0';
+        body.appendChild(docs);
+        const ta=document.createElement('textarea'); ta.className='kin'; ta.id='libtext-'+k.id; ta.style.cssText='width:100%;min-height:54px;display:block'; ta.placeholder='paste document text… (or upload below)';
+        body.appendChild(ta);
+        const row=document.createElement('div'); row.className='mods'; row.style.cssText='margin-top:6px;align-items:center';
+        const src=document.createElement('input'); src.className='kin'; src.id='libsrc-'+k.id; src.style.width='200px'; src.placeholder='source name (e.g. notes.md)';
+        const up=document.createElement('label'); up.className='xbtn'; up.style.cursor='pointer'; up.textContent='+ upload .txt/.md/.pdf/.docx';
+        const fin=document.createElement('input'); fin.type='file'; fin.accept='.txt,.md,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'; fin.style.display='none';
+        fin.onchange=()=>onLibFile(k.id, fin); up.appendChild(fin);
+        const atb=document.createElement('button'); atb.className='ghost'; atb.textContent='Attach'; atb.onclick=()=>attachLibDoc(k.id);
+        const st=document.createElement('span'); st.className='hint'; st.id='libstatus-'+k.id;
+        row.appendChild(src); row.appendChild(up); row.appendChild(atb); row.appendChild(st);
+        body.appendChild(row);
+        det.appendChild(body);
+        // Lazily load this library's docs the first time it's expanded (avoids N doc_search spawns on chat open).
+        det.addEventListener('toggle',()=>{ if(det.open && !det.dataset.loaded){ det.dataset.loaded='1'; loadLibDocs(k.id); } });
+        wrap.appendChild(det);
+      });
+    }
+    async function loadLibDocs(id){
+      const wrap=document.getElementById('libdocs-'+id); if(!wrap) return;
+      let list=[];
+      try{ list=await (await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs')).json(); }catch{}
+      list=Array.isArray(list)?list:[];
+      wrap.innerHTML='';
+      if(list.length===0){ const e=document.createElement('span'); e.className='hint'; e.textContent='no documents yet'; wrap.appendChild(e); return; }
+      list.forEach(d=>{
+        const row=document.createElement('div'); row.className='kbrow';
+        const nm=document.createElement('span'); nm.className='kbname'; nm.textContent=d.source; nm.title=d.source;
+        const ch=document.createElement('span'); ch.className='kbchunks'; ch.textContent=(d.chunks||0)+' chunk'+(d.chunks===1?'':'s');
+        const x=document.createElement('button'); x.className='xbtn'; x.textContent='remove'; x.onclick=()=>removeLibDoc(id, d.source);
+        row.appendChild(nm); row.appendChild(ch); row.appendChild(x); wrap.appendChild(row);
+      });
+    }
+    // .txt/.md → read client-side into the library's paste box (the JSON path); .pdf/.docx → upload raw bytes (server
+    // extracts). Mirrors onKbFile, scoped to the library id.
+    function onLibFile(id, input){
+      const f=input.files&&input.files[0]; if(!f) return; input.value='';
+      const ext=(f.name.split('.').pop()||'').toLowerCase();
+      if(ext==='pdf'||ext==='docx'){ uploadLibFile(id, f); return; }
+      const rd=new FileReader();
+      rd.onload=()=>{ const ta=document.getElementById('libtext-'+id); if(ta) ta.value=rd.result||''; const nm=document.getElementById('libsrc-'+id); if(nm&&!nm.value.trim()) nm.value=f.name; const st=document.getElementById('libstatus-'+id); if(st) st.textContent='loaded '+f.name+' — name it + Attach'; };
+      rd.readAsText(f);
+    }
+    async function uploadLibFile(id, f){
+      const st=document.getElementById('libstatus-'+id); if(st) st.textContent='uploading + extracting '+f.name+'…';
+      const fd=new FormData(); fd.append('file', f, f.name); fd.append('source', f.name);
+      try{
+        const r=await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs/file',{method:'POST',body:fd});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to AGENT mode':'upload failed'); return; }
+        if((j.chunks||0)===0){ if(st) st.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — looks scanned (OCR not supported)'); }
+        else if(st) st.textContent='attached '+(j.source||f.name)+' ('+j.chunks+' chunks)';
+        await loadLibDocs(id);
+      }catch{ if(st) st.textContent='upload request failed'; }
+    }
+    async function attachLibDoc(id){
+      const st=document.getElementById('libstatus-'+id);
+      const ta=document.getElementById('libtext-'+id); const text=(ta&&ta.value||'').trim();
+      const sin=document.getElementById('libsrc-'+id); let source=(sin&&sin.value||'').trim();
+      if(!text){ if(st) st.textContent='paste text or upload a file first'; return; }
+      if(!source) source='pasted.txt';
+      if(st) st.textContent='embedding…';
+      try{
+        const r=await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source, text})});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===503?'embed server unavailable — switch to AGENT mode':'attach failed'); return; }
+        if(ta) ta.value=''; if(sin) sin.value='';
+        if(st) st.textContent='attached '+(j.source||source)+' ('+(j.chunks||0)+' chunks)';
+        await loadLibDocs(id);
+      }catch{ if(st) st.textContent='attach request failed'; }
+    }
+    async function removeLibDoc(id, source){
+      const st=document.getElementById('libstatus-'+id);
+      try{
+        const r=await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs/'+encodeURIComponent(source),{method:'DELETE'});
+        if(!r.ok){ if(st) st.textContent='remove failed'; return; }
+        if(st) st.textContent='removed '+source;
+        await loadLibDocs(id);
+      }catch{ if(st) st.textContent='remove request failed'; }
+    }
     function appendBubble(role,text){ const log=document.getElementById('chatLog');
       const b=$(`<div class="bub ${role}"></div>`);
       if(role==='assistant'){
@@ -1455,10 +1686,11 @@
     }
     function renderThread(conv){
       _chatConv=conv?conv.id:null; _chatMsgs=(conv&&conv.messages)?conv.messages.map(m=>({role:m.role,content:m.content})):[];
+      _chatKbId=conv?(conv.kbId||null):null;   // a named library id, the thread's own id (private), or null (fresh)
       const log=document.getElementById('chatLog'); log.innerHTML='';
       _chatMsgs.forEach(m=>appendBubble(m.role==='assistant'?'assistant':'user', m.content));
       document.getElementById('chatHint').textContent='';
-      loadKb();   // surface any docs already attached to this thread (+ the RAG-active flag)
+      loadKb();   // surface any docs already attached to this thread (+ the RAG-active flag / attached-library pill)
     }
     // Loaded persona cards (full PersonaCard objects from GET /api/personas) cached so readback can derive the
     // selected card's default voice with no extra fetch. Keyed by card name.
@@ -1555,7 +1787,7 @@
       if(!id){ newChat(); return; }
       try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
     }
-    function newChat(){ _chatMsgs=[]; _chatConv=null; document.getElementById('chatLog').innerHTML='';
+    function newChat(){ _chatMsgs=[]; _chatConv=null; _chatKbId=null; document.getElementById('chatLog').innerHTML='';
       document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); }
     function renderChatGuard(){
       const el=document.getElementById('chatGuard'); if(!el) return;
