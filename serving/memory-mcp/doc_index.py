@@ -18,6 +18,7 @@
 # and dim-agnostic (struct-pack <Nf at whatever length comes back; search_vec skips dim-mismatched rows), so a
 # model change can't silently mis-score, and the KB inherits that for free.
 
+import io
 import json
 import math
 import os
@@ -77,6 +78,90 @@ def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP, max_chunks=MAX_CHUN
             ordinal += 1
         i += step
     return out
+
+
+# --- binary extraction (PDF/docx, v0.14 follow-up) ------------------------------------------------------
+# The ONLY part of doc_index that ever touches a non-stdlib dependency, and it does so LAZILY: the parser
+# libs (pypdf for .pdf, python-docx for .docx) are imported INSIDE the per-format helper, so the txt/md fast
+# path never imports them and `uv run python doc_index.py doc_ingest ...` stays pure-stdlib / zero-dep. The
+# parser deps are made available ONLY on the binary path via the C# side's `uv run --with pypdf --with
+# python-docx ...` overlay (see DocSearch.BuildIngestBinArgs).
+#
+# The library functions (extract_text / ingest_bin) NEVER call sys.exit and NEVER let a parser traceback
+# escape — they raise CATCHABLE domain errors so a non-CLI consumer can import + reuse them, and the CLI
+# doc_ingest_bin HANDLER is the single place that maps each to a printed JSON {"error": …} + a DISTINCT exit
+# code: _ParserMissing -> exit 3 (parsers couldn't load), _ExtractFailed -> exit 4 (corrupt/encrypted/wrong
+# format), _DocTooLarge -> exit 5 (extracted text over MAX_DOC_CHARS, consistent with the C# text path).
+class _ParserMissing(Exception):
+    """A binary-format parser dep (pypdf / python-docx) could not be imported (offline / not resolved). Carries
+    the user-facing 'parsers couldn't load' message; the CLI handler maps it to {"error": …} + exit 3."""
+
+
+class _ExtractFailed(Exception):
+    """The parser IS installed but the FILE is unreadable — corrupt, encrypted, or not really that format (pypdf
+    PdfReadError, python-docx PackageNotFoundError, etc.). Distinct from _ParserMissing (the embed server is
+    fine, the dep is present); the CLI handler maps it to a clear {"error": …} + exit 4 (NOT the embed-down 1)."""
+
+
+class _DocTooLarge(Exception):
+    """The EXTRACTED text exceeds MAX_DOC_CHARS. Raised BEFORE chunking so a 1.5MB docx/PDF that extracts to
+    >200k chars is rejected with a clear message rather than silently truncated to MAX_CHUNKS. The CLI handler
+    maps it to {"error": …} + exit 5 — the same 'document too large' contract as the C# text path."""
+
+
+def _extract_pdf(data):
+    """Plain text of a TEXT-based PDF via pypdf (lazy import). Scanned / image-only PDFs have no text layer and
+    return ~empty here — the pipeline then writes 0 chunks (a benign no-op the UI surfaces as 'looks scanned')."""
+    try:
+        from pypdf import PdfReader            # lazy: NEVER imported on the txt/md path
+    except ImportError:
+        raise _ParserMissing("the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ...)")
+    return "\n".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(data)).pages)
+
+
+def _extract_docx(data):
+    """Plain text of an OOXML .docx via python-docx (lazy import). Reads paragraph text only; legacy .doc (OLE)
+    is NOT supported by python-docx and is out of scope (a follow-up needing a different lib)."""
+    try:
+        from docx import Document               # pip dist is 'python-docx'; import package is 'docx'
+    except ImportError:
+        raise _ParserMissing("the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ...)")
+    return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
+
+
+def extract_text(source, data):
+    """Route raw bytes -> plain text on the source EXTENSION: .pdf -> pypdf, .docx -> python-docx, else utf-8
+    decode (txt/md and any other extension — the stdlib zero-dep path, mangled bytes 'replace'd, never thrown).
+    The extracted text drops straight into the EXISTING chunk_text -> embed -> store pipeline unchanged.
+
+    NEVER exits and NEVER lets a parser traceback escape: a missing parser dep re-raises _ParserMissing; ANY
+    other exception from the parser (a corrupt / encrypted / not-really-that-format file) is wrapped in
+    _ExtractFailed with a clear message. The CLI handler is the one place that turns either into a printed
+    {"error": …} + the right exit code — so this stays importable + reusable by a non-CLI consumer."""
+    ext = os.path.splitext(source)[1].lower()
+    if ext == ".pdf" or ext == ".docx":
+        try:
+            return _extract_pdf(data) if ext == ".pdf" else _extract_docx(data)
+        except _ParserMissing:
+            raise                                # missing dep -> exit 3 (handled by the CLI), distinct from below
+        except Exception as e:                   # parser IS present but the FILE is bad -> a CLEAR, distinct error
+            raise _ExtractFailed(
+                "couldn't read this file (corrupt, encrypted, or not a valid PDF/DOCX)") from e
+    return data.decode("utf-8", "replace")
+
+
+def ingest_bin(kb_id, source, data, embed_fn=embed):
+    """Binary-format ingest: extract plain text from `data` by `source`'s extension, ENFORCE the MAX_DOC_CHARS
+    cap on the extracted text (so a small-byte / huge-text file is rejected with a clear message rather than
+    silently truncated to MAX_CHUNKS), then feed the EXISTING ingest_doc (chunk_text -> embed -> store)
+    byte-for-byte unchanged. Returns the number of chunks written (0 for a scanned/empty PDF whose text layer
+    is blank — a benign no-op, not an error). Raises the catchable _ParserMissing / _ExtractFailed / _DocTooLarge
+    domain errors (NEVER exits) — the CLI handler maps them to exit codes."""
+    text = extract_text(source, data)
+    if len(text) > MAX_DOC_CHARS:
+        raise _DocTooLarge(
+            f"document too large ({len(text)} chars) — split it or attach a smaller file (max {MAX_DOC_CHARS} chars).")
+    return ingest_doc(kb_id, source, text, embed_fn=embed_fn)
 
 
 # --- store ----------------------------------------------------------------------------------------------
@@ -235,44 +320,82 @@ def search(kb_id, query, k=5, embed_fn=embed):
     return search_vec(kb_id, qv, k)
 
 
-if __name__ == "__main__":
-    # Subcommands the C# DocSearch sidecar shells via `uv run python doc_index.py ...` (stdlib-only, no temp file):
-    #   doc_ingest KB SOURCE     — read the document TEXT from STDIN, chunk+embed+store it; prints {"chunks":N}.
-    #   doc_search KB QUERY [K]  — prints a JSON array of {source,ord,content,score}.
-    #   doc_sources KB           — prints a JSON array of {source,chunks}.
-    #   doc_remove KB SOURCE     — prints {"removed":N}.
-    #   doc_delete KB            — drop the WHOLE KB (conversation-delete cleanup); prints {"removed":N}.
-    # A connection error (embed server down) / missing index propagates as a non-zero exit, which the C# caller
-    # degrades to "no context injected" (plain chat proceeds unchanged) — the same contract as code_search.
-    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+def _cli(argv):
+    """The CLI dispatch the C# DocSearch sidecar shells via `uv run python doc_index.py ...` (stdlib-only, no temp
+    file). Returns the PROCESS EXIT CODE (it does NOT call sys.exit — the __main__ guard does that), so the dispatch
+    + its exit-code mapping is unit-testable IN-PROCESS (monkeypatch sys.stdin + the extractor, assert the return).
+    The library funcs (ingest_doc / extract_text / ingest_bin) raise catchable domain errors; this is the single
+    place that maps each to a printed {"error":…} + the right exit code.
+
+    Subcommands:
+      doc_ingest KB SOURCE     — read the document TEXT from STDIN, chunk+embed+store it; prints {"chunks":N}.
+      doc_ingest_bin KB SOURCE — read the raw FILE BYTES from STDIN, extract text by extension (.pdf->pypdf,
+                                 .docx->python-docx, else utf-8), then the SAME chunk+embed+store; {"chunks":N}.
+                                 Distinct error exits (NOT the embed-down 1): 3 = parsers couldn't load, 4 =
+                                 corrupt/encrypted/wrong-format file, 5 = extracted text over MAX_DOC_CHARS.
+      doc_search KB QUERY [K]  — prints a JSON array of {source,ord,content,score}.
+      doc_sources KB           — prints a JSON array of {source,chunks}.
+      doc_remove KB SOURCE     — prints {"removed":N}.
+      doc_delete KB            — drop the WHOLE KB (conversation-delete cleanup); prints {"removed":N}.
+    A connection error (embed server down) / missing index propagates as a non-zero exit, which the C# caller
+    degrades to "no context injected" (plain chat proceeds unchanged) — the same contract as code_search."""
+    cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "doc_ingest":
-        kb = sys.argv[2] if len(sys.argv) > 2 else ""
-        src = sys.argv[3] if len(sys.argv) > 3 else ""
+        kb = argv[2] if len(argv) > 2 else ""
+        src = argv[3] if len(argv) > 3 else ""
         text = sys.stdin.read()
         n = ingest_doc(kb, src, text)
         print(json.dumps({"chunks": n}))
         # A non-blank doc that produced ZERO stored chunks means the embed server rejected EVERY chunk (it's down /
         # OOM): exit non-zero so the C# IngestAsync surfaces a 503 ("start the embed server") instead of a
         # misleading "attached, 0 chunks". A genuinely empty/blank doc (no chunks to embed) exits 0.
-        sys.exit(1 if (n == 0 and text.strip()) else 0)
+        return 1 if (n == 0 and text.strip()) else 0
+    if cmd == "doc_ingest_bin":
+        kb = argv[2] if len(argv) > 2 else ""
+        src = argv[3] if len(argv) > 3 else ""
+        data = sys.stdin.buffer.read()            # raw FILE BYTES (no text decode) — extract_text routes on ext
+        # extract_text RAISES the domain errors (never exits); this is the single place that maps each to a printed
+        # {"error":…} + a DISTINCT exit code so the C# IngestBinAsync surfaces the RIGHT message (and never the
+        # misleading embed-down 503). Extract ONCE here so the 0-chunk signal below reuses the same text (no re-parse).
+        try:
+            text = extract_text(src, data)        # parse ONCE (reused for the 0-chunk signal below)
+        except _ParserMissing as e:               # parsers couldn't load (offline / unresolved) -> exit 3
+            print(json.dumps({"error": str(e)})); return 3
+        except _ExtractFailed as e:               # corrupt / encrypted / not-really-that-format file -> exit 4
+            print(json.dumps({"error": str(e)})); return 4
+        # enforce the same MAX_DOC_CHARS cap ingest_bin does, here on the already-extracted text (exit 5) — so a
+        # small-byte / huge-text file is rejected with a clear message rather than silently truncated to MAX_CHUNKS.
+        if len(text) > MAX_DOC_CHARS:
+            print(json.dumps({"error": f"document too large ({len(text)} chars) — split it or attach a "
+                                       f"smaller file (max {MAX_DOC_CHARS} chars)."})); return 5
+        n = ingest_doc(kb, src, text)
+        print(json.dumps({"chunks": n}))
+        # A scanned/empty PDF (no text layer) extracts to "" -> 0 chunks: exit 0 (benign, the UI hints "looks
+        # scanned"). Non-blank extracted text that produced 0 chunks means the embed server rejected every
+        # chunk (down/OOM) -> exit 1 so the C# side surfaces the 503, exactly as the text doc_ingest path does.
+        return 1 if (n == 0 and text.strip()) else 0
     if cmd == "doc_search":
-        kb = sys.argv[2] if len(sys.argv) > 2 else ""
-        q = sys.argv[3] if len(sys.argv) > 3 else ""
-        k = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+        kb = argv[2] if len(argv) > 2 else ""
+        q = argv[3] if len(argv) > 3 else ""
+        k = int(argv[4]) if len(argv) > 4 else 5
         print(json.dumps(search(kb, q, k)))
-        sys.exit(0)
+        return 0
     if cmd == "doc_sources":
-        kb = sys.argv[2] if len(sys.argv) > 2 else ""
+        kb = argv[2] if len(argv) > 2 else ""
         print(json.dumps(sources(kb)))
-        sys.exit(0)
+        return 0
     if cmd == "doc_remove":
-        kb = sys.argv[2] if len(sys.argv) > 2 else ""
-        src = sys.argv[3] if len(sys.argv) > 3 else ""
+        kb = argv[2] if len(argv) > 2 else ""
+        src = argv[3] if len(argv) > 3 else ""
         print(json.dumps({"removed": remove_source(kb, src)}))
-        sys.exit(0)
+        return 0
     if cmd == "doc_delete":
-        kb = sys.argv[2] if len(sys.argv) > 2 else ""
+        kb = argv[2] if len(argv) > 2 else ""
         print(json.dumps({"removed": delete(kb)}))
-        sys.exit(0)
-    print("usage: doc_index.py {doc_ingest KB SOURCE <stdin| doc_search KB Q [K] | doc_sources KB | doc_remove KB SOURCE | doc_delete KB}")
-    sys.exit(2)
+        return 0
+    print("usage: doc_index.py {doc_ingest KB SOURCE <stdin| doc_ingest_bin KB SOURCE <stdin| doc_search KB Q [K] | doc_sources KB | doc_remove KB SOURCE | doc_delete KB}")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(_cli(sys.argv))

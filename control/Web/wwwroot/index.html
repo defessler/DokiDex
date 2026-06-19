@@ -311,12 +311,12 @@
       <details id="kbPanel" style="margin:4px 0 8px">
         <summary class="hint" style="cursor:pointer">+ knowledge base (chat with your documents)<span class="kbflag" title="RAG is active — relevant chunks of attached docs are injected each turn">RAG ON</span></summary>
         <div style="margin-top:6px">
-          <p class="hint" id="kbHint" style="margin:0 0 6px">Attach .txt/.md docs to this conversation — relevant passages are auto-retrieved and injected each turn.</p>
+          <p class="hint" id="kbHint" style="margin:0 0 6px">Attach .txt/.md/.pdf/.docx docs to this conversation — relevant passages are auto-retrieved and injected each turn. (Scanned/image PDFs have no text layer; OCR is not yet supported.)</p>
           <div id="kbDocs"></div>
           <textarea id="kbText" class="kin" style="width:100%;min-height:60px;display:block" placeholder="paste document text… (or upload a .txt/.md below)"></textarea>
           <div class="mods" style="margin-top:6px;align-items:center">
             <input id="kbName" class="kin" style="width:200px" placeholder="source name (e.g. notes.md)">
-            <label class="xbtn" style="cursor:pointer">+ upload .txt/.md<input id="kbFile" type="file" accept=".txt,.md,text/plain,text/markdown" style="display:none" onchange="onKbFile(this)"></label>
+            <label class="xbtn" style="cursor:pointer">+ upload .txt/.md/.pdf/.docx<input id="kbFile" type="file" accept=".txt,.md,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none" onchange="onKbFile(this)"></label>
             <button class="ghost" onclick="attachDoc()">Attach</button>
             <span class="hint" id="kbStatus"></span>
           </div>
@@ -1367,13 +1367,33 @@
       }
       renderKb();
     }
-    // Read a chosen .txt/.md into the paste box; default the source-name field to the filename if blank.
+    // Handle a chosen KB file. .txt/.md are TEXT — read client-side into the paste box (the existing JSON path).
+    // .pdf/.docx are BINARY — there's no client-side text extraction, so upload the raw FILE bytes via FormData to
+    // the /docs/file endpoint where the server extracts text, then reuse attachDoc's success/error handling.
     function onKbFile(input){
       const f=input.files&&input.files[0]; if(!f) return;
+      input.value='';   // allow re-picking the same file
+      const ext=(f.name.split('.').pop()||'').toLowerCase();
+      if(ext==='pdf'||ext==='docx'){ uploadKbFile(f); return; }
       const rd=new FileReader();
       rd.onload=()=>{ document.getElementById('kbText').value=rd.result||''; const nm=document.getElementById('kbName'); if(!nm.value.trim()) nm.value=f.name; document.getElementById('kbStatus').textContent='loaded '+f.name+' — name it + Attach'; };
       rd.readAsText(f);
-      input.value='';   // allow re-picking the same file
+    }
+    // Upload a binary .pdf/.docx as multipart to the server (which extracts text + ingests). Reuses the same
+    // status/loadKb refresh as attachDoc; a 0-chunk result surfaces the "looks scanned" hint the server returns.
+    async function uploadKbFile(f){
+      const status=document.getElementById('kbStatus');
+      if(!_chatConv){ status.textContent='send a message first to start this conversation, then attach docs'; return; }
+      status.textContent='uploading + extracting '+f.name+'…';
+      const fd=new FormData(); fd.append('file', f, f.name); fd.append('source', f.name);
+      try{
+        const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs/file',{method:'POST',body:fd});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ status.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to AGENT mode':'upload failed'); return; }
+        if((j.chunks||0)===0){ status.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — looks scanned (OCR not supported)'); }
+        else status.textContent='attached '+(j.source||f.name)+' ('+j.chunks+' chunks)';
+        await loadKb();
+      }catch{ status.textContent='upload request failed'; }
     }
     async function attachDoc(){
       const status=document.getElementById('kbStatus');

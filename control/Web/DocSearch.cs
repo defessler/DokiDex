@@ -44,6 +44,14 @@ public static class DocSearch
     // never even reaches binding/ingest — the byte-level companion to the char-level ValidateIngest.
     public const long MaxDocBytes = 1_500_000;
 
+    // Multipart upload ceiling for POST /chats/{id}/docs/file: MaxDocBytes (the file payload) + a small margin for
+    // the multipart framing (boundaries, the per-part Content-Disposition/Content-Type headers, the 'source' field).
+    // Applied as the ReadFormAsync MultipartBodyLengthLimit so a CHUNKED upload (no Content-Length, so the cheap 413
+    // pre-check can't fire) — or a forged-low Content-Length — still can't force the whole body to buffer up to
+    // Kestrel's 30MB default: ReadFormAsync aborts past this limit and the endpoint returns the 413. ~64KB margin
+    // comfortably covers the framing for a single small file part without letting a multi-MB body through.
+    public const long MaxUploadBytes = MaxDocBytes + 64 * 1024;
+
     private static string Script => Path.Combine(RepoPaths.Root, "serving", "memory-mcp", "doc_index.py");
 
     public static bool Installed => File.Exists(Script);
@@ -61,6 +69,17 @@ public static class DocSearch
             : null;
     }
 
+    // PURE raw-bytes upper bound for one BINARY ingest: null when at/under MaxDocBytes (the PRIMARY binary gate —
+    // a PDF's bytes exceed its extracted text), else a CLEAR "too large" message. The endpoint also gates on
+    // Content-Length (413) before buffering; this is the in-process companion checked at the top of IngestBinAsync.
+    public static string? ValidateIngestBytes(byte[]? data)
+    {
+        var len = data?.LongLength ?? 0;
+        return len > MaxDocBytes
+            ? $"document too large ({len} bytes) — split it or attach a smaller file (max {MaxDocBytes} bytes)."
+            : null;
+    }
+
     // Pure: the argv for `uv run python doc_index.py doc_search KB Q K`. k is clamped to [1,10].
     public static IReadOnlyList<string> BuildSearchArgs(string kbId, string query, int k)
     {
@@ -71,6 +90,39 @@ public static class DocSearch
     // Pure: the argv for `uv run python doc_index.py doc_ingest KB SOURCE` (the document TEXT is piped via STDIN).
     public static IReadOnlyList<string> BuildIngestArgs(string kbId, string source)
         => new[] { Script, "doc_ingest", kbId ?? "", source ?? "" };
+
+    // Pure: the argv for `doc_index.py doc_ingest_bin KB SOURCE` (the raw FILE BYTES are piped via STDIN). The
+    // server extracts text by extension (.pdf->pypdf, .docx->python-docx, else utf-8) then reuses the SAME ingest.
+    public static IReadOnlyList<string> BuildIngestBinArgs(string kbId, string source)
+        => new[] { Script, "doc_ingest_bin", kbId ?? "", source ?? "" };
+
+    // The parser deps the binary path makes available to uv ONLY for doc_ingest_bin (pure-python, lightweight).
+    private static readonly string[] ParserWith = { "--with", "pypdf", "--with", "python-docx" };
+
+    // PURE: the FULL `uv` argument list for the txt/md TEXT ingest — `run python <script> doc_ingest …`, with NO
+    // `--with` overlay so the stdlib fast path never pays dependency resolution. Locked by a test so the zero-dep
+    // invariant can't silently regress. (StartOrNull builds the live invocation from the same pieces.)
+    public static IReadOnlyList<string> BuildIngestUvArgs(string kbId, string source)
+        => UvArgs(BuildIngestArgs(kbId, source));
+
+    // PURE: the FULL `uv` argument list for the BINARY (.pdf/.docx) ingest — `run --with pypdf --with python-docx
+    // python <script> doc_ingest_bin …`. The `--with` overlay sits on the `run` verb (before `python`) so uv
+    // resolves+caches the parser env for this path ONLY; the text path above stays clean.
+    public static IReadOnlyList<string> BuildIngestBinUvArgs(string kbId, string source)
+        => UvArgs(BuildIngestBinArgs(kbId, source));
+
+    // The shared `uv run [--with …] python <args>` assembly: the `--with` overlay is added ONLY when the
+    // subcommand is doc_ingest_bin (the binary parser path). Every other subcommand (search/list/remove/delete/
+    // text-ingest) is plain `uv run python …` — zero added deps.
+    private static IReadOnlyList<string> UvArgs(IReadOnlyList<string> scriptArgs)
+    {
+        var isBin = scriptArgs.Count > 1 && scriptArgs[1] == "doc_ingest_bin";
+        var uv = new List<string> { "run" };
+        if (isBin) uv.AddRange(ParserWith);
+        uv.Add("python");
+        uv.AddRange(scriptArgs);
+        return uv;
+    }
 
     // Pure: the argv for `uv run python doc_index.py doc_sources KB` / `doc_remove KB SOURCE`.
     public static IReadOnlyList<string> BuildSourcesArgs(string kbId)
@@ -164,6 +216,69 @@ public static class DocSearch
         catch (Exception ex) { KillTree(p); return new IngestResult(false, 0, $"ingest error: {ex.Message}"); }
     }
 
+    // Ingest one BINARY document (.pdf/.docx — or any extension; the server decodes utf-8 for the rest) under
+    // (kbId, source): the raw FILE BYTES are piped via STDIN to `doc_ingest_bin`, which extracts text by extension
+    // and reuses the SAME chunk+embed+store pipeline. Distinct error exits each surface a CLEAR, RIGHT message (NEVER
+    // the misleading embed-down 503): 3 = parsers couldn't load, 4 = corrupt/encrypted/wrong-format file, 5 =
+    // extracted text over MaxDocChars (the same too-large contract as the text path). Never throws, never hangs.
+    public static async Task<IngestResult> IngestBinAsync(string kbId, string source, byte[] data, CancellationToken ct)
+    {
+        // Bound on RAW BYTES FIRST — before the install check and any spawn — so an over-cap upload fails fast with
+        // a clear "too large" message, never the 30s-timeout 503. (The endpoint's Content-Length 413 is the cheap
+        // outer guard; this holds even on a direct call.)
+        var tooBig = ValidateIngestBytes(data);
+        if (tooBig is not null) return new IngestResult(false, 0, tooBig);
+        if (!Installed) return new IngestResult(false, 0, "knowledge base unavailable — doc_index.py is missing.");
+        using Process? p = StartOrNull(BuildIngestBinArgs(kbId, source), out var redirectStdin);
+        try
+        {
+            if (p is null) return new IngestResult(false, 0, "could not start uv/python");
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            if (redirectStdin)
+            {
+                await p.StandardInput.BaseStream.WriteAsync((data ?? Array.Empty<byte>()).AsMemory(), ct).ConfigureAwait(false);
+                await p.StandardInput.BaseStream.FlushAsync(ct).ConfigureAwait(false);
+                p.StandardInput.Close();   // EOF so doc_index's sys.stdin.buffer.read() returns
+            }
+
+            var outTask = p.StandardOutput.ReadToEndAsync(ct);
+            var errTask = p.StandardError.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+            var stdout = await outTask.ConfigureAwait(false);
+            await errTask.ConfigureAwait(false);
+
+            // The exit-code -> message mapping is a PURE seam (MapIngestBinExit, unit-tested): 0 = ok (chunks may
+            // be 0 for a scanned PDF), 3 = parsers couldn't load, 4 = corrupt/encrypted/wrong-format file, 5 =
+            // extracted text over MaxDocChars, any other non-zero = generic (offline parsers OR a down embed server).
+            return MapIngestBinExit(p.ExitCode, stdout);
+        }
+        catch (OperationCanceledException) { KillTree(p); return new IngestResult(false, 0, "ingest cancelled / timed out"); }
+        catch (Exception ex) { KillTree(p); return new IngestResult(false, 0, $"ingest error: {ex.Message}"); }
+    }
+
+    // PURE: map doc_ingest_bin's process exit code (+ its stdout) to the user-facing IngestResult. Distinct codes so
+    // a corrupt file / an over-cap doc / offline parsers each surface the RIGHT message instead of the misleading
+    // "start the embed server" 503 (the embed server is fine on every one of those):
+    //   exit 0  -> Ok, with the parsed {"chunks":N} (0 chunks = a scanned/image PDF, a benign no-op the endpoint hints)
+    //   exit 3  -> the parsers couldn't load (offline / unresolved): surface the script's clear `uv run --with …` hint
+    //   exit 4  -> the FILE is unreadable (corrupt, encrypted, not really that format): a clear "couldn't read" message
+    //   exit 5  -> the EXTRACTED text exceeds MaxDocChars: the SAME "document too large" message as the text path
+    //   other   -> generic: parsers may be unavailable OFFLINE, or the embed server is down — name BOTH (FIX 5)
+    public static IngestResult MapIngestBinExit(int exitCode, string? stdout) => exitCode switch
+    {
+        0 => new IngestResult(true, ParseChunks(stdout), "done"),
+        3 => new IngestResult(false, 0, ParseError(stdout)
+                 ?? "the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ...)."),
+        4 => new IngestResult(false, 0, ParseError(stdout)
+                 ?? "couldn't read this file (corrupt, encrypted, or not a valid PDF/DOCX)."),
+        5 => new IngestResult(false, 0, ParseError(stdout)
+                 ?? $"document too large — split it or attach a smaller file (max {MaxDocChars} chars)."),
+        _ => new IngestResult(false, 0,
+                 "document ingest failed (the parsers may be unavailable offline, or the embed server is down — see start-embed.ps1)."),
+    };
+
     // List the sources attached to a KB ([{source, chunks}]); empty on any failure (graceful).
     public static async Task<IReadOnlyList<(string source, int chunks)>> SourcesAsync(string kbId, CancellationToken ct)
     {
@@ -223,11 +338,14 @@ public static class DocSearch
         catch { KillTree(p); return false; }
     }
 
-    // `uv run python <script> ...` — uv resolves the project python; doc_index.py is stdlib-only. redirectStdin is
-    // returned true ONLY for doc_ingest (so the caller pipes the document text); search/list/remove take argv only.
+    // `uv run [--with pypdf --with python-docx] python <script> ...` — uv resolves the project python; doc_index.py
+    // is stdlib-only EXCEPT the doc_ingest_bin path, which adds the `--with` parser overlay (resolved+cached by uv
+    // the first time, free thereafter) so the txt/md/search/list/remove paths stay zero-dep. redirectStdin is true
+    // for the two ingest subcommands (doc_ingest pipes text; doc_ingest_bin pipes raw file bytes).
     private static Process? StartOrNull(IReadOnlyList<string> args, out bool redirectStdin)
     {
-        redirectStdin = args.Count > 1 && args[1] == "doc_ingest";
+        var sub = args.Count > 1 ? args[1] : "";
+        redirectStdin = sub is "doc_ingest" or "doc_ingest_bin";
         var psi = new ProcessStartInfo("uv")
         {
             UseShellExecute = false,
@@ -237,10 +355,26 @@ public static class DocSearch
             RedirectStandardError = true,
             WorkingDirectory = RepoPaths.Root,
         };
-        psi.ArgumentList.Add("run");
-        psi.ArgumentList.Add("python");
-        foreach (var a in args) psi.ArgumentList.Add(a);
+        // UvArgs adds the `--with` parser overlay ONLY for doc_ingest_bin; every other subcommand stays plain
+        // `uv run python …` (zero added deps — the stdlib fast path the text/search sidecar relies on).
+        foreach (var a in UvArgs(args)) psi.ArgumentList.Add(a);
         return Process.Start(psi);
+    }
+
+    // PURE: pull the {"error":…} message doc_ingest_bin prints on an error exit (3/4/5); null if absent / not a
+    // string / not an object / not JSON (the caller then falls back to its own clear default). Unit-tested seam.
+    public static string? ParseError(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String)
+                return e.GetString();
+        }
+        catch { /* not JSON — fall through to the caller's default message */ }
+        return null;
     }
 
     private static void KillTree(Process? p)

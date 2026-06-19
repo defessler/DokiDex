@@ -4,6 +4,7 @@ using DokiDex.Control.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DokiDex.Web;
@@ -423,6 +424,74 @@ public static class StudioHost
                 ChatStore.Save(conv with { KbId = id });   // graceful: a save failure doesn't undo the ingest
 
             return Results.Json(new { source, chunks = r.Chunks });
+        });
+
+        // ---- BINARY doc upload (.pdf/.docx): unlike the .txt/.md paste path above (the browser reads text
+        // client-side and POSTs JSON), PDF/docx are BINARY — the browser uploads the raw FILE BYTES as multipart
+        // and the SERVER extracts text (doc_ingest_bin -> pypdf/python-docx by extension), then reuses the EXACT
+        // same chunk+embed+store pipeline. Caps: MaxDocBytes is the PRIMARY raw-bytes gate (a clean 413 BEFORE
+        // buffering); SafeName guards the basename exactly as the JSON path. A missing parser dep / scanned PDF
+        // degrades to a CLEAR surfaced message, never a crash — the same DocSearch contract.
+        api.MapPost("/chats/{id}/docs/file", async (string id, HttpRequest req, CancellationToken ct) =>
+        {
+            // Raw-bytes ceiling up front (Content-Length) for a clean 413 before buffering a multi-MB upload — the
+            // PRIMARY binary gate (a PDF's bytes exceed its extracted text). Mirrors the JSON path's byte guard.
+            if (req.ContentLength is long clen && clen > DocSearch.MaxDocBytes)
+                return Results.Json(new { error = $"document too large ({clen} bytes) — split it or attach a smaller file." }, statusCode: 413);
+
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+
+            if (!req.HasFormContentType) return Results.BadRequest(new { error = "expected multipart/form-data" });
+
+            // ENDPOINT-LEVEL body cap (FIX 6): the Content-Length 413 above is skipped by a CHUNKED upload (no
+            // Content-Length) or a forged-low one, and the default ReadFormAsync would buffer the whole body up to
+            // Kestrel's 30MB limit before the post-buffer cap fires. Cap MultipartBodyLengthLimit at ~MaxDocBytes
+            // (+ framing margin) so ReadFormAsync ABORTS past it — a chunked client can't force a multi-MB buffer.
+            // Honest (Content-Length-bearing) clients still get the clear 413 from the pre-check above.
+            IFormCollection form;
+            try
+            {
+                form = await req.ReadFormAsync(
+                    new FormOptions { MultipartBodyLengthLimit = DocSearch.MaxUploadBytes }, ct);
+            }
+            catch (System.IO.InvalidDataException)   // body exceeded MultipartBodyLengthLimit -> the same 413 contract
+            {
+                return Results.Json(new { error = $"document too large — split it or attach a smaller file (max {DocSearch.MaxDocBytes} bytes)." }, statusCode: 413);
+            }
+            var file = form.Files["file"];
+            if (file is null || file.Length == 0) return Results.BadRequest(new { error = "no file uploaded" });
+
+            // Source label = the form 'source' (basename) or the uploaded filename; SafeName-guard the basename
+            // exactly as the JSON path (no path/traversal surface — kb_id is the conversation id, never client-set).
+            var rawSource = ((string?)form["source"] ?? file.FileName ?? "").Trim();
+            var source = System.IO.Path.GetFileName(rawSource);
+            if (source.Length == 0 || RecipeStore.SafeName(System.IO.Path.GetFileNameWithoutExtension(source)) is null)
+                return Results.BadRequest(new { error = "bad or missing source filename" });
+
+            // Buffer the (already byte-capped) upload, then hand the raw bytes to doc_ingest_bin. The server-side
+            // extractor routes by extension and the EXISTING ValidateIngest/MAX_CHUNKS backstops bound the result.
+            byte[] bytes;
+            using (var ms = new MemoryStream())
+            {
+                await file.CopyToAsync(ms, ct);
+                bytes = ms.ToArray();
+            }
+            if (bytes.LongLength > DocSearch.MaxDocBytes)
+                return Results.Json(new { error = $"document too large ({bytes.LongLength} bytes) — split it or attach a smaller file." }, statusCode: 413);
+
+            var r = await DocSearch.IngestBinAsync(id, source, bytes, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+
+            if (string.IsNullOrWhiteSpace(conv.KbId))
+                ChatStore.Save(conv with { KbId = id });   // graceful: a save failure doesn't undo the ingest
+
+            // chunks==0 on a successful exit means a scanned/image-only PDF (no text layer) — surface a hint so the
+            // user isn't confused by a silent no-op (OCR is out of scope for v0.14, a labeled follow-up).
+            var note = r.Chunks == 0
+                ? "no text found — looks like a scanned/image PDF (OCR not yet supported)."
+                : null;
+            return Results.Json(new { source, chunks = r.Chunks, note });
         });
 
         api.MapGet("/chats/{id}/docs", async (string id, CancellationToken ct) =>

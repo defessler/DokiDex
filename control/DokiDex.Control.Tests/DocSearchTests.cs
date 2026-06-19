@@ -39,6 +39,194 @@ public class DocSearchTests
         Assert.Equal("manual.txt", a[3]);
     }
 
+    // ---- binary ingest (PDF/docx): a SEPARATE subcommand `doc_ingest_bin` whose argv carries the same KB +
+    //      SOURCE, but whose `uv run` invocation adds the `--with pypdf --with python-docx` overlay (asserted via
+    //      BuildIngestBinUvArgs) so the parser deps are present ONLY on this path. The txt/md doc_ingest argv is
+    //      left untouched (zero-dep). Both builders are pure, so they're locked here with no process. ----
+    [Fact]
+    public void BuildIngestBinArgs_is_pure_script_doc_ingest_bin_kb_source_argv()
+    {
+        var a = DocSearch.BuildIngestBinArgs("conv-9", "manual.pdf");
+        Assert.EndsWith("doc_index.py", a[0]);
+        Assert.Equal("doc_ingest_bin", a[1]);
+        Assert.Equal("conv-9", a[2]);
+        Assert.Equal("manual.pdf", a[3]);
+    }
+
+    [Fact]
+    public void BuildIngestBinUvArgs_prepends_run_python_and_the_parser_with_overlay()
+    {
+        // The binary path is the ONLY one that adds `--with pypdf --with python-docx` to `uv run`; the overlay
+        // must come BEFORE `python` (uv consumes --with on the `run` verb), and the script subcommand follows.
+        var uv = DocSearch.BuildIngestBinUvArgs("conv-9", "manual.pdf");
+        Assert.Equal("run", uv[0]);
+        Assert.Contains("--with", uv);
+        Assert.Contains("pypdf", uv);
+        Assert.Contains("python-docx", uv);
+        var py = uv.ToList().IndexOf("python");
+        var withIdx = uv.ToList().IndexOf("--with");
+        Assert.True(withIdx >= 0 && withIdx < py, "--with overlay precedes the `python` token");
+        Assert.Equal("doc_ingest_bin", uv[py + 2]);   // python <script> doc_ingest_bin ...
+    }
+
+    [Fact]
+    public void BuildIngestUvArgs_for_the_text_path_stays_zero_dep_no_with_overlay()
+    {
+        // INVARIANT: the txt/md / paste path must NEVER carry a --with overlay (it stays pure-stdlib, no resolve).
+        var uv = DocSearch.BuildIngestUvArgs("conv-9", "notes.txt");
+        Assert.Equal("run", uv[0]);
+        Assert.DoesNotContain("--with", uv);
+        Assert.DoesNotContain("pypdf", uv);
+        var py = uv.ToList().IndexOf("python");
+        Assert.Equal("doc_ingest", uv[py + 2]);
+    }
+
+    [Fact]
+    public async Task IngestBinAsync_rejects_an_over_cap_byte_payload_with_the_clear_message()
+    {
+        // The raw-bytes ceiling (MaxDocBytes) is the PRIMARY binary gate (a PDF's bytes exceed its text). An
+        // over-cap byte payload fails FAST with a clear "too large" message BEFORE any spawn — never the timeout
+        // 503 — and the gate runs before the install/spawn checks so it holds without uv/python present.
+        var over = new byte[DocSearch.MaxDocBytes + 1];
+        var r = await DocSearch.IngestBinAsync("conv-1", "huge.pdf", over, CancellationToken.None);
+        Assert.False(r.Ok);
+        Assert.Equal(0, r.Chunks);
+        Assert.NotNull(r.Message);
+        Assert.Contains("too large", r.Message!);
+        Assert.DoesNotContain("embed server", r.Message!);
+    }
+
+    [Fact]
+    public void ValidateIngestBytes_gates_on_the_raw_byte_ceiling()
+    {
+        Assert.Null(DocSearch.ValidateIngestBytes(new byte[DocSearch.MaxDocBytes]));   // at-cap accepted
+        var msg = DocSearch.ValidateIngestBytes(new byte[DocSearch.MaxDocBytes + 1]);
+        Assert.NotNull(msg);
+        Assert.Contains("too large", msg!);
+    }
+
+    [Fact]
+    public void MaxUploadBytes_bounds_the_chunked_multipart_body_just_above_MaxDocBytes()
+    {
+        // FIX 6: the /docs/file endpoint caps ReadFormAsync's MultipartBodyLengthLimit at MaxUploadBytes so a
+        // CHUNKED upload (no Content-Length, so the cheap 413 pre-check can't fire) can't force the whole body to
+        // buffer up to Kestrel's 30MB default. The cap must be (a) at least MaxDocBytes + a real framing margin so
+        // an honest at-cap file still uploads, and (b) far below Kestrel's 30MB default so the guard actually bites.
+        Assert.True(DocSearch.MaxUploadBytes > DocSearch.MaxDocBytes, "leaves headroom over the payload for multipart framing");
+        Assert.True(DocSearch.MaxUploadBytes - DocSearch.MaxDocBytes >= 16 * 1024, "the framing margin is a real (>=16KB) allowance");
+        Assert.True(DocSearch.MaxUploadBytes < 30L * 1024 * 1024, "stays well under Kestrel's 30MB default so the cap actually bites");
+    }
+
+    // ---- binary-ingest exit-code -> message mapping (FIX 1 + FIX 5): a PURE seam so each exit code surfaces the
+    //      RIGHT user-facing message without spawning uv/python. doc_ingest_bin's exits: 0 = ok (chunks may be 0
+    //      for a scanned PDF), 3 = parsers couldn't load, 4 = corrupt/encrypted/wrong-format file, 5 = extracted
+    //      text over MaxDocChars, any OTHER non-zero = generic (parsers unavailable offline OR embed server down). ----
+
+    [Fact]
+    public void MapIngestBinExit_exit0_is_ok_with_the_parsed_chunk_count()
+    {
+        var r = DocSearch.MapIngestBinExit(0, "{\"chunks\":7}");
+        Assert.True(r.Ok);
+        Assert.Equal(7, r.Chunks);
+    }
+
+    [Fact]
+    public void MapIngestBinExit_exit0_with_zero_chunks_is_still_ok_a_scanned_pdf()
+    {
+        // A scanned/image-only PDF extracts to "" -> 0 chunks but exit 0: that's a benign no-op the endpoint
+        // surfaces as "looks scanned", NOT a failure. Ok stays true so it isn't turned into a 503.
+        var r = DocSearch.MapIngestBinExit(0, "{\"chunks\":0}");
+        Assert.True(r.Ok);
+        Assert.Equal(0, r.Chunks);
+    }
+
+    [Fact]
+    public void MapIngestBinExit_exit3_surfaces_the_scripts_clear_parser_install_message()
+    {
+        // exit 3 = the parsers couldn't load: surface the script's {"error":…} (the real `uv run --with …` hint),
+        // NOT the embed-down 503. The message must NOT mention the (non-existent) `setup.ps1 -Docs` switch.
+        const string stdout = "{\"error\":\"the PDF/DOCX parsers couldn't load (offline? run: uv run --with pypdf --with python-docx ...)\"}";
+        var r = DocSearch.MapIngestBinExit(3, stdout);
+        Assert.False(r.Ok);
+        Assert.Equal(0, r.Chunks);
+        Assert.Contains("uv run --with pypdf --with python-docx", r.Message!);
+        Assert.DoesNotContain("setup.ps1 -Docs", r.Message!);
+        Assert.DoesNotContain("embed server", r.Message!);
+    }
+
+    [Fact]
+    public void MapIngestBinExit_exit4_is_the_clear_corrupt_file_message_not_a_503()
+    {
+        // FIX 1: a corrupt/encrypted/not-really-that-format file (parser present, file unreadable) exits 4. It must
+        // surface the script's clear "couldn't read this file" message — NEVER the misleading "start the embed
+        // server" 503 (the embed server is fine). Falls back to a clear default if stdout carried no {"error":…}.
+        const string stdout = "{\"error\":\"couldn't read this file (corrupt, encrypted, or not a valid PDF/DOCX)\"}";
+        var r = DocSearch.MapIngestBinExit(4, stdout);
+        Assert.False(r.Ok);
+        Assert.Equal(0, r.Chunks);
+        Assert.Contains("couldn't read", r.Message!);
+        Assert.DoesNotContain("embed server", r.Message!);
+
+        // even with NO parseable stdout, exit 4 must NOT degrade to the embed-server message — a clear corrupt-file
+        // default stands in (the distinct exit code alone tells us it's a read failure, not a down embed server).
+        var rNoBody = DocSearch.MapIngestBinExit(4, "");
+        Assert.False(rNoBody.Ok);
+        Assert.DoesNotContain("embed server", rNoBody.Message!);
+        Assert.Contains("read", rNoBody.Message!);
+    }
+
+    [Fact]
+    public void MapIngestBinExit_exit5_is_the_clear_too_large_message_not_a_503()
+    {
+        // FIX 2: extracted text over MaxDocChars exits 5 — the SAME "document too large" contract as the text path.
+        // It must surface that message (content was NOT silently truncated to MAX_CHUNKS), not the embed-down 503.
+        const string stdout = "{\"error\":\"document too large (260000 chars) — split it or attach a smaller file (max 200000 chars).\"}";
+        var r = DocSearch.MapIngestBinExit(5, stdout);
+        Assert.False(r.Ok);
+        Assert.Equal(0, r.Chunks);
+        Assert.Contains("too large", r.Message!);
+        Assert.DoesNotContain("embed server", r.Message!);
+
+        // with no parseable body, exit 5 still surfaces a clear "too large" default (never the embed-server message).
+        var rNoBody = DocSearch.MapIngestBinExit(5, "");
+        Assert.False(rNoBody.Ok);
+        Assert.Contains("too large", rNoBody.Message!);
+        Assert.DoesNotContain("embed server", rNoBody.Message!);
+    }
+
+    [Fact]
+    public void MapIngestBinExit_generic_nonzero_names_both_offline_parsers_and_a_down_embed_server()
+    {
+        // FIX 5: the realistic live failure on the binary path is `uv` failing to RESOLVE pypdf/python-docx OFFLINE
+        // (a non-3/4/5 exit), which the old code mislabeled "start the embed server". The generic fallback must name
+        // BOTH likely causes (parsers unavailable offline OR embed server down) so the message isn't embed-specific.
+        var r = DocSearch.MapIngestBinExit(1, "");
+        Assert.False(r.Ok);
+        Assert.Equal(0, r.Chunks);
+        Assert.Contains("parser", r.Message!, System.StringComparison.OrdinalIgnoreCase);   // names the offline-parsers cause
+        Assert.Contains("embed", r.Message!, System.StringComparison.OrdinalIgnoreCase);    // still names the embed-server cause
+    }
+
+    // ---- ParseError (FIX 7): the pure {"error":…}-extracting seam doc_ingest_bin's error exits print. A valid
+    //      object yields the string; non-JSON / a non-string error / a missing key yields null (the caller then
+    //      uses its own default). Pure, so locked here with no process. ----
+    [Fact]
+    public void ParseError_reads_a_valid_error_object_into_its_string()
+    {
+        Assert.Equal("boom", DocSearch.ParseError("{\"error\":\"boom\"}"));
+        Assert.Equal("couldn't read this file", DocSearch.ParseError("{\"error\":\"couldn't read this file\"}"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not json")]
+    [InlineData("{}")]               // no "error" key
+    [InlineData("{\"error\":123}")]  // "error" is not a string
+    [InlineData("[]")]               // not an object
+    public void ParseError_returns_null_on_missing_or_malformed_input(string json)
+        => Assert.Null(DocSearch.ParseError(json));
+
     [Fact]
     public void BuildSourcesArgs_and_BuildRemoveArgs_are_pure_argv()
     {
