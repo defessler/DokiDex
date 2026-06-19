@@ -1,5 +1,77 @@
 # Decision log
 
+## 2026-06-19 — Best-local-video census (HunyuanVideo / Mochi-1 / CogVideoX / HunyuanVideo 1.5 / Kandinsky 5 Lite) → **DEFER** (Wan 2.2 + LTX cover the 32GB spectrum; NO install/recipe change)
+
+**Question.** Among the notable open text/image-to-video models, is there one that is a clearly **BETTER quality
+default** than DokiDex's **Wan 2.2 TI2V-5B** (the `doki gen -Video` default), OR a genuinely **COMPLEMENTARY tier**
+that the existing Wan+LTX lineup doesn't cover (a specific strength — longer clips, better motion, a niche) — for a
+**32GB single-user box**? This is the same shape as the standalone-TTS census above: it asks ONLY about the *video
+default + tiers*, not the lip-sync / V2A / talking-video sidecars. The existing lineup is already **strong**:
+**Wan 2.2 TI2V-5B fp16** (the `-Video` default, live-validated 832×480×49 in 53s @ 13.8GB) + the gated **Wan 2.2 T2V
+A14B GGUF dual-expert** Q4_K_M (`-Quality`, StepSwap) + **LTX-Video ltxv-2b-distilled** (`-Video -Fast`, the
+near-real-time fast-draft tier) + **WanFoley** (video→audio) + **InfiniteTalk/LatentSync** (lip-sync). The 2026-06
+research already picked Wan 2.2 as SwarmUI's recommended best-local video; **LTX-2/2.3 (22B) was separately
+evaluated and parked** as too-heavy / nascent-loader (`docs/frontier-roadmap.md` Tier-2 notes: official floor is
+32GB+ VRAM = exactly the 5090, and SwarmUI's LTX2 path previously had no loadable checkpoint).
+
+**Census (cited).**
+- **HunyuanVideo v1 (13B)** (`tencent/HunyuanVideo`; Diffusers mirror `hunyuanvideo-community/HunyuanVideo`) — **DOMINATED on 32GB.** The
+  full 13B DiT (~25.6GB bf16 transformer + the ~12GB MLLM text encoder + CLIP + VAE) blows **over 32GB** before
+  activations; even GGUF/fp8 repacks of the 13B leave too little headroom for the long-frame attention at a useful
+  resolution, and the quality it buys over the 5B doesn't open a tier Wan 5B + A14B don't already span. License is
+  Tencent Hunyuan Community (the same EU/UK/SK restriction DokiDex already accepts for Foley).
+- **Mochi-1 (10B)** (`genmo/mochi-1-preview`) — **DOMINATED (non-native).** Genmo's AsymmDiT is **480p-only**
+  (preview) and is **not a SwarmUI-native class** — it needs a ComfyUI custom-node path (node-authoring, the same
+  wall InstantID/InfiniteTalk hit), so it can't ride the existing `-Video` recipe. 480p preview-grade output is a
+  lateral-to-worse step from the 5B's validated 832×480, for a node-authoring cost.
+- **CogVideoX (5B)** (`THUDM/CogVideoX-5b`) — **DOMINATED (non-native).** Same arch class as the 5B size-wise but
+  **not SwarmUI-native** (CogVideoX-Fun / the THUDM nodes are a ComfyUI custom-node path), and its quality/motion is
+  not a measured win over Wan 2.2 5B. Adds a node-authoring cost for no default-beating or tier-opening gain.
+- **HunyuanVideo 1.5 (8.3B)** (the smaller native-tractable refresh) — **fits but LATERAL.** This is the only
+  candidate that is **plausibly SwarmUI-native AND 32GB-feasible** via a community **GGUF Q4_K_M (~5.09GB**, the
+  `jayn7` HF repo) into `Models/diffusion_models` (CFG ~1 distilled / ~6 base — standard ComfyUI HunyuanVideo-1.5
+  practice, NOT a model-card spec; confirm at bake-off). But it is a
+  **lateral bake-off alternative** to Wan 2.2 5B — same tier, no measured quality win, no distinct axis (clip
+  length / motion / resolution) that Wan 5B + A14B don't already cover. A bake-off candidate, not a default-beater
+  or a new tier.
+- **Kandinsky 5 Lite (2B, 10s)** (the genuinely-distinct axis) — **DISTINCT but BUGGY/UNPROVEN.** Its one real
+  differentiator is **~10s native clips** (vs the 5B's ~2s/49-frame and LTXV's short drafts) — the only axis in this
+  whole census that Wan+LTX don't cover. But its **SwarmUI path is buggy/unproven** (the loader/class support is not
+  a clean native ride; it needs node-authoring to wire reliably), so the longer-clip win is not bankable at rest.
+  An unproven, buggy path is exactly the kind of blind-authoring this log refuses to ship (the InstantID/InfiniteTalk
+  posture: don't wire a model whose native path can't be verified).
+
+**Verdict — DECISION RULE branch taken: DEFER (the 2nd branch).** **None beats Wan 2.2 as the default**, and **none
+opens a gated tier the existing Wan 5B + A14B + LTXV miss** with a *verified* 32GB checkpoint + recipe. The two
+remaining live candidates each fail the bar in a different way: **HunyuanVideo 1.5 8.3B** native-fits but is a
+**lateral** same-tier bake-off alt (no measured win, no distinct axis) — not a clearly-better default and not a
+complementary tier; **Kandinsky 5 Lite 2B** is the **only distinct axis** (10s clips) but its SwarmUI path is
+**buggy and unproven** (needs node-authoring), so it is not a *verified* checkpoint+recipe. HunyuanVideo v1 13B
+(over 32GB), Mochi-1 (480p non-native), and CogVideoX (non-native) are dominated. Per the DECISION RULE, DEFER means
+**add ONLY this note and make NO install/recipe change** — so **every existing video + image recipe is kept
+byte-for-byte**: the Wan 2.2 TI2V-5B `-Video` default (`wan2.2_ti2v_5B_fp16.safetensors`), the gated A14B GGUF
+dual-expert `-Quality` arm, the LTXV `-Video -Fast` draft tier, WanFoley, and InfiniteTalk/LatentSync are all
+untouched. No `setup.ps1` switch, no `model-catalog.json` row, no `doki-gen.ps1` recipe arm, and no GenCli/GenArgs
+forward was added (no forwarded switch was touched, so no GenCliTests parity work was needed).
+
+**When to revisit.** (1) **Kandinsky 5 Lite** is the one to watch — if SwarmUI gains a **clean native loader** for
+its class (so the 10s-clip axis becomes a *verified* checkpoint+recipe, not a buggy node-author), revisit it as a
+gated **longer-clip** tier (the genuinely-complementary axis Wan+LTX miss), wired ADDITIVELY exactly like the A14B
+`-Quality` add (a `-Models full` checkpoint or a `-Flag` + a catalog row + a template-sourced recipe), with Wan
+TI2V-5B staying the byte-for-byte default. (2) **HunyuanVideo 1.5 8.3B** is worth a future **bake-off** only — pull
+the GGUF Q4_K_M (~5.09GB, `jayn7` repo) into `Models/diffusion_models` and A/B it head-to-head against the 5B at
+matched res/frames (CFG 1 distilled / 6 base); adopt only on a *measured* quality win, and record the A/B either way
+(a clean negative is as useful as a win, same discipline as the LTX-2.3 recon backlog). (3) LTX-2.3 (22B) remains
+parked per `docs/frontier-roadmap.md` (32GB+ floor; re-recon SwarmUI's LTX2 loader against an `unsloth/LTX-2.3-GGUF`
+checkpoint). Until one of these flips to a *verified, default-beating-or-tier-opening* result, **Wan 2.2 + LTX cover
+the 32GB video spectrum** and the lineup stays as-is.
+
+**Sources.** HunyuanVideo 13B — huggingface.co/tencent/HunyuanVideo ; Mochi-1 480p preview —
+huggingface.co/genmo/mochi-1-preview ; CogVideoX-5b — huggingface.co/THUDM/CogVideoX-5b ; HunyuanVideo 1.5 GGUF —
+the `jayn7` HF repo (Q4_K_M ~5.09GB → `Models/diffusion_models`) ; Kandinsky 5 — ai-forever/Kandinsky-5 (10s Lite
+variant). Wan 2.2 5B live-validation + the A14B-doesn't-fit-32GB finding + LTX-2/2.3 parking are in this log and
+`docs/frontier-roadmap.md`.
+
 ## 2026-06-19 — Coexist-with-chat standalone TTS census → **DEFER on the default** (Chatterbox stays) + wire the **ONE** gated `-Kokoro` alternative
 
 **Question.** Is a *different* standalone TTS a better **default** for the coexist-with-chat speech path — the
