@@ -412,7 +412,7 @@ switch ($Command) {
         # 2. python suites (pure-stdlib): sqlite/FTS5 memory store + the codebase-RAG core. Skipped if
         #    python is absent (the rest of the suite still runs).
         if (Get-Command python -ErrorAction SilentlyContinue) {
-            foreach ($pt in @("tests\memory_db.test.py", "tests\code_index.test.py")) {
+            foreach ($pt in @("tests\memory_db.test.py", "tests\code_index.test.py", "tests\doc_index.test.py")) {
                 $ptp = Join-Path $root $pt
                 if (Test-Path $ptp) {
                     Write-Host "`n== $(Split-Path $ptp -Leaf) ==" -ForegroundColor Cyan

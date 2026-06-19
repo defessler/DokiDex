@@ -9,8 +9,13 @@ namespace DokiDex.Web;
 // A persisted multi-turn conversation: the on-disk memory the one-shot LocalLlm structurally lacks. The id is
 // SERVER-generated (never a client path => no traversal surface); Persona/Lorebook name the card + world-info
 // the thread runs under; Messages is the append-on-turn transcript that reload restores.
+// KbId (optional) names the per-conversation KNOWLEDGE BASE the thread runs over — the scope key for the
+// doc_index.db chunks attached to this conversation (mirrors the Lorebook? field: carried in the same <id>.json,
+// null on a thread with no attached docs so the no-KB chat path stays byte-for-byte). First slice: KbId == the
+// conversation Id, so a doc attaches to a thread, not globally; a later slice can promote it to a named library.
 public sealed record Conversation(
-    string Id, string? Persona, string? Lorebook, string Created, IReadOnlyList<ChatTurn> Messages);
+    string Id, string? Persona, string? Lorebook, string Created, IReadOnlyList<ChatTurn> Messages,
+    string? KbId = null);
 
 // Conversation store — file-based under <home>/chats/<id>.json, mirroring SavedSearches (JSON via the same
 // serializer, graceful try/catch). Unlike personas/recipes the FILE STEM is a server-generated id, so there is

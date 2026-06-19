@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using DokiDex.Web;
 using Xunit;
 
@@ -70,6 +71,27 @@ public class ChatTests
         // No lorebook name => no injection and NO disk touched, so ChatPrompt.Build keeps its exact pre-P3 output.
         var history = new List<ChatTurn> { U("the dragon roared") };
         Assert.Null(Chat.ActivateLore(lorebookName, history, "tell me more"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task RetrieveDocs_returns_null_when_there_is_no_attached_kb(string? kbId)
+    {
+        // No KB id => no retrieval and NO sidecar/process touched, so ChatPrompt.Build keeps the no-KB output
+        // byte-for-byte (the same degrade contract code_search has — a conversation with no docs is unchanged).
+        Assert.Null(await Chat.RetrieveDocs(kbId, "anything", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task RetrieveDocs_returns_null_for_a_blank_user_message(string? message)
+    {
+        // A blank turn can't be retrieved against; short-circuit to null (no injection) without touching the sidecar.
+        Assert.Null(await Chat.RetrieveDocs("conv-123", message!, CancellationToken.None));
     }
 
     [Fact]

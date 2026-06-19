@@ -35,6 +35,8 @@ public static class Chat
     private const int LoreMaxEntries = 8;
     private const int LoreMaxChars = 1500;
 
+    // (KB retrieval top-K lives in DocSearch.RetrieveK — the single knob — so there's no duplicate constant here.)
+
     // Steps defaults to empty so the existing SendAsync callers/tests are unaffected; AgentAsync fills it with
     // the tool calls taken (each: the tool name + a short preview of its result) for an optional SPA trace.
     public sealed record Result(bool Ok, string ConversationId, string Text, string? Message,
@@ -91,7 +93,11 @@ public static class Chat
         var imageDataUrl = ResolveImage(body.Image);
         model = VisionModel(imageDataUrl, model);
 
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl);
+        // KB context-injection: retrieve the conversation's top-K relevant doc chunks for the latest turn (null +
+        // no injection when there's no attached KB / the embed server is down — the no-KB path stays unchanged).
+        var activeDocs = await RetrieveDocs(conv.KbId, userMessage, ct).ConfigureAwait(false);
+
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs);
 
         var temperature = 0.8;
         var maxTokens = 1024;
@@ -172,8 +178,12 @@ public static class Chat
         IReadOnlyList<ChatTurn> history = SelectHistory(conv, body.Messages);
         var activeLore = ActivateLore(card?.Lorebook, history, userMessage);
 
+        // KB context-injection (same as SendAsync): the attached docs are injected unconditionally each turn,
+        // independent of the tool registry — the [Documents] block rides alongside any tool calls the loop makes.
+        var activeDocs = await RetrieveDocs(conv.KbId, userMessage, ct).ConfigureAwait(false);
+
         // The agent loop is text-only (no vision-in-chat this slice): keep the requested speed tier as-is.
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore);
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, activeDocs: activeDocs);
 
         // A MUTABLE working transcript for the loop: we append the assistant tool-call turns + tool results onto a
         // copy of the built messages, then re-call. The persisted conversation only ever stores the user turn + the
@@ -272,7 +282,11 @@ public static class Chat
         var imageDataUrl = ResolveImage(body.Image);
         model = VisionModel(imageDataUrl, model);
 
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl);
+        // KB context-injection (same as SendAsync): retrieve the conversation's relevant doc chunks before the
+        // first token; a down embed server / no attached KB degrades to no injection (the no-KB stream unchanged).
+        var activeDocs = await RetrieveDocs(conv.KbId, userMessage, ct).ConfigureAwait(false);
+
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs);
 
         // Hand the conversation id to the endpoint up front (so the SPA can capture it before any token).
         yield return StreamEvent.Meta(conv.Id);
@@ -350,5 +364,23 @@ public static class Chat
         var scanText = string.Join("\n", recent.Select(t => t.Content)) + "\n" + userMessage;
 
         return Lorebook.Activate(book.Entries, scanText, LoreMaxEntries, LoreMaxChars);
+    }
+
+    // KB context-injection: when the conversation has an attached KB (KbId set), retrieve the top-K doc chunks
+    // most relevant to the LATEST user turn (semantic cosine over the kb_id-scoped doc_index rows) so
+    // ChatPrompt.Build can inject a bounded [Documents] block — the deterministic, every-turn alternative to a
+    // 5th chat tool. Returns null when there's no KB (so Build preserves the EXACT no-KB output) and DEGRADES to
+    // null on any failure: a down :8090 embed server, a missing index, a sidecar error, or a timeout all yield
+    // "no context injected" and plain chat proceeds unchanged — the SAME contract as code_search. Internal so the
+    // no-KB short-circuit is unit-testable with no process.
+    internal static async Task<IReadOnlyList<DocChunk>?> RetrieveDocs(string? kbId, string userMessage, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(kbId) || string.IsNullOrWhiteSpace(userMessage)) return null;
+        try
+        {
+            var docs = await DocSearch.RetrieveAsync(kbId, userMessage, ct).ConfigureAwait(false);
+            return docs is { Count: > 0 } ? docs : null;   // empty => null so Build's no-KB output is byte-for-byte
+        }
+        catch { return null; }   // never let a KB hiccup break a reply
     }
 }

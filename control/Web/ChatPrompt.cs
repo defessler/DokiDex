@@ -19,6 +19,13 @@ public sealed record PersonaCard(
 // One persisted turn in a conversation (Ts = ISO timestamp, optional / null in pure tests).
 public sealed record ChatTurn(string Role, string Content, string? Ts);
 
+// One retrieved knowledge-base chunk for context-injection (the KB's analog of a LoreEntry). Source = the doc
+// filename the chunk came from (labels the chunk in the injected block); Content = the chunk text; Score = the
+// cosine relevance (descending). Produced by the doc_index.py `doc_search` retrieval and rendered as ONE
+// bounded "[Documents]" system turn by ChatPrompt.Build — never a 5th chat tool (context-injection, like the
+// Lorebook, is unconditional, costs zero agent hops, and works on the non-tool send/stream paths too).
+public sealed record DocChunk(string Source, string Content, double Score);
+
 // The pure, unit-tested assembly of what reaches llama-swap: a persona system bundle + a most-recent-wins
 // trimmed history + the new user turn, as an OpenAI message[]. This is the single source of truth for the
 // prompt; the live LLM call (LocalLlm.ChatTurnsAsync) is a thin wrapper over the array this produces.
@@ -41,7 +48,8 @@ public static class ChatPrompt
     // shape Vision.cs/LocalLlm.ChatVisionAsync send (same llama-swap vision path). When null/empty the user turn
     // stays the plain-string content, preserving the EXACT pre-P5 output. History turns are always plain strings.
     public static List<object> Build(PersonaCard? card, IReadOnlyList<ChatTurn> history, string userMessage,
-        int historyTurnBudget, IReadOnlyList<LoreEntry>? activeLore = null, string? imageDataUrl = null)
+        int historyTurnBudget, IReadOnlyList<LoreEntry>? activeLore = null, string? imageDataUrl = null,
+        IReadOnlyList<DocChunk>? activeDocs = null)
     {
         var msgs = new List<object> { new { role = "system", content = SystemBundle(card) } };
 
@@ -54,6 +62,13 @@ public static class ChatPrompt
             if (lore.Length > 0)
                 msgs.Add(new { role = "system", content = "[World Info]\n" + lore });
         }
+
+        // KB: one bounded [Documents] system turn — the sibling of [World Info] — placed right after it and still
+        // BEFORE history (only when the conversation has retrieved docs). A null/empty list adds nothing, so the
+        // no-KB output is byte-for-byte the prior output. DocsBlock applies the (DocsMaxChunks, DocsMaxChars) cap.
+        var docs = DocsBlock(activeDocs);
+        if (docs.Length > 0)
+            msgs.Add(new { role = "system", content = "[Documents]\n" + docs });
 
         foreach (var t in RecentTurns(history, historyTurnBudget))
             msgs.Add(new { role = NormalizeRole(t.Role), content = t.Content.Trim() });
@@ -83,6 +98,58 @@ public static class ChatPrompt
         if (kept.Count > budget)
             kept = kept.Skip(kept.Count - budget).ToList();
         return kept;
+    }
+
+    // KB context-block caps (the precedent is Chat's LoreMaxEntries/LoreMaxChars): at most this many retrieved
+    // chunks, and a cumulative char budget so the injected block can't blow past max_tokens across turns.
+    public const int DocsMaxChunks = 5;
+    public const int DocsMaxChars = 4000;
+
+    // A pathological source name can't dominate the budget: the "## <source>\n" label is capped to this many
+    // chars of the source before the budget accounting (the ellipsis-truncated body still carries the content).
+    private const int DocsMaxSourceChars = 120;
+
+    // PURE + bounded: render the top retrieved chunks into the "[Documents]" block body, top-K capped to
+    // DocsMaxChunks and the cumulative text capped to DocsMaxChars. Each chunk is labelled with its source
+    // filename. A null/empty list yields "" (so Build injects nothing — the no-KB path is byte-for-byte). Total +
+    // side-effect-free, so the budget can't silently drift — the same discipline the [World Info] block follows.
+    //
+    // The DocsMaxChars budget is HONEST: it counts the per-chunk "## <source>\n" header AND the inter-chunk
+    // newline, not just the chunk CONTENT — so the emitted block is genuinely <= DocsMaxChars even with a long
+    // source name (the prior `used += body.Length`-only accounting could overshoot by ~1KB).
+    public static string DocsBlock(IReadOnlyList<DocChunk>? docs)
+    {
+        if (docs is not { Count: > 0 }) return "";
+        var sb = new StringBuilder();
+        var used = 0;
+        var shown = 0;
+        foreach (var d in docs)
+        {
+            if (d is null || string.IsNullOrWhiteSpace(d.Content)) continue;
+            if (shown >= DocsMaxChunks || used >= DocsMaxChars) break;
+
+            // Fixed (non-body) cost of emitting this chunk, charged against the SAME budget as the content: the
+            // inter-chunk newline (every chunk after the first) + the "## <source>\n" header (when a source exists).
+            var src = string.IsNullOrWhiteSpace(d.Source) ? "" : d.Source.Trim();
+            if (src.Length > DocsMaxSourceChars) src = src[..DocsMaxSourceChars];
+            var overhead = (sb.Length > 0 ? 1 : 0) + (src.Length > 0 ? src.Length + 4 : 0);   // "## " + name + "\n"
+
+            // No room even for this chunk's header+newline (let alone any body) => stop cleanly.
+            if (used + overhead >= DocsMaxChars) break;
+            var bodyBudget = DocsMaxChars - used - overhead;
+
+            var body = d.Content.Trim();
+            // Truncate so body + the "…" sentinel together stay within bodyBudget (reserve the 1 ellipsis char),
+            // keeping the WHOLE emitted block genuinely <= DocsMaxChars (no +1 ellipsis overshoot).
+            if (body.Length > bodyBudget) body = body[..(bodyBudget - 1)] + "…";
+
+            if (sb.Length > 0) sb.Append('\n');
+            if (src.Length > 0) sb.Append("## ").Append(src).Append('\n');
+            sb.Append(body);
+            used += overhead + body.Length;
+            shown++;
+        }
+        return sb.ToString();
     }
 
     // Compose the system turn from the card's behavior + the user-identity block + few-shot examples. Falls

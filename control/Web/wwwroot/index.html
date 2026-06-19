@@ -103,6 +103,13 @@
     .toolsteps{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 5px}
     .toolsteps .tchip{display:inline-block;font-size:11px;color:var(--cyan);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #chatImagePicker .pcell:hover{border-color:var(--cyan)}
+    /* per-conversation KNOWLEDGE BASE (RAG): attach .txt/.md docs to a thread; relevant chunks auto-injected each turn */
+    #kbPanel summary .kbflag{display:none;margin-left:8px;font-size:10px;font-family:"Cascadia Mono",Consolas,monospace;color:#06121a;background:var(--cyan);border-radius:999px;padding:1px 8px;vertical-align:middle;font-weight:600}
+    #kbPanel.active summary .kbflag{display:inline-block}
+    #kbDocs{display:flex;flex-direction:column;gap:5px;margin:6px 0}
+    .kbrow{display:flex;align-items:center;gap:8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px}
+    .kbrow .kbname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .kbrow .kbchunks{color:var(--dim);font-family:"Cascadia Mono",Consolas,monospace;font-size:10px}
   </style>
 </head>
 <body>
@@ -301,6 +308,20 @@
           <div id="loreRows" style="margin-top:6px"></div>
         </div>
       </details>
+      <details id="kbPanel" style="margin:4px 0 8px">
+        <summary class="hint" style="cursor:pointer">+ knowledge base (chat with your documents)<span class="kbflag" title="RAG is active — relevant chunks of attached docs are injected each turn">RAG ON</span></summary>
+        <div style="margin-top:6px">
+          <p class="hint" id="kbHint" style="margin:0 0 6px">Attach .txt/.md docs to this conversation — relevant passages are auto-retrieved and injected each turn.</p>
+          <div id="kbDocs"></div>
+          <textarea id="kbText" class="kin" style="width:100%;min-height:60px;display:block" placeholder="paste document text… (or upload a .txt/.md below)"></textarea>
+          <div class="mods" style="margin-top:6px;align-items:center">
+            <input id="kbName" class="kin" style="width:200px" placeholder="source name (e.g. notes.md)">
+            <label class="xbtn" style="cursor:pointer">+ upload .txt/.md<input id="kbFile" type="file" accept=".txt,.md,text/plain,text/markdown" style="display:none" onchange="onKbFile(this)"></label>
+            <button class="ghost" onclick="attachDoc()">Attach</button>
+            <span class="hint" id="kbStatus"></span>
+          </div>
+        </div>
+      </details>
       <div id="chatLog"></div>
       <div class="row" style="align-items:flex-start;margin-top:8px">
         <textarea id="chatInput" placeholder="Message…  (Ctrl+Enter to send)" style="flex:1;min-height:72px"></textarea>
@@ -447,7 +468,7 @@
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
-      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); renderChatGuard(); document.getElementById('chatInput').focus(); }
+      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKb(); renderChatGuard(); document.getElementById('chatInput').focus(); }
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];
@@ -1317,6 +1338,71 @@
     }
     // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
     let _chatMsgs=[], _chatConv=null;
+    // ---- per-conversation KNOWLEDGE BASE (RAG "chat with your documents") ----
+    // The KB id IS the conversation id (_chatConv). A doc can only attach once the thread exists (has an id), which
+    // happens after the first turn — until then the panel prompts the user to send a message first. Endpoints:
+    //   POST   /api/chats/{id}/docs  {source,text} -> {source,chunks}  (503 embed down, 400 bad input)
+    //   GET    /api/chats/{id}/docs  -> [{source,chunks}]
+    //   DELETE /api/chats/{id}/docs/{source}
+    // Attached docs drive a subtle "RAG ON" flag on the panel summary so the user knows retrieval is active.
+    let _kbDocs=[];
+    // Reflect the attached-doc count on the panel: the cyan "RAG ON" flag + the doc list. No-doc threads look exactly
+    // as before (flag hidden, empty list). Mirrors the chat-mode lock reconcilers — single source of truth for UI.
+    function renderKb(){
+      const panel=document.getElementById('kbPanel'); if(panel) panel.classList.toggle('active', _kbDocs.length>0);
+      const wrap=document.getElementById('kbDocs'); if(!wrap) return; wrap.innerHTML='';
+      _kbDocs.forEach(d=>{
+        const row=document.createElement('div'); row.className='kbrow';
+        const nm=document.createElement('span'); nm.className='kbname'; nm.textContent=d.source; nm.title=d.source;
+        const ch=document.createElement('span'); ch.className='kbchunks'; ch.textContent=(d.chunks||0)+' chunk'+(d.chunks===1?'':'s');
+        const x=document.createElement('button'); x.className='xbtn'; x.textContent='remove'; x.onclick=()=>removeDoc(d.source);
+        row.appendChild(nm); row.appendChild(ch); row.appendChild(x); wrap.appendChild(row);
+      });
+    }
+    // Load the attached-doc list for the current thread. A brand-new (unsent) chat has no id yet → empty KB.
+    async function loadKb(){
+      _kbDocs=[];
+      if(_chatConv){
+        try{ const list=await (await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs')).json(); _kbDocs=Array.isArray(list)?list:[]; }catch{}
+      }
+      renderKb();
+    }
+    // Read a chosen .txt/.md into the paste box; default the source-name field to the filename if blank.
+    function onKbFile(input){
+      const f=input.files&&input.files[0]; if(!f) return;
+      const rd=new FileReader();
+      rd.onload=()=>{ document.getElementById('kbText').value=rd.result||''; const nm=document.getElementById('kbName'); if(!nm.value.trim()) nm.value=f.name; document.getElementById('kbStatus').textContent='loaded '+f.name+' — name it + Attach'; };
+      rd.readAsText(f);
+      input.value='';   // allow re-picking the same file
+    }
+    async function attachDoc(){
+      const status=document.getElementById('kbStatus');
+      if(!_chatConv){ status.textContent='send a message first to start this conversation, then attach docs'; return; }
+      const text=(document.getElementById('kbText').value||'').trim();
+      let source=(document.getElementById('kbName').value||'').trim();
+      if(!text){ status.textContent='paste text or upload a .txt/.md first'; return; }
+      if(!source) source='pasted.txt';
+      status.textContent='embedding…';
+      try{
+        const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({source, text})});
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok){ status.textContent=(j&&j.error)||(r.status===503?'embed server unavailable — switch to AGENT mode':'attach failed'); return; }
+        document.getElementById('kbText').value=''; document.getElementById('kbName').value='';
+        status.textContent='attached '+(j.source||source)+' ('+(j.chunks||0)+' chunks)';
+        await loadKb();
+      }catch{ status.textContent='attach request failed'; }
+    }
+    async function removeDoc(source){
+      const status=document.getElementById('kbStatus');
+      if(!_chatConv) return;
+      try{
+        const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs/'+encodeURIComponent(source),{method:'DELETE'});
+        if(!r.ok){ status.textContent='remove failed'; return; }
+        status.textContent='removed '+source;
+        await loadKb();
+      }catch{ status.textContent='remove request failed'; }
+    }
     function appendBubble(role,text){ const log=document.getElementById('chatLog');
       const b=$(`<div class="bub ${role}"></div>`);
       if(role==='assistant'){
@@ -1352,6 +1438,7 @@
       const log=document.getElementById('chatLog'); log.innerHTML='';
       _chatMsgs.forEach(m=>appendBubble(m.role==='assistant'?'assistant':'user', m.content));
       document.getElementById('chatHint').textContent='';
+      loadKb();   // surface any docs already attached to this thread (+ the RAG-active flag)
     }
     // Loaded persona cards (full PersonaCard objects from GET /api/personas) cached so readback can derive the
     // selected card's default voice with no extra fetch. Keyed by card name.
@@ -1449,7 +1536,7 @@
       try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
     }
     function newChat(){ _chatMsgs=[]; _chatConv=null; document.getElementById('chatLog').innerHTML='';
-      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); }
+      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); }
     function renderChatGuard(){
       const el=document.getElementById('chatGuard'); if(!el) return;
       if(state.llmActive){ el.innerHTML=''; return; }
@@ -1561,7 +1648,7 @@
       const bub=appendBubble('assistant', j.text);
       renderToolSteps(bub, j.steps);   // backend emits only `steps`
       hint.textContent='';
-      if(fresh) loadThreads();
+      if(fresh){ loadThreads(); loadKb(); }
     }
     // Non-streaming POST /api/chat — kept as the P2 transport fallback (real 503 contract).
     async function sendChatOnce(text,fresh,image){
@@ -1572,7 +1659,7 @@
       const j=await r.json();
       if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
       _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
-      if(fresh) loadThreads();
+      if(fresh){ loadThreads(); loadKb(); }
     }
     async function sendChat(){
       const inp=document.getElementById('chatInput'), hint=document.getElementById('chatHint');
@@ -1617,11 +1704,11 @@
         if(errored){ return; }
         if(!got){ bub.remove(); await sendChatOnce(text,fresh,image); return; }   // empty stream → fall back to the one-shot path
         _chatMsgs.push({role:'assistant',content:acc}); hint.textContent='';
-        if(fresh) loadThreads();
+        if(fresh){ loadThreads(); loadKb(); }
       }catch{
         // streaming transport threw: fall back to the non-streaming POST if no token landed, else surface a hint.
         if(!got){ bub.remove(); try{ await sendChatOnce(text,fresh,image); }catch{ hint.textContent='request failed'; } }
-        else { _chatMsgs.push({role:'assistant',content:acc}); hint.textContent=''; if(fresh) loadThreads(); }
+        else { _chatMsgs.push({role:'assistant',content:acc}); hint.textContent=''; if(fresh){ loadThreads(); loadKb(); } }
       }
     }
     function svcCard(s){

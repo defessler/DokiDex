@@ -43,6 +43,25 @@ public class ChatStoreTests
     }
 
     [Fact]
+    public void KbId_is_null_by_default_and_round_trips_when_a_doc_is_attached()
+    {
+        string? id = null;
+        try
+        {
+            var conv = ChatStore.NewConversation("doki", lorebook: null);
+            id = conv.Id;
+            Assert.Null(conv.KbId);   // a fresh thread has no attached KB (the no-KB chat path stays byte-for-byte)
+
+            // attaching a doc marks the thread (first slice: KbId == the conversation id).
+            Assert.True(ChatStore.Save(conv with { KbId = id }));
+            var loaded = ChatStore.Load(id);
+            Assert.NotNull(loaded);
+            Assert.Equal(id, loaded!.KbId);
+        }
+        finally { if (id is not null) ChatStore.Delete(id); }
+    }
+
+    [Fact]
     public void Generated_ids_are_unique()
     {
         var a = ChatStore.NewConversation("p", null);

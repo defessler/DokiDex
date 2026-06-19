@@ -370,7 +370,88 @@ public static class StudioHost
         api.MapGet("/chats", () => Results.Json(ChatStore.List()));
         api.MapGet("/chats/{id}", (string id) =>
             ChatStore.Load(id) is { } conv ? Results.Json(conv) : Results.NotFound());
-        api.MapDelete("/chats/{id}", (string id) => ChatStore.Delete(id) ? Results.Ok() : Results.NotFound());
+        // Deleting a conversation also drops its KB chunks from doc_index.db so a deleted-with-docs thread's
+        // vectors don't accumulate forever (the disk-leak fix). BEST-EFFORT: the cleanup runs AFTER the thread
+        // file is removed and can NEVER fail the delete — a down embed/index just leaves the rows for a later
+        // reset. KbId == the conversation id in the first slice; we read the stored KbId before deleting so a
+        // later named-KB slice still cleans the right scope.
+        api.MapDelete("/chats/{id}", async (string id, CancellationToken ct) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+            var kbId = string.IsNullOrWhiteSpace(conv.KbId) ? id : conv.KbId!;
+            if (!ChatStore.Delete(id)) return Results.NotFound();
+            try { await DocSearch.DeleteAsync(kbId, ct); } catch { /* never fail the delete on a KB-cleanup hiccup */ }
+            return Results.Ok();
+        });
+
+        // ---- per-conversation KNOWLEDGE BASE (RAG "chat with your documents"): attach/list/remove plain-text docs
+        // (.txt/.md, first slice) on a conversation. The KB id IS the conversation id (a doc attaches to a thread,
+        // not globally); ingest chunks+embeds via the :8090 embed server and stores in doc_index.db scoped by that
+        // id. RetrieveDocs then injects the top-K relevant chunks into ChatPrompt.Build each turn. Degrades like
+        // code_search: a down embed server makes ingest return Ok=false (surfaced here) and retrieval inject nothing
+        // (plain chat unchanged). The doc TEXT is sent in the JSON body (the browser reads the file client-side).
+        api.MapPost("/chats/{id}/docs", async (string id, DocAttachRequest body, HttpRequest req, CancellationToken ct) =>
+        {
+            // Reject a multi-MB body up front (Content-Length) so an oversized paste fails with a clean, clear
+            // error instead of buffering + timing the embed loop into a misleading 503. The char-level cap below
+            // (DocSearch.ValidateIngest) is the precise gate; this is the cheap byte-level outer guard.
+            if (req.ContentLength is long len && len > DocSearch.MaxDocBytes)
+                return Results.Json(new { error = $"document too large ({len} bytes) — split it or attach a smaller file." }, statusCode: 413);
+
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+
+            var source = (body?.Source ?? "").Trim();
+            var text = body?.Text ?? "";
+            if (source.Length == 0 || RecipeStore.SafeName(System.IO.Path.GetFileNameWithoutExtension(source)) is null)
+                return Results.BadRequest(new { error = "bad or missing source filename" });
+            if (string.IsNullOrWhiteSpace(text))
+                return Results.BadRequest(new { error = "empty document text" });
+
+            // Char-level cap: a too-long doc fails FAST with the clear validator message (never the 30s-timeout
+            // "start the embed server" 503). This mirrors what IngestAsync also enforces, surfaced here as a 413.
+            var tooBig = DocSearch.ValidateIngest(text);
+            if (tooBig is not null) return Results.Json(new { error = tooBig }, statusCode: 413);
+
+            // KB id == the conversation id (first slice). Ingest under it, then mark the thread attached (KbId set)
+            // so RetrieveDocs fires on subsequent turns. A failed ingest (embed server down) surfaces a 503.
+            var r = await DocSearch.IngestAsync(id, source, text, ct);
+            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+
+            if (string.IsNullOrWhiteSpace(conv.KbId))
+                ChatStore.Save(conv with { KbId = id });   // graceful: a save failure doesn't undo the ingest
+
+            return Results.Json(new { source, chunks = r.Chunks });
+        });
+
+        api.MapGet("/chats/{id}/docs", async (string id, CancellationToken ct) =>
+        {
+            if (ChatStore.Load(id) is null) return Results.NotFound();
+            var srcs = await DocSearch.SourcesAsync(id, ct);
+            return Results.Json(srcs.Select(s => new { source = s.source, chunks = s.chunks }));
+        });
+
+        api.MapDelete("/chats/{id}/docs/{source}", async (string id, string source, CancellationToken ct) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+            if (!await DocSearch.RemoveAsync(id, source, ct)) return Results.NotFound();
+
+            // If that was the LAST attached source, clear KbId so RetrieveDocs short-circuits (it otherwise keeps
+            // spawning a doc_search every turn over an empty KB). Best-effort: a sources-list/save hiccup never
+            // fails the remove the user already got. (The KB id IS the thread id in the first slice.)
+            if (!string.IsNullOrWhiteSpace(conv.KbId))
+            {
+                try
+                {
+                    var remaining = await DocSearch.SourcesAsync(id, ct);
+                    if (remaining.Count == 0) ChatStore.Save(conv with { KbId = null });
+                }
+                catch { /* leave KbId as-is on a cleanup hiccup; retrieval still degrades gracefully */ }
+            }
+            return Results.Ok();
+        });
 
         // ---- pending image-gen queued FROM CHAT (the generate_image tool's durable side; the create view surfaces
         // it so the user can pick it up after flipping the GPU to MEDIA). Id is server-generated => no client path. ----
