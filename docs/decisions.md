@@ -27,12 +27,10 @@ On-GPU load + image quality is the labeled remaining step (first full checkpoint
 kit vs the existing DiT/unet models).
 
 **Remaining model-adds = gated follow-ups (NOT blind-shipped, per verify-before-ship):**
-FLUX.2 Klein, Qwen-Image (GGUF, needs the city96 ComfyUI-GGUF node + TE/VAE), Wan 2.2 A14B
-GGUF (dual-expert high/low-noise recipe DokiDex doesn't have), PuLID-Flux + InfiniteTalk
-(ComfyUI custom-node / sidecar integrations), TTS-Audio-Suite (a ComfyUI-node vs the
-standalone Chatterbox `:8004` architecture decision), and Nunchaku NVFP4. Each needs
-multi-component/node integration, a recipe tuning pass, or an architecture decision that
-requires on-GPU verification — none a clean unit-testable slice. Full map in
+PuLID-Flux + InfiniteTalk (ComfyUI custom-node / sidecar integrations), TTS-Audio-Suite
+(a ComfyUI-node vs the standalone Chatterbox `:8004` architecture decision), and Nunchaku
+NVFP4. Each needs multi-component/node integration, a recipe tuning pass, or an architecture
+decision that requires on-GPU verification — none a clean unit-testable slice. Full map in
 `docs/superpowers/specs/2026-06-18-ai-platform-models-workflows-research.md`.
 
 **Update — the music `xl_base` quality tier SHIPPED as a gated integration** (branch
@@ -68,6 +66,25 @@ doc-sourced (uni_pc/simple + 20 steps carried from the 5B as the start point, tu
 node** install / GGUF arch auto-detect. Decision-rule branch taken: dual-expert wiring IS doc-sourced
 → wire it fully (gated downloads + catalog + `-Quality` arm on both sides, TDD), with the three derived/
 unsourced items labeled as the on-GPU step.
+
+**Update — the Qwen-Image base GGUF (in-image TEXT) tier SHIPPED as a gated integration** (moved off
+the gated-follow-ups list above), mirroring the FLUX.2 Klein / Wan A14B model-add discipline. The
+**Qwen-Image base GGUF** (`Qwen_Image-Q4_K_M.gguf`, ~13.1GB — QuantStack's Q4_K_M of the NON-distilled
+t2i unet, the strong in-image-text model) is added as a gated **`-Models full`** download + a
+`model-catalog.json` row (so it surfaces in the Studio picker / SwarmUI's native picker / via `-Model`)
++ an **additive, image-only `Get-ModelFamilyOverride`** that applies **steps 20 / cfg 4 / euler / simple**
+when a `Qwen_Image-*.gguf` checkpoint is selected. The override is doc/template-sourced: `steps≈20` +
+`cfg=4` are SwarmUI's `Model Support.md` quality/speed band ("CFG=4 ... at a performance cost", "normal
+~20 works"), and `euler`/`simple` are the official `image_qwen_image.json` KSampler. It REUSES the
+**Qwen2.5-VL TE + Qwen-Image VAE already installed by the Qwen-Image-Edit-2511 lines** (`$te`/`$vae` — no
+re-download; only the unet is new, NOT the GGUF repo's redundant 254MB VAE). Opt-in only: selecting any
+other model leaves every existing path byte-for-byte unchanged (the override returns `@{}`), and no
+recipe default / download URL / catalog row / test assertion changed.
+**On-GPU / LABELED confirms (render-unverified at rest — no GPU in CI):** (1) the **GGUF arch
+auto-detect** + the one-time **city96 ComfyUI-GGUF node** install popup that SwarmUI raises on first GGUF
+load (headless-accepted via the existing `InstallConfirmWS` path); (2) the exact **base step/cfg** within
+the doc-supported **20–50 steps / cfg 4** band (the 20/4 start point, tune live); (3) the live **32GB fit**
++ render quality. The override knobs are additive + unit-tested at rest; output quality is the on-GPU step.
 
 Released as **v0.7.0** (`feat/chat-phases` → `main`).
 

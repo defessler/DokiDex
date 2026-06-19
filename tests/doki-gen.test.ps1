@@ -245,6 +245,33 @@ Assert ($bKleinEdit.steps -eq 20 -and $bKleinEdit.cfgscale -eq 2.5) "Klein under
 Assert (-not $bKleinEdit.ContainsKey('scheduler'))               "Klein under -Edit: no Flux2 scheduler injected (override guarded off non-image)"
 Assert (-not $bKleinEdit.ContainsKey('sampler'))                 "Klein under -Edit: no euler sampler injected (edit recipe untouched)"
 
+# --- Qwen-Image (BASE, in-image text) GGUF family override: same additive contract as FLUX.2 Klein ---
+# The BASE Qwen-Image GGUF is the NON-distilled t2i unet, so it needs a REAL CFG (cfg 1 only suits the
+# distilled/Lightning preset). steps=20 / cfg=4 are the SwarmUI-doc-blessed quality/speed sweet spot;
+# sampler=euler + scheduler=simple are doc/template-confirmed (image_qwen_image.json KSampler). Keyed on the
+# QuantStack underscore filename 'Qwen_Image-*.gguf' so it can NEVER collide with the lowercase Edit-2511
+# safetensors (which routes via -Edit / Kind=edit and is guarded off anyway).
+Assert ((Get-ModelFamilyOverride 'qwen_image_edit_2511_fp8mixed.safetensors').Count -eq 0) "family override: Qwen-Image-EDIT safetensors -> no override (distinct from base GGUF)"
+$ovQ = Get-ModelFamilyOverride 'Qwen_Image-Q4_K_M.gguf'
+Assert ($ovQ.steps -eq 20 -and $ovQ.cfgscale -eq 4)             "family override: Qwen-Image base GGUF -> 20 steps / cfg 4 (SwarmUI-doc band)"
+Assert ($ovQ.sampler -eq 'euler' -and $ovQ.scheduler -eq 'simple') "family override: Qwen-Image base GGUF -> euler / simple (template-confirmed)"
+Assert ((Get-ModelFamilyOverride 'QWEN_IMAGE-Q4_K_M.GGUF').sampler -eq 'euler') "family override: Qwen-Image case-insensitive filename match"
+# -Kind guard (defense-in-depth): a Qwen base GGUF hand-picked under -Edit/-Video must NOT inherit the
+# image override (otherwise it would clobber that kind's recipe). Image kind (default) applies it.
+Assert ((Get-ModelFamilyOverride 'Qwen_Image-Q4_K_M.gguf' -Kind image).Count -gt 0)  "family override: Qwen GGUF under IMAGE kind -> override applies"
+Assert ((Get-ModelFamilyOverride 'Qwen_Image-Q4_K_M.gguf' -Kind edit).Count -eq 0)   "family override: Qwen GGUF under EDIT kind -> NO override (edit recipe untouched)"
+Assert ((Get-ModelFamilyOverride 'Qwen_Image-Q4_K_M.gguf' -Kind video).Count -eq 0)  "family override: Qwen GGUF under VIDEO kind -> NO override (non-image guarded)"
+
+# --- Build-GenBody integration: selecting the Qwen-Image base GGUF rewrites the Z-Image recipe knobs ---
+$bQwen = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Model 'Qwen_Image-Q4_K_M.gguf'
+Assert ($bQwen.model -eq 'Qwen_Image-Q4_K_M.gguf')              "Qwen body: -Model swaps the checkpoint"
+Assert ($bQwen.steps -eq 20 -and $bQwen.cfgscale -eq 4)         "Qwen body: overrides steps=20 / cfg=4 (over Z-Image recipe)"
+Assert ($bQwen.sampler -eq 'euler' -and $bQwen.scheduler -eq 'simple') "Qwen body: overrides sampler=euler / scheduler=simple"
+# DESIGN CHOICE: unlike FLUX.2 Klein, Qwen-Image accepts a negative fine at CFG 4, so the Z-Image curated
+# negative is KEPT (NOT dropped). This is the conservative default; the official card's empty-negative is an
+# acceptable alternative but removing a working negative is not required and Klein behaviour stays untouched.
+Assert ($bQwen.negativeprompt -match 'worst quality')          "Qwen body: Z-Image curated negative KEPT (Qwen runs fine with a negative at CFG 4)"
+
 # --- Build-GenBody: user -Negative appends to (image) / sets (else) the negativeprompt ---
 $bNegImg = Build-GenBody -Recipe (Get-GenRecipe -Kind image) -PromptFields (Get-GenPromptFields -Kind image -Idea 'x' -Raw) -SessionId 's' -Negative 'extra limbs'
 Assert ($bNegImg.negativeprompt -match 'worst quality' -and $bNegImg.negativeprompt -match 'extra limbs') "-Negative -> appended to the recipe negative (image)"

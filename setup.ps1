@@ -563,6 +563,15 @@ if ($Models -eq "full") {
     Get-Model "$qbase/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"        (Join-Path $te   "qwen_2.5_vl_7b_fp8_scaled.safetensors")
     Get-Model "$qbase/vae/qwen_image_vae.safetensors"                             (Join-Path $vae  "qwen_image_vae.safetensors")
 
+    # Qwen-Image BASE (strong in-image TEXT) — the NON-distilled t2i unet as a QuantStack Q4_K_M GGUF
+    # (~13.1GB). SwarmUI auto-detects the GGUF arch; on first GGUF load it prompts a one-time install-support
+    # popup (autoinstalls city96/ComfyUI-GGUF), accepted headlessly via the existing InstallConfirmWS path
+    # (5e). This is a DIFFERENT model from Edit-2511 above; it REUSES the Qwen2.5-VL TE + Qwen-Image VAE already
+    # pulled by the two lines above ($te/$vae), so ONLY the unet is new (do NOT pull the GGUF repo's redundant
+    # 254MB VAE). GATED on-GPU (render-unverified at rest): the GGUF arch detect + node popup + live 32GB fit.
+    $qimggguf = "https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main"
+    Get-Model "$qimggguf/Qwen_Image-Q4_K_M.gguf"                                  (Join-Path $diff "Qwen_Image-Q4_K_M.gguf")
+
     # Music / song generation: ACE-Step 1.5 — SwarmUI-NATIVE audio model (class AceStep15).
     # XL base = max quality, turbo = fast preset. The qwen ace15 text-encoders auto-download
     # on first gen; the ace 1.5 VAE is provided here. (ACE-Step 1.5, NOT the v1 all-in-one.)

@@ -105,6 +105,17 @@ public class GenCliTests
     }
 
     [Fact]
+    public void Qwen_image_gguf_model_is_forwarded_verbatim_params_stay_in_powershell()
+    {
+        // Qwen-Image BASE (in-image-text) GGUF needs euler + the 'simple' scheduler + steps 20 / cfg 4 (it's the
+        // NON-distilled t2i unet, so a real CFG). Those params are computed in doki-gen.ps1's Build-GenBody family
+        // override keyed on this exact filename — C# only plumbs the checkpoint. PARITY contract: the exact GGUF
+        // filename must reach -Model untouched (so the PS override fires).
+        var a = GenCli.BuildArgs(new GenRequest("x", "image", Model: "Qwen_Image-Q4_K_M.gguf", OutPath: "o"));
+        var i = a.IndexOf("-Model"); Assert.True(i >= 0); Assert.Equal("Qwen_Image-Q4_K_M.gguf", a[i + 1]);
+    }
+
+    [Fact]
     public void ControlNet_units_serialize_to_one_json_arg_on_image_edit()
     {
         var a = GenCli.BuildArgs(new GenRequest("x", "image",

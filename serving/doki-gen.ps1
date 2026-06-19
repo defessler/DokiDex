@@ -226,6 +226,18 @@ function Get-ModelFamilyOverride {
         if ($Model -like '*base*') { return @{ steps = 20; cfgscale = 5; sampler = 'euler'; scheduler = 'Flux2' } }
         else                       { return @{ steps = 4;  cfgscale = 1; sampler = 'euler'; scheduler = 'Flux2' } }
     }
+    # Qwen-Image BASE (in-image-text) GGUF — the NON-distilled t2i unet, so it needs a REAL CFG (cfg 1 only
+    # suits the distilled/Lightning preset). steps=20/cfg=4 are the SwarmUI-doc-blessed quality/speed band
+    # (Model Support.md: "CFG=4 ... at a performance cost", "normal ~20 works"); sampler=euler + scheduler=
+    # simple are doc/template-confirmed (the official image_qwen_image.json KSampler). The match can't collide
+    # with the Edit-2511 checkpoint (qwen_image_edit_2511_fp8mixed.safetensors, routed via -Edit): -like is
+    # case-INSENSITIVE, so the real discriminators are the hyphen in 'Qwen_Image-*' (the Edit file has an
+    # underscore after 'image', not a hyphen) + the '.gguf' extension (Edit is .safetensors) — the Edit name
+    # fails BOTH. ON-GPU NOTE (render-unverified at rest — no GPU in CI): the GGUF arch auto-detect + the
+    # one-time city96/ComfyUI-GGUF node install popup (headless-accepted via setup.ps1's InstallConfirmWS) +
+    # the exact step/cfg within the doc-supported 20-50 / cfg 4 band + the live 32GB fit are the confirms; the
+    # values below are additive (image-kind only) so every non-Qwen path stays byte-for-byte unchanged.
+    if ($Model -like 'Qwen_Image-*.gguf') { return @{ steps = 20; cfgscale = 4; sampler = 'euler'; scheduler = 'simple' } }
     return @{}
 }
 

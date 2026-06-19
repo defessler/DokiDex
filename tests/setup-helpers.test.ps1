@@ -189,6 +189,26 @@ try {
         Assert ($full -match '^https://huggingface\.co/[^/]+/[^/]+/resolve/main/.+\.gguf$') "Wan A14B GGUF: $($spec.File) resolves to a well-formed HF resolve/main/*.gguf URL"
     }
 
+    Write-Host "`nQwen-Image base GGUF (-Models full): QuantStack Q4_K_M t2i unet (the in-image-text image tier)"
+    # The Qwen-Image BASE (strong in-image TEXT) t2i unet, a QuantStack Q4_K_M GGUF (~13.1GB), HF-tree-verified.
+    # It REUSES the Qwen2.5-VL TE + Qwen-Image VAE already pulled by the Edit-2511 block ($te/$vae targets), so
+    # ONLY the unet is new. Pin it by local filename, that it rides a $qimggguf QuantStack base, and that the
+    # base is a well-formed HF resolve/main URL. (Resolve 302->Xet CDN, content-disposition filename verified.)
+    $qimggBase = ($ast.FindAll({ param($x)
+        $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $x.Left.Extent.Text -eq '$qimggguf' }, $true) | Select-Object -First 1)
+    Assert ($null -ne $qimggBase) "Qwen-Image GGUF: setup.ps1 defines a `$qimggguf base URL var"
+    $qimggUrl = if ($qimggBase) { $qimggBase.Right.Extent.Text.Trim('"') } else { '' }
+    Assert ($qimggUrl -match '^https://huggingface\.co/QuantStack/Qwen-Image-GGUF/resolve/main$') "Qwen-Image GGUF: `$qimggguf = QuantStack Qwen-Image-GGUF resolve/main URL"
+    $eQ = $entries | Where-Object { $_.File -eq 'Qwen_Image-Q4_K_M.gguf' } | Select-Object -First 1
+    Assert ($null -ne $eQ)                       "Qwen-Image GGUF: Qwen_Image-Q4_K_M.gguf is wired as a Get-Model entry"
+    Assert ($eQ -and $eQ.Url -match '(?i)\$qimggguf/') "Qwen-Image GGUF: URL hangs off the `$qimggguf QuantStack base"
+    $qfull = ($eQ.Url -replace '(?i)\$qimggguf', $qimggUrl).Trim('"')
+    Assert ($qfull -match '^https://huggingface\.co/[^/]+/[^/]+/resolve/main/.+\.gguf$') "Qwen-Image GGUF: resolves to a well-formed HF resolve/main/*.gguf URL"
+    # the Qwen-Image BASE t2i unet must land in diffusion_models/ (NOT re-download a TE/VAE — those ride the
+    # Edit-2511 block's $te/$vae targets; a second VAE under a different name would be a redundant duplicate).
+    Assert ($eQ -and $eQ.File -eq 'Qwen_Image-Q4_K_M.gguf') "Qwen-Image GGUF: saves under the canonical QuantStack local filename"
+
     # every Get-Model lands a UNIQUE local filename (a duplicate would make one model silently shadow another)
     $dupes = $entries | Where-Object { $_.File } | Group-Object File | Where-Object { $_.Count -gt 1 }
     Assert ($dupes.Count -eq 0) "no two Get-Model entries collide on the same local filename$(if ($dupes) { ' (dupes: ' + (($dupes | ForEach-Object { $_.Name }) -join ', ') + ')' })"
