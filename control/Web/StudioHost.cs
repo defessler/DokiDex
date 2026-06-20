@@ -445,6 +445,18 @@ public static class StudioHost
             ctx.Response.Headers["X-Accel-Buffering"] = "no";
             var ct = ctx.RequestAborted;
 
+            // OPTIONAL transient override of persona/tier for THIS resend (absent/empty body => v0.22 behavior).
+            // Read defensively: a missing or malformed body must not break regenerate (graceful => no override).
+            ChatRegenerateRequest? ovr = null;
+            try
+            {
+                if (ctx.Request.ContentLength is > 0)
+                    ovr = await ctx.Request.ReadFromJsonAsync<ChatRegenerateRequest>(ct);
+            }
+            catch { ovr = null; }
+            var ovrPersona = ChatEdit.NormalizeOverride(ovr?.Persona);
+            var ovrTier = ChatEdit.NormalizeOverride(ovr?.Tier);
+
             var conv = ChatStore.Load(id);
             if (conv is null)
             {
@@ -470,7 +482,7 @@ public static class StudioHost
             // Resend over the EXISTING streaming path (byte-for-byte). Persona/Tier carried from the stored thread.
             // KNOWN LIMITATION (FIX 4b): a regenerated turn that originally carried a gallery Image re-runs TEXT-ONLY —
             // ChatTurn persists only role/content (no image), so there is nothing on disk to re-attach here.
-            var resend = new ChatRequest(Conversation: conv.Id, Persona: conv.Persona, Message: lastUser, Tier: null);
+            var resend = new ChatRequest(Conversation: conv.Id, Persona: ovrPersona ?? conv.Persona, Message: lastUser, Tier: ovrTier);
             var any = false;
             try
             {
@@ -525,6 +537,25 @@ public static class StudioHost
             var mutated = conv with { Messages = ChatEdit.EditTurn(conv.Messages, index, body!.Content ?? "") };
             ChatStore.Save(mutated);
             return Results.Json(mutated);
+        });
+
+        // BRANCH a thread into a NEW conversation (non-destructive fork — the ORIGINAL is never re-saved). Keep the
+        // PREFIX up to AND INCLUDING the chosen turn (ChatEdit.BranchAtTurn), copy Persona/Lorebook (via
+        // NewConversation) + KbId (read-only chunk share), mint a fresh server id, Save, and return { id } so the
+        // SPA opens the fork. 404 on a missing thread; 400 on an out-of-range index (same index space as /edit).
+        api.MapPost("/chats/{id}/branch", (string id, ChatBranchRequest body) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+
+            var index = body?.Index ?? -1;
+            if (index < 0 || index >= conv.Messages.Count) return Results.BadRequest(new { error = "index out of range" });
+
+            var prefix = ChatEdit.BranchAtTurn(conv.Messages, index);                 // keep through the chosen turn
+            var fork = ChatStore.NewConversation(conv.Persona, conv.Lorebook)         // fresh id + Created=now
+                           with { Messages = prefix, KbId = conv.KbId };              // carry the prefix + the KB scope
+            ChatStore.Save(fork);
+            return Results.Json(new { id = fork.Id });
         });
 
         // DELETE one turn (pure mutation + Save only — no LLM). The pairing rule lives in DeleteTurn: a user turn

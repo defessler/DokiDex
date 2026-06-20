@@ -179,4 +179,102 @@ public class ChatEditTests
         Assert.Equal(-1, ChatEdit.LastUserTurnIndex(Thread(A("a1"))));
         Assert.Equal(-1, ChatEdit.LastUserTurnIndex(Thread()));
     }
+
+    // ---- BranchAtTurn: the non-destructive fork prefix (keep UP TO AND INCLUDING the chosen index) ------------
+
+    [Fact]
+    public void Branch_keeps_through_the_chosen_turn_inclusive()
+    {
+        var t = Thread(U("q1"), A("a1"), U("q2"), A("a2"));
+        var r = ChatEdit.BranchAtTurn(t, 1);   // keep q1 + a1 (through index 1)
+        Assert.Equal(2, r.Count);
+        Assert.Equal("q1", r[0].Content);
+        Assert.Equal("a1", r[1].Content);
+    }
+
+    [Fact]
+    public void Branch_at_the_first_turn_keeps_just_that_turn()
+    {
+        var t = Thread(U("q1"), A("a1"), U("q2"), A("a2"));
+        var r = ChatEdit.BranchAtTurn(t, 0);
+        Assert.Single(r);
+        Assert.Equal("q1", r[0].Content);
+    }
+
+    [Fact]
+    public void Branch_at_the_last_turn_keeps_the_whole_thread()
+    {
+        var t = Thread(U("q1"), A("a1"), U("q2"), A("a2"));
+        var r = ChatEdit.BranchAtTurn(t, 3);
+        Assert.Equal(4, r.Count);
+        Assert.Equal("a2", r[3].Content);
+    }
+
+    [Fact]
+    public void Branch_does_not_mutate_the_source_thread()
+    {
+        var t = Thread(U("q1"), A("a1"), U("q2"), A("a2"));
+        ChatEdit.BranchAtTurn(t, 1);
+        Assert.Equal(4, t.Count);   // original untouched
+        Assert.Equal("q1", t[0].Content);
+        Assert.Equal("a2", t[3].Content);
+    }
+
+    [Fact]
+    public void Branch_out_of_range_high_keeps_the_whole_thread()
+    {
+        // index+1 > Count => TruncateToTurn returns the input unchanged (a full-thread fork is the safe default).
+        var t = Thread(U("q1"), A("a1"));
+        var r = ChatEdit.BranchAtTurn(t, 99);
+        Assert.Equal(2, r.Count);
+    }
+
+    [Fact]
+    public void Branch_at_int_max_keeps_the_whole_thread_not_empty()
+    {
+        // Defensive: index == int.MaxValue would make the naive index+1 overflow to int.MinValue, and
+        // TruncateToTurn(int.MinValue) returns empty — the OPPOSITE of the documented "out-of-range high =>
+        // full-thread fork". The overflow guard keeps the whole thread (a full fork is the safe default).
+        var t = Thread(U("q1"), A("a1"));
+        var r = ChatEdit.BranchAtTurn(t, int.MaxValue);
+        Assert.Equal(2, r.Count);
+        Assert.Equal("q1", r[0].Content);
+        Assert.Equal("a1", r[1].Content);
+    }
+
+    // ---- NormalizeOverride: the regenerate per-resend persona/tier override normalization --------------------
+    // (a blank/absent override => null => keep the thread's stored persona+default tier; a real value passes
+    // through trimmed). Extracted from the inline endpoint logic so the resend's Persona/Tier-resolution
+    // contract is explicit + covered, mirroring how BranchAtTurn was extracted + tested.
+
+    [Fact]
+    public void NormalizeOverride_null_yields_null()
+    {
+        Assert.Null(ChatEdit.NormalizeOverride(null));
+    }
+
+    [Fact]
+    public void NormalizeOverride_empty_yields_null()
+    {
+        Assert.Null(ChatEdit.NormalizeOverride(""));
+    }
+
+    [Fact]
+    public void NormalizeOverride_whitespace_yields_null()
+    {
+        Assert.Null(ChatEdit.NormalizeOverride("  "));
+    }
+
+    [Fact]
+    public void NormalizeOverride_trims_surrounding_whitespace()
+    {
+        Assert.Equal("custom", ChatEdit.NormalizeOverride("  custom "));
+    }
+
+    [Fact]
+    public void NormalizeOverride_passes_a_real_value_through()
+    {
+        Assert.Equal("Aria", ChatEdit.NormalizeOverride("Aria"));
+        Assert.Equal("fast", ChatEdit.NormalizeOverride("fast"));
+    }
 }

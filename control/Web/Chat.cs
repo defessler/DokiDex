@@ -27,6 +27,16 @@ public sealed record ChatRequest(
 // SPA's _chatMsgs index). The endpoint validates Index in range AND that it points at a user turn before Save.
 public sealed record ChatTurnEditRequest(int Index, string? Content);
 
+// The OPTIONAL body for POST /api/chats/{id}/regenerate: a transient per-resend OVERRIDE of the persona and/or
+// tier. Both null (or an absent body) => regenerate with the thread's stored Persona + the default tier (the
+// v0.22 behavior, byte-for-byte). Persona names a saved card (null => keep conv.Persona); Tier names an LlmTiers
+// tier (null => default). The override is transient: the stored conv.Persona on disk is NOT rewritten.
+public sealed record ChatRegenerateRequest(string? Persona, string? Tier);
+
+// The body for POST /api/chats/{id}/branch: the 0-based conv.Messages index to fork at (same index space as
+// /edit and /turn/{index}). The fork keeps the prefix UP TO AND INCLUDING this turn (ChatEdit.BranchAtTurn).
+public sealed record ChatBranchRequest(int Index);
+
 // The persona-chat orchestrator (mirrors Director/Rewriter shape): load the card + the conversation, assemble
 // the prompt via the pure ChatPrompt.Build, run the multi-turn LLM call, persist BOTH turns, and return a
 // Director-style Result. The network call degrades gracefully (LLM down => Ok=false + the canonical message),

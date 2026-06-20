@@ -65,6 +65,31 @@ public static class ChatEdit
         return result;
     }
 
+    // The BRANCH prefix: keep turns [0..index] — everything UP TO AND INCLUDING the chosen turn — for a
+    // non-destructive fork. Reuses TruncateToTurn with index+1 (TruncateToTurn keeps STRICTLY before its arg, so
+    // index+1 keeps through index). Out-of-range is graceful: index >= Count keeps the WHOLE thread (a full-thread
+    // fork is the safe default), index < 0 yields empty. The source list is never mutated.
+    //   Defensive guard: when index >= thread.Count we keep the whole thread DIRECTLY rather than computing
+    //   index+1 — at index == int.MaxValue that addition would overflow to int.MinValue and TruncateToTurn would
+    //   return EMPTY (the opposite of the documented full-thread fork). Bailing on index >= Count first makes the
+    //   helper total for every int, matching the doc (unreachable via the endpoint, whose index>=Count 400-guard
+    //   rejects it first, but the public primitive must hold on its own).
+    public static IReadOnlyList<ChatTurn> BranchAtTurn(IReadOnlyList<ChatTurn> thread, int index)
+    {
+        if (thread is null) return Array.Empty<ChatTurn>();
+        if (index >= thread.Count) return thread;   // full-thread fork (also avoids the index+1 overflow)
+        return TruncateToTurn(thread, index + 1);
+    }
+
+    // The regenerate per-resend OVERRIDE normalizer (PURE, no disk/GPU): a single field of the optional
+    // ChatRegenerateRequest body (persona OR tier) is reduced to a clean override-or-null. A null / empty /
+    // whitespace value => null => "no override" => the resend keeps the thread's STORED persona + the default
+    // tier (the v0.22 behavior, byte-for-byte); a real value is trimmed and passed through as the override.
+    // Extracted from the inline endpoint logic (was `IsNullOrWhiteSpace(x) ? null : x.Trim()` per field) so the
+    // resend's Persona/Tier-resolution contract is explicit + unit-tested, exactly as BranchAtTurn was.
+    public static string? NormalizeOverride(string? raw)
+        => string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+
     // The regenerate ANCHOR: the index of the LAST user turn (scan from the end for Role == "user"), or -1 when
     // the thread has no user turn. Regenerate-last truncates the persisted thread to THIS index (dropping the
     // last user turn AND its assistant reply) and resends with that user turn's content as the new userMessage —

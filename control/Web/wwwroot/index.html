@@ -1831,6 +1831,10 @@
         const ed=$(`<button type="button" title="Edit & resend" aria-label="Edit">✎</button>`);
         ed.onclick=()=>editTurn(b); acts.appendChild(ed);
       }
+      // BRANCH a NEW chat from this turn — valid on ANY turn (unlike ↻, which is last-assistant-only), since a fork
+      // keeps the prefix through whichever turn was chosen. Non-destructive: the original thread stays open/unchanged.
+      const br=$(`<button type="button" title="Branch a new chat from here" aria-label="Branch">⑂</button>`);
+      br.onclick=()=>branchTurn(b); acts.appendChild(br);
       const del=$(`<button type="button" title="Delete this turn" aria-label="Delete">🗑</button>`);
       del.onclick=()=>deleteTurn(b); acts.appendChild(del);
       b.appendChild(acts);
@@ -1878,6 +1882,21 @@
         loadThreads();
       }catch{ hint.textContent='edit failed'; }
     }
+    // BRANCH a NEW conversation from this turn: POST /api/chats/{id}/branch {index} forks a fresh thread carrying
+    // the prefix UP TO AND INCLUDING this turn (+ the source persona/lorebook/KbId). The ORIGINAL stays unchanged
+    // server-side, so we just OPEN the returned fork id (and refresh the thread list to show it). Non-destructive.
+    async function branchTurn(b){
+      if(!_chatConv || b._idx==null) return;
+      const hint=document.getElementById('chatHint');
+      try{
+        const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/branch',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:b._idx})});
+        if(!r.ok){ hint.textContent='branch failed'; return; }
+        const j=await r.json();
+        if(j && j.id){ await openThread(j.id); loadThreads(); hint.textContent='branched a new chat'; }
+        else hint.textContent='branch failed';
+      }catch{ hint.textContent='branch failed'; }
+    }
     // REGENERATE the last reply: server truncates back to the last user turn + re-streams over the existing path.
     async function regenerateTurn(b){
       if(!_chatConv) return;
@@ -1897,7 +1916,12 @@
       // post-'done' reload (we never client-push it into _chatMsgs; the reload re-derives the authoritative thread).
       const bub=appendBubble('assistant','', null); let acc='', got=false;
       try{
-        const res=await fetch('/api/chats/'+encodeURIComponent(id)+'/regenerate',{method:'POST'});
+        // REGENERATE-WITH-OPTIONS (LIGHT): carry the CURRENT Persona/Speed selects as a transient per-resend
+        // override, so re-running ↻ after changing a dropdown regenerates with the new persona/model. Empty values
+        // (=> the stored persona + default tier) keep the v0.22 behavior. The stored conv.Persona is NOT rewritten.
+        const ovr={persona:(document.getElementById('chatPersona')||{}).value||'', tier:(document.getElementById('chatTier')||{}).value||''};
+        const res=await fetch('/api/chats/'+encodeURIComponent(id)+'/regenerate',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body:JSON.stringify(ovr)});
         if(!res.ok || !res.body){ bub.remove(); hint.textContent='regenerate failed'; return; }
         const reader=res.body.getReader(), dec=new TextDecoder(); let buf='', errored=false, done=false;
         const handleFrame=frame=>{
