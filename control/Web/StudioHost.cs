@@ -420,6 +420,127 @@ public static class StudioHost
             return Results.Ok();
         });
 
+        // ---- CHAT INTERACTIVITY (regenerate / edit / delete a turn) — pure thread mutation (ChatEdit) + the ----
+        // single Save sink (ChatStore.Save), then for the LLM-bearing cases (regenerate, edit) a TRUNCATE-then-
+        // RESEND over the EXISTING send/stream path. The normal SendAsync/StreamAsync/AgentAsync are NOT touched:
+        // regenerate truncates the stored thread so the trailing user turn is GONE, then re-invokes the existing
+        // path with body.Message = that user turn's content + body.Conversation = the thread id. SelectHistory then
+        // returns the truncated transcript (history WITHOUT the redo'd user turn) and the existing append re-adds
+        // exactly ONE user + ONE assistant turn — reproducing a clean thread with a fresh reply, reusing
+        // ChatPrompt.Build + the 4 tools + LocalLlm byte-for-byte. Edit = EditTurn (truncate-after the edited user
+        // turn) + Save, then the SAME truncate-from-last-user resend yields a fresh answer for the edited question.
+        // Delete = DeleteTurn + Save only (no LLM). All index validation lives in the pure cores (out-of-range ->
+        // unchanged); the endpoints add an explicit 400 so a bad index is a clean error, never a silent no-op. Load
+        // / Save are SafeName-guarded (traversal-safe) and the id is server-generated.
+
+        // REGENERATE the last assistant reply (STREAMING, reusing /api/chat/stream's EXACT meta/{t}/error/done
+        // frames): find the last user turn, truncate the stored thread to it (dropping that user turn + its stale
+        // assistant reply), Save, then drive the UNCHANGED Chat.StreamAsync with body.Message = that user content.
+        // The normal append re-adds one user + one assistant turn — a fresh streamed reply. 404 when the thread is
+        // missing; an in-band 'event: error' (the LLM-down contract) when there is no user turn to redo.
+        api.MapPost("/chats/{id}/regenerate", async (string id, HttpContext ctx) =>
+        {
+            ctx.Response.Headers.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            var ct = ctx.RequestAborted;
+
+            var conv = ChatStore.Load(id);
+            if (conv is null)
+            {
+                await ctx.Response.WriteAsync("event: error\ndata: conversation not found\n\n", ct);
+                await ctx.Response.WriteAsync("event: done\ndata: end\n\n", ct);
+                return;
+            }
+
+            var i = ChatEdit.LastUserTurnIndex(conv.Messages);
+            if (i < 0)
+            {
+                await ctx.Response.WriteAsync("event: error\ndata: nothing to regenerate (no user turn)\n\n", ct);
+                await ctx.Response.WriteAsync("event: done\ndata: end\n\n", ct);
+                return;
+            }
+
+            // Capture the user turn's content, then truncate the persisted thread so it ENDS just BEFORE that user
+            // turn (drops the redo'd user turn AND its assistant reply). Save the shorter thread so the resend's
+            // SelectHistory yields history WITHOUT the duplicate trailing user turn — the existing append re-adds it.
+            var lastUser = conv.Messages[i].Content;
+            ChatStore.Save(conv with { Messages = ChatEdit.TruncateToTurn(conv.Messages, i) });
+
+            // Resend over the EXISTING streaming path (byte-for-byte). Persona/Tier carried from the stored thread.
+            // KNOWN LIMITATION (FIX 4b): a regenerated turn that originally carried a gallery Image re-runs TEXT-ONLY —
+            // ChatTurn persists only role/content (no image), so there is nothing on disk to re-attach here.
+            var resend = new ChatRequest(Conversation: conv.Id, Persona: conv.Persona, Message: lastUser, Tier: null);
+            var any = false;
+            try
+            {
+                await foreach (var ev in Chat.StreamAsync(resend, LlmTiers.Resolve(resend.Tier), ct))
+                {
+                    if (ev.IsMeta)
+                    {
+                        var meta = JsonSerializer.Serialize(new { conversation = ev.ConversationId ?? "", kbId = ev.KbId });
+                        await ctx.Response.WriteAsync($"event: meta\ndata: {meta}\n\n", ct);
+                        await ctx.Response.Body.FlushAsync(ct);
+                        continue;
+                    }
+                    if (ev.Delta is { Length: > 0 })
+                    {
+                        any = true;
+                        await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { t = ev.Delta })}\n\n", ct);
+                        await ctx.Response.Body.FlushAsync(ct);
+                    }
+                }
+            }
+            finally
+            {
+                // If the resend never produced a reply, StreamAsync's persist guard (reply.Length > 0 &&
+                // !ct.IsCancellationRequested) did NOT re-save — so the up-front truncation at line ~468 would
+                // otherwise stay on disk, silently dropping the user's last question + its reply. Restore the
+                // original (pre-truncation) thread on EVERY non-success exit: zero deltas (LLM unloaded/
+                // unreachable), a client abort (ct cancelled), or an upstream fault after the meta frame. On the
+                // success path StreamAsync already re-saved the rebuilt thread, so this restore is skipped (any).
+                if (!any)
+                    ChatStore.Save(conv);
+            }
+            if (!any)
+                await ctx.Response.WriteAsync(
+                    "event: error\ndata: LLM not reachable at :8080 — start agent mode first\n\n", ct);
+            await ctx.Response.WriteAsync("event: done\ndata: end\n\n", ct);
+        });
+
+        // EDIT a USER turn's content (no LLM here — pure mutation + Save). EditTurn drops the stale reply + any
+        // later turns; the SPA then calls /regenerate to produce a fresh answer for the edited question. 404 on a
+        // missing thread; 400 when the index is out of range or does NOT point at a user turn (editing an assistant
+        // turn is rejected). Returns the mutated conversation so the SPA can re-render immediately.
+        api.MapPost("/chats/{id}/edit", (string id, ChatTurnEditRequest body) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+
+            var index = body?.Index ?? -1;
+            if (index < 0 || index >= conv.Messages.Count) return Results.BadRequest(new { error = "index out of range" });
+            if (!string.Equals(conv.Messages[index].Role, "user", System.StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { error = "only a user turn can be edited" });
+
+            var mutated = conv with { Messages = ChatEdit.EditTurn(conv.Messages, index, body!.Content ?? "") };
+            ChatStore.Save(mutated);
+            return Results.Json(mutated);
+        });
+
+        // DELETE one turn (pure mutation + Save only — no LLM). The pairing rule lives in DeleteTurn: a user turn
+        // drops its following assistant reply; an assistant turn drops only itself. 404 on a missing thread; 400 on
+        // an out-of-range index. Returns the mutated conversation for an immediate SPA re-render.
+        api.MapDelete("/chats/{id}/turn/{index:int}", (string id, int index) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+            if (index < 0 || index >= conv.Messages.Count) return Results.BadRequest(new { error = "index out of range" });
+
+            var mutated = conv with { Messages = ChatEdit.DeleteTurn(conv.Messages, index) };
+            ChatStore.Save(mutated);
+            return Results.Json(mutated);
+        });
+
         // ---- per-conversation KNOWLEDGE BASE (RAG "chat with your documents"): attach/list/remove plain-text docs
         // (.txt/.md, first slice) on a conversation. The KB id IS the conversation id (a doc attaches to a thread,
         // not globally); ingest chunks+embeds via the :8090 embed server and stores in doc_index.db scoped by that

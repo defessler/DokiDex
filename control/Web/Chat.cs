@@ -22,6 +22,11 @@ public sealed record ChatRequest(
     string? Conversation, string? Persona, string? Message, string? Tier, IReadOnlyList<ChatTurn>? Messages = null,
     string? Image = null, bool Tools = false);
 
+// The body for POST /api/chats/{id}/edit: replace the USER turn at Index with Content (the SPA then re-runs
+// regenerate so the edited question gets a fresh answer). Index is the 0-based conv.Messages position (== the
+// SPA's _chatMsgs index). The endpoint validates Index in range AND that it points at a user turn before Save.
+public sealed record ChatTurnEditRequest(int Index, string? Content);
+
 // The persona-chat orchestrator (mirrors Director/Rewriter shape): load the card + the conversation, assemble
 // the prompt via the pure ChatPrompt.Build, run the multi-turn LLM call, persist BOTH turns, and return a
 // Director-style Result. The network call degrades gracefully (LLM down => Ok=false + the canonical message),
