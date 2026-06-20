@@ -376,6 +376,30 @@ public static class StudioHost
         api.MapGet("/chats", () => Results.Json(ChatStore.List()));
         api.MapGet("/chats/{id}", (string id) =>
             ChatStore.Load(id) is { } conv ? Results.Json(conv) : Results.NotFound());
+
+        // ADDITIVE read-only chat-history SEARCH: a literal, case-insensitive substring scan over message CONTENT
+        // (NOT RAG/embedding). ChatStore.List() is the safe scan — it skips a malformed file and returns
+        // newest-first — and no path is ever built from q, so there is zero traversal surface. The pure
+        // ChatSearch.Run core is unit-tested headless; this endpoint is a thin wrapper.
+        api.MapGet("/chats/search", (string? q) => Results.Json(ChatSearch.Run(ChatStore.List(), q)));
+
+        // ADDITIVE read-only EXPORT of one conversation to a portable download: markdown by default (a pure,
+        // unit-tested persona/lorebook/KB header + each turn), or ?format=json for the raw on-disk thread. Load
+        // is SafeName-guarded (traversal-safe); the filename stem is conv.Id (already SafeName-legal — no
+        // client-supplied name). Results.File(bytes, contentType, downloadName) is the established download
+        // pattern (the .ddkb export above). Touches nothing on the persist path.
+        api.MapGet("/chats/{id}/export", (string id, string? format) =>
+        {
+            var conv = ChatStore.Load(id);
+            if (conv is null) return Results.NotFound();
+            if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
+            {
+                var json = JsonSerializer.Serialize(conv);
+                return Results.File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", $"{conv.Id}.json");
+            }
+            var md = ChatExport.ToMarkdown(conv);
+            return Results.File(System.Text.Encoding.UTF8.GetBytes(md), "text/markdown", $"{conv.Id}.md");
+        });
         // Deleting a conversation also drops its PRIVATE KB chunks from doc_index.db so a deleted-with-docs thread's
         // vectors don't accumulate forever (the disk-leak fix). BEST-EFFORT: the cleanup runs AFTER the thread
         // file is removed and can NEVER fail the delete — a down embed/index just leaves the rows for a later reset.

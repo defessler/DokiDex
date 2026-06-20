@@ -318,6 +318,8 @@
         <label>Persona <select id="chatPersona" class="kin" style="width:auto"><option value="">default</option></select></label>
         <label>Conversation <select id="chatThread" class="kin" style="width:auto" onchange="openThread(this.value)"><option value="">— new —</option></select></label>
         <button class="ghost" onclick="newChat()">+ New chat</button>
+        <button id="chatExport" class="ghost" disabled onclick="if(_chatConv) location.href='/api/chats/'+encodeURIComponent(_chatConv)+'/export'">Export</button>
+        <input id="chatSearch" class="kin" style="width:auto" placeholder="search history…" oninput="searchThreads(this.value)">
       </div>
       <details style="margin:4px 0 8px">
         <summary class="hint" style="cursor:pointer">+ new persona</summary>
@@ -1811,6 +1813,7 @@
       }catch{ if(hint) hint.textContent='voice request failed'; }
       finally{ btn.disabled=false; btn.textContent=prev; }
     }
+    function syncChatExport(){ const b=document.getElementById('chatExport'); if(b) b.disabled=!_chatConv; }
     function renderThread(conv){
       _chatConv=conv?conv.id:null; _chatMsgs=(conv&&conv.messages)?conv.messages.map(m=>({role:m.role,content:m.content})):[];
       _chatKbId=conv?(conv.kbId||null):null;   // a named library id, the thread's own id (private), or null (fresh)
@@ -1818,6 +1821,7 @@
       _chatMsgs.forEach(m=>appendBubble(m.role==='assistant'?'assistant':'user', m.content));
       document.getElementById('chatHint').textContent='';
       loadKb();   // surface any docs already attached to this thread (+ the RAG-active flag / attached-library pill)
+      syncChatExport();
     }
     // Loaded persona cards (full PersonaCard objects from GET /api/personas) cached so readback can derive the
     // selected card's default voice with no extra fetch. Keyed by card name.
@@ -1915,7 +1919,28 @@
       try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
     }
     function newChat(){ _chatMsgs=[]; _chatConv=null; _chatKbId=null; document.getElementById('chatLog').innerHTML='';
-      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); }
+      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); syncChatExport(); }
+    // ADDITIVE chat-history search over the thread list: a blank box falls back to loadThreads(); else it
+    // re-populates #chatThread's options from GET /api/chats/search (id + persona label + snippet), so selecting
+    // a hit still flows through the existing onchange="openThread(this.value)" — zero new open code. Debounced;
+    // snippet rides as the option label + title (textContent/.title only — which ALREADY escape, so no esc() here;
+    // do NOT wrap a textContent/.title sink in esc(), that would double-escape).
+    let _chatSearchT=null;
+    function searchThreads(q){
+      clearTimeout(_chatSearchT);
+      _chatSearchT=setTimeout(async()=>{
+        const query=(q||'').trim();
+        if(!query){ loadThreads(); return; }
+        const sel=document.getElementById('chatThread');
+        try{ const hits=await (await fetch('/api/chats/search?q='+encodeURIComponent(query))).json();
+          sel.innerHTML='<option value="">— new —</option>';
+          (hits||[]).forEach(h=>{ const o=document.createElement('option'); o.value=h.id;
+            o.textContent=(h.persona?h.persona+' · ':'')+(h.snippet||h.id);
+            o.title=h.snippet||''; sel.appendChild(o); });
+          sel.value=_chatConv||'';
+        }catch{}
+      },200);
+    }
     function renderChatGuard(){
       const el=document.getElementById('chatGuard'); if(!el) return;
       if(state.llmActive){ el.innerHTML=''; return; }
@@ -2023,7 +2048,8 @@
           message:text, tier:document.getElementById('chatTier').value, image:image||null, tools:true})});
       const j=await r.json();
       if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
-      _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text});
+      _chatConv=j.conversation; syncChatExport();   // FIX: enable Export the moment a fresh thread gets its server id
+      _chatMsgs.push({role:'assistant',content:j.text});
       const bub=appendBubble('assistant', j.text);
       renderToolSteps(bub, j.steps);   // backend emits only `steps`
       hint.textContent='';
@@ -2037,7 +2063,8 @@
           message:text, tier:document.getElementById('chatTier').value, image:image||null})});
       const j=await r.json();
       if(!r.ok){ const b=appendBubble('assistant', j.error||('error '+r.status)); b.classList.add('err'); hint.textContent=''; return; }
-      _chatConv=j.conversation; _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
+      _chatConv=j.conversation; syncChatExport();   // FIX: enable Export the moment a fresh thread gets its server id
+      _chatMsgs.push({role:'assistant',content:j.text}); appendBubble('assistant', j.text); hint.textContent='';
       if(fresh){ applyFreshKbId(j.kbId); loadThreads(); loadKb(); }   // FIX 1: refresh the scope if the default KB was auto-attached
     }
     async function sendChat(){
@@ -2066,7 +2093,7 @@
             else if(ln.startsWith('data:')) data+=(data?'\n':'')+ln.slice(5).replace(/^ /,''); });
           if(ev==='error'){ bub.classList.add('err'); (bub._text||bub).textContent=data||'LLM not reachable — start agent mode first'; errored=true; hint.textContent=''; }
           else if(ev==='done'){ done=true; }
-          else if(ev==='meta'){ try{ const m=JSON.parse(data); if(m&&m.conversation) _chatConv=m.conversation; if(m&&'kbId' in m) metaKbId=m.kbId||null; }catch{} }
+          else if(ev==='meta'){ try{ const m=JSON.parse(data); if(m&&m.conversation){ _chatConv=m.conversation; syncChatExport(); }   /* FIX: enable Export the moment a fresh thread gets its server id */ if(m&&'kbId' in m) metaKbId=m.kbId||null; }catch{} }
           else if(data){ try{ const t=JSON.parse(data).t; if(typeof t==='string'){ got=true; acc+=t; (bub._text||bub).textContent+=t; log.scrollTop=log.scrollHeight; } }catch{} }
         };
         // Drain every COMPLETE '\n\n'-terminated frame currently buffered (leaves any partial tail in buf).
