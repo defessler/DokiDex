@@ -32,6 +32,29 @@ public class ServiceViewModelTests
         Assert.False(vm.StartCommand.CanExecute(null));   // gated on Installed
     }
 
+    [Theory]
+    [InlineData("kokoro", "run  setup.ps1 -Kokoro")]            // the gated TTS alt — was wrongly defaulting to -Media
+    [InlineData("tts",    "run  setup.ps1 -Tts")]
+    [InlineData("stt",    "run  setup.ps1 -Stt")]
+    [InlineData("media",  "run  setup.ps1 -Media -Models full")]
+    [InlineData("embed",  "run  setup.ps1")]                    // base installer fetches the embed model (no flag)
+    public void Not_installed_hint_is_registry_driven_per_service(string name, string expected)
+    {
+        var vm = Make(new ServiceStatus { Name = name, Installed = false });
+        Assert.Equal("notinstalled", vm.StateKind);
+        Assert.Equal(expected, vm.Detail);                 // from ServiceRegistry's SetupHint, not a hardcoded switch
+    }
+
+    [Fact]
+    public void Every_installable_service_has_a_correct_registry_setup_hint()
+    {
+        // guards against the original bug class: a service added to the registry but missing from the hint map.
+        // Every service whose RequiresRel gates installation must carry a non-default, flag-bearing SetupHint.
+        foreach (var def in DokiDex.Control.Services.ServiceRegistry.Services)
+            if (!string.IsNullOrEmpty(def.RequiresRel) && def.Name != "embed")   // embed is base-installed (no flag)
+                Assert.Contains("setup.ps1 -", def.SetupHint);                    // e.g. "setup.ps1 -Kokoro"
+    }
+
     [Fact]
     public void Degraded_when_running_but_unhealthy()
     {

@@ -47,9 +47,9 @@ New-Item -ItemType Directory -Force $runDir | Out-Null
 $Services = [ordered]@{
     "llama-swap" = @{ script = (Join-Path $serving "start-serving.ps1"); health = "http://127.0.0.1:8080/v1/models"; group = "llm";   desc = "agent inference :8080"; port = 8080; ui = "http://127.0.0.1:8080/ui"; vramGB = 26 }
     "fim"        = @{ script = (Join-Path $serving "start-fim.ps1");     health = "http://127.0.0.1:8012/health";   group = "llm";   desc = "autocomplete  :8012"; port = 8012; ui = $null; vramGB = 4 }
-    # Code-embedding server (:8090) for the codebase RAG (the code_search MCP tool). CPU-only -> 0 VRAM,
-    # so it coexists with ANY llm-group profile. 'requires' skips it cleanly until the embed model is fetched.
-    "embed"      = @{ script = (Join-Path $serving "start-embed.ps1");   health = "http://127.0.0.1:8090/health";   group = "llm";   desc = "code embeddings :8090"; port = 8090; ui = $null; vramGB = 0; requires = (Join-Path $root "models\nomic-embed-text-v1.5.f16.gguf") }
+    # Embedding server (:8090) for BOTH the codebase RAG (code_search) AND the KB "chat with your documents" RAG.
+    # CPU-only -> 0 VRAM, so it coexists with ANY llm-group profile. 'requires' skips it cleanly until the model is fetched.
+    "embed"      = @{ script = (Join-Path $serving "start-embed.ps1");   health = "http://127.0.0.1:8090/health";   group = "llm";   desc = "embeddings code+KB :8090"; port = 8090; ui = $null; vramGB = 0; requires = (Join-Path $root "models\nomic-embed-text-v1.5.f16.gguf") }
     # Uncensored TTS (:8004) — OpenAI-compatible /v1/audio/speech + voice cloning. ~4GB, group=llm
     # so it coexists with the coder in agent mode. 'requires' skips it cleanly when not installed.
     "tts"        = @{ script = (Join-Path $serving "start-tts.ps1");     health = "http://127.0.0.1:8004/";         group = "llm";   desc = "speech/TTS    :8004"; port = 8004; ui = "http://127.0.0.1:8004/"; vramGB = 4; requires = (Join-Path $root "tts\Chatterbox-TTS-Server\.venv\Scripts\python.exe") }

@@ -66,12 +66,9 @@ public partial class ServiceViewModel : ObservableObject
         {
             StateKind = "notinstalled"; StateLabel = "not installed";
             _unhealthySince = null;
-            Detail = Name switch
-            {
-                "tts" => "run  setup.ps1 -Tts",
-                "stt" => "run  setup.ps1 -Stt",
-                _     => "run  setup.ps1 -Media -Models full",
-            };
+            // Registry-driven per-service install guidance — so a new gated service (e.g. kokoro -> -Kokoro)
+            // can never fall back to a wrong default. Was a hardcoded tts/stt switch that mis-hinted the rest.
+            Detail = "run  " + (ServiceRegistry.Find(Name)?.SetupHint ?? "setup.ps1");
             return;
         }
         // running-but-unhealthy is "warming up" (calm pulse) only for a grace window; past it the service
