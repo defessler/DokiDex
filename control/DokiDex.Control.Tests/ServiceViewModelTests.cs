@@ -37,6 +37,7 @@ public class ServiceViewModelTests
     [InlineData("tts",    "run  setup.ps1 -Tts")]
     [InlineData("stt",    "run  setup.ps1 -Stt")]
     [InlineData("media",  "run  setup.ps1 -Media -Models full")]
+    [InlineData("prompt-rewriter", "run  setup.ps1 -Media -Models full")]  // its Qwen2.5-3B model is double-gated behind -Media + -Models full (setup.ps1:714)
     [InlineData("embed",  "run  setup.ps1")]                    // base installer fetches the embed model (no flag)
     public void Not_installed_hint_is_registry_driven_per_service(string name, string expected)
     {
@@ -52,7 +53,13 @@ public class ServiceViewModelTests
         // Every service whose RequiresRel gates installation must carry a non-default, flag-bearing SetupHint.
         foreach (var def in DokiDex.Control.Services.ServiceRegistry.Services)
             if (!string.IsNullOrEmpty(def.RequiresRel) && def.Name != "embed")   // embed is base-installed (no flag)
+            {
                 Assert.Contains("setup.ps1 -", def.SetupHint);                    // e.g. "setup.ps1 -Kokoro"
+                // a group=media service is only installed by the -Media stack, so its hint MUST carry -Media —
+                // "setup.ps1 -Models full" alone early-returns at setup.ps1:419 and installs nothing.
+                if (def.Group == "media")
+                    Assert.Contains("-Media", def.SetupHint);
+            }
     }
 
     [Fact]

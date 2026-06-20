@@ -30,7 +30,7 @@ public static class ServiceRegistry
         new ServiceDef("kokoro", "llm", "Kokoro TTS   :8006", 8006, "http://127.0.0.1:8006/web", 2, "http://127.0.0.1:8006/health", "start-kokoro.ps1", @"kokoro\Kokoro-FastAPI\.venv\Scripts\python.exe", "setup.ps1 -Kokoro"),
         new ServiceDef("stt", "llm", "speech-to-text :8005", 8005, null, 1, "http://127.0.0.1:8005/health", "start-stt.ps1", @"stt\.venv\Scripts\python.exe", "setup.ps1 -Stt"),
         new ServiceDef("media", "media", "image+video   :7801", 7801, "http://127.0.0.1:7801/", 18, "http://127.0.0.1:7801/", "start-media.ps1", null, "setup.ps1 -Media -Models full"),
-        new ServiceDef("prompt-rewriter", "media", "prompt rewriter :8013", 8013, null, 3, "http://127.0.0.1:8013/health", "start-prompt-rewriter.ps1", @"models\Qwen2.5-3B-Instruct-Q5_K_M.gguf", "setup.ps1 -Models full"),
+        new ServiceDef("prompt-rewriter", "media", "prompt rewriter :8013", 8013, null, 3, "http://127.0.0.1:8013/health", "start-prompt-rewriter.ps1", @"models\Qwen2.5-3B-Instruct-Q5_K_M.gguf", "setup.ps1 -Media -Models full"),
     };
 
     public static readonly IReadOnlyDictionary<string, List<string>> Profiles = new Dictionary<string, List<string>>
