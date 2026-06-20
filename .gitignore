@@ -64,3 +64,5 @@ DokiDex.lnk
 
 # transient on-hardware install log
 setup-full.log
+audio-tools/
+kokoro/
