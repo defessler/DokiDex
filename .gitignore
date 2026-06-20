@@ -61,3 +61,6 @@ control/assets/*-preview.png
 # generated, machine-specific launcher shortcut (created per-machine by control.bat / `doki panel`,
 # with an absolute TargetPath) — never commit it.
 DokiDex.lnk
+
+# transient on-hardware install log
+setup-full.log

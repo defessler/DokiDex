@@ -366,7 +366,11 @@ if ($Train) {
         if (-not (Test-Path $trpy)) { python -m venv (Join-Path $tRoot ".venv") }
         & $trpy -m pip install --upgrade pip | Out-Null
         Pip $trpy install torch --index-url https://download.pytorch.org/whl/cu128
-        Pip $trpy install -r (Join-Path $tRoot "requirements.txt")
+        # kohya's requirements.txt ends with a bare "." (install sd-scripts itself as an editable package),
+        # which pip resolves against the CURRENT directory — so run it FROM the sd-scripts dir. Otherwise "."
+        # hits the DokiDex root (no setup.py/pyproject.toml) and pip hard-fails, aborting the whole install.
+        Push-Location $tRoot
+        try { Pip $trpy install -r "requirements.txt" } finally { Pop-Location }
         Pip $trpy install accelerate bitsandbytes
         New-Item -ItemType File -Force $trok | Out-Null
     } else { Ok "trainer venv present" }
@@ -460,6 +464,20 @@ if (Test-Path $dgSrc) {
     if ($dgNew) { Info "installing DokiGen Void theme ..."; $extAdded = $true } else { Ok "DokiGen Void theme present (refreshed)" }
 } else { Warn "media-assets\SwarmUI-DokiGenTheme not present; skipping DokiGen theme" }
 
+# 5b4. patch SwarmUI's ComfyUI-backend installer. The bare relative "launchtools/7z/win/7za.exe" fails
+#      Process.Start with Win32 error 2 ("cannot find the file") in this headless launch even though the
+#      Swarm CWD IS the root and the file exists there — so the ComfyUI backend never extracts and the whole
+#      media stack is dead. Anchor 7za to the binary dir (AppContext.BaseDirectory -> up 3 to the Swarm root),
+#      a CWD-independent absolute path. Idempotent: only the un-patched string matches; forces a rebuild so an
+#      already-built SwarmUI recompiles. (SwarmUI lives under the gitignored media\, so this re-applies per clone.)
+$instCs = Join-Path $swarm "src\Core\Installation.cs"
+if ((Test-Path $instCs) -and ((Get-Content $instCs -Raw) -match '"launchtools/7z/win/7za\.exe"')) {
+    $patched = (Get-Content $instCs -Raw) -replace '"launchtools/7z/win/7za\.exe"', 'Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "launchtools", "7z", "win", "7za.exe"))'
+    [System.IO.File]::WriteAllText($instCs, $patched)
+    Info "patched SwarmUI ComfyUI-backend 7za path (relative -> binary-anchored absolute)"
+    $extAdded = $true   # force the rebuild below so the patched code compiles in
+}
+
 # 5c. build SwarmUI (rebuild when missing, a new extension was added, OR the checkout advanced past
 #     the last build — the last_build sentinel was written but never read, so a `git pull` of SwarmUI
 #     previously kept running a stale binary).
@@ -478,7 +496,10 @@ if ((-not (Test-Path $swarmExe)) -or $extAdded -or ($headAt -and $headAt -ne $bu
 function Swarm-Up { try { Invoke-WebRequest "http://127.0.0.1:7801/" -TimeoutSec 3 -UseBasicParsing | Out-Null; $true } catch { $false } }
 if (-not (Swarm-Up)) {
     Info "launching SwarmUI ..."
-    Start-Process -FilePath $swarmExe -ArgumentList "--launch_mode","none","--host","127.0.0.1","--port","7801" -WorkingDirectory $swarm -WindowStyle Hidden | Out-Null
+    # Capture SwarmUI's console — its headless ComfyUI-backend install reports the REAL cause here; the WS
+    # frame only says "internal error", so a hidden window with no redirect would lose it (swarm-*.log is
+    # under the gitignored media\ tree).
+    Start-Process -FilePath $swarmExe -ArgumentList "--launch_mode","none","--host","127.0.0.1","--port","7801" -WorkingDirectory $swarm -WindowStyle Hidden -RedirectStandardOutput (Join-Path $swarm "swarm-stdout.log") -RedirectStandardError (Join-Path $swarm "swarm-stderr.log") | Out-Null
     for ($i = 0; $i -lt 60 -and -not (Swarm-Up); $i++) { Start-Sleep 1 }
 }
 if (Swarm-Up) { Ok "SwarmUI serving :7801" } else { throw "SwarmUI failed to start" }
@@ -527,15 +548,18 @@ if (-not (Test-Path (Join-Path $swarm "dlbackend\comfy"))) {
             }
         }
     }
-    catch { throw "ComfyUI backend install failed/timed out: $($_.Exception.Message)" }
+    catch { Warn "ComfyUI backend install errored: $($_.Exception.Message)" }
     finally { $ws.Dispose(); $cts.Dispose() }
     # SwarmUI creates dlbackend\comfy EARLY (right after the 7z extract, before VC-redist + the
     # multi-minute pip install), so its existence does NOT mean success. Require the explicit success
-    # frame; otherwise nuke the partial dir so the existence gate above reinstalls cleanly next run.
+    # frame; otherwise nuke the partial dir AND the cached archive so the existence gate above reinstalls
+    # cleanly next run. The catch only WARNS (no re-throw) so this cleanup ALWAYS runs on any failure path —
+    # previously the re-throw skipped it, leaving a half-extracted dlbackend that poisoned the retry.
     if (-not $installed) {
         Remove-Item (Join-Path $swarm "dlbackend\comfy") -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item (Join-Path $swarm "dlbackend\tmpcomfy") -Recurse -Force -ErrorAction SilentlyContinue
-        throw "ComfyUI backend install did not report success (partial install removed; re-run setup.ps1 -Media)"
+        Remove-Item (Join-Path $swarm "dlbackend\comfyui_dl.7z") -Force -ErrorAction SilentlyContinue
+        throw "ComfyUI backend install did not report success (partial removed; re-run setup.ps1 -Media). See media\SwarmUI\swarm-stdout.log for SwarmUI's real error."
     }
     Ok "ComfyUI backend installed"
 } else { Ok "ComfyUI backend present" }
