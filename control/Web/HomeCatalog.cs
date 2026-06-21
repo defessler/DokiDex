@@ -29,6 +29,9 @@ public sealed record HomeReadiness(string Status, string? NextStep, string? Acti
 // One capability + its computed readiness — the GET /api/home item the SPA renders.
 public sealed record HomeCard(HomeCapability Capability, HomeReadiness Readiness);
 
+// Where the Home quick-start box sends the user: a Studio view + the carried text + (for Create) the gen kind.
+public sealed record QuickStartRoute(string View, string? Prompt, string? Kind);
+
 // The guided Home hub's content catalog + the PURE readiness resolver. The catalog is the single source of truth for
 // what the hub shows (data, not logic); the resolver (requires + status snapshot -> readiness) is a pure, unit-tested
 // function so the "ready / needs-X" logic is covered like the rest of the stack. The SPA Home view renders /api/home
@@ -70,6 +73,25 @@ public static class HomeCatalog
             StringComparer.OrdinalIgnoreCase);
         return new HomeStatusSnapshot(mode, up, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
     }
+
+    // PURE: route the Home quick-start box. A question -> Chat (carry the text); otherwise -> Create, with the gen
+    // kind inferred from keywords (video / music, else image). Blank input -> Create/image with no prompt. No LLM.
+    public static QuickStartRoute RouteQuickStart(string? input)
+    {
+        var q = (input ?? "").Trim();
+        if (q.Length == 0) return new QuickStartRoute("create", null, "image");
+        if (LooksLikeQuestion(q)) return new QuickStartRoute("chat", q, null);
+        var lower = q.ToLowerInvariant();
+        if (ContainsAny(lower, "video", "clip", "animate", "animation", "footage")) return new QuickStartRoute("create", q, "video");
+        if (ContainsAny(lower, "song", "music", "track", "soundtrack", "melody")) return new QuickStartRoute("create", q, "music");
+        return new QuickStartRoute("create", q, "image");
+    }
+
+    private static readonly string[] _questionWords =
+        { "who", "what", "why", "how", "when", "where", "which", "can", "could", "should", "is", "are", "am", "do", "does", "did", "will", "would" };
+    private static bool LooksLikeQuestion(string q)
+        => q.EndsWith('?') || _questionWords.Contains(q.Split(' ', '\t')[0].ToLowerInvariant());
+    private static bool ContainsAny(string s, params string[] words) => words.Any(s.Contains);
 
     // terse catalog helpers
     private static CapabilityRequires Need(string? mode = null, string? service = null, string? model = null) => new(mode, service, model);

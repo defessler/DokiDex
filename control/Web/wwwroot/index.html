@@ -592,6 +592,10 @@
           <div class="hint">Everything you can make, talk to, and manage — and what's ready right now.</div></div>
           <span class="gpu-pill" style="margin-left:auto">GPU: <b>${mode}</b>${vram} · <a href="#" onclick="setView('status');return false" style="color:var(--cyan);text-decoration:none">manage ›</a></span>
         </div>`;
+      html += `<div class="row" style="margin-bottom:24px;gap:8px">
+          <input id="quickStart" placeholder="Describe something to make, or ask a question…" onkeydown="if(event.key==='Enter')doQuickStart()" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:11px 14px;font-size:14px;font-family:inherit">
+          <button class="primary" onclick="doQuickStart()">Go</button>
+        </div>`;
       for (const [key,label] of [['make','Make'],['talk','Talk'],['manage','Manage']]){
         const cards = (_homeData.cards||[]).filter(c => c.capability.group===key);
         if(!cards.length) continue;
@@ -617,17 +621,26 @@
         </div></div>`;
     }
     function homeReadyClick(action){ if((action||'').startsWith('model:')) setView('models'); else setView('status'); }
+    // Shared: jump to a view and pre-fill it (Create -> prompt+kind; Chat -> chat input; else just switch).
+    function applyStarter(view, prompt, kind){
+      if(view==='create'){
+        document.getElementById('prompt').value = prompt || '';
+        if(kind){ state.kind = kind; renderControls(); }
+        setView('create'); document.getElementById('prompt').focus();
+      } else if(view==='chat'){
+        setView('chat');
+        const ci = document.getElementById('chatInput'); if(ci){ if(prompt) ci.value = prompt; ci.focus(); }
+      } else { setView(view); }
+    }
     function runStarter(capId, i){
       const cap = (_homeData?.cards||[]).find(c => c.capability.id===capId)?.capability; if(!cap) return;
-      const s = cap.starters[i]; if(!s) return;
-      if(s.view==='create'){
-        document.getElementById('prompt').value = s.prompt || '';
-        if(s.kind){ state.kind = s.kind; renderControls(); }
-        setView('create'); document.getElementById('prompt').focus();
-      } else if(s.view==='chat'){
-        setView('chat');
-        const ci = document.getElementById('chatInput'); if(ci){ if(s.prompt) ci.value = s.prompt; ci.focus(); }
-      } else { setView(s.view); }
+      const s = cap.starters[i]; if(s) applyStarter(s.view, s.prompt, s.kind);
+    }
+    // Quick-start box: route the typed text server-side (question -> Chat, else -> Create), then pre-fill + jump.
+    async function doQuickStart(){
+      const q = (document.getElementById('quickStart')?.value || '').trim(); if(!q) return;
+      let r; try { r = await (await fetch('/api/home/route?q=' + encodeURIComponent(q))).json(); } catch { return; }
+      applyStarter(r.view, r.prompt, r.kind);
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];

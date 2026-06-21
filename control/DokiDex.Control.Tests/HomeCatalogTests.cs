@@ -129,4 +129,30 @@ public class HomeCatalogTests
         var withTts = HomeCatalog.Annotate(Snap("agent", up: new[] { "llama-swap", "tts" })).First(c => c.Capability.Id == "voice");
         Assert.Equal("ready", withTts.Readiness.Status);
     }
+
+    // ---- quick-start routing (the Home "just start typing" box): a question -> Chat, else -> Create with an
+    //      inferred gen kind. Pure + unit-tested; the SPA calls GET /api/home/route on submit. ----
+
+    [Theory]
+    [InlineData("how do I export a video?", "chat", null)]   // ends with ? -> question
+    [InlineData("what can this make", "chat", null)]         // starts with a question word
+    [InlineData("a neon dragon over a city", "create", "image")]
+    [InlineData("a 5 second video of a cat", "create", "video")]
+    [InlineData("an upbeat synthwave song", "create", "music")]
+    public void RouteQuickStart_routes_questions_to_chat_and_prompts_to_create(string input, string view, string? kind)
+    {
+        var r = HomeCatalog.RouteQuickStart(input);
+        Assert.Equal(view, r.View);
+        Assert.Equal(kind, r.Kind);
+        Assert.Equal(input, r.Prompt);   // the typed text is always carried into the target view
+    }
+
+    [Fact]
+    public void RouteQuickStart_defaults_blank_to_create_image_with_no_prompt()
+    {
+        var r = HomeCatalog.RouteQuickStart("   ");
+        Assert.Equal("create", r.View);
+        Assert.Equal("image", r.Kind);
+        Assert.True(string.IsNullOrEmpty(r.Prompt));
+    }
 }

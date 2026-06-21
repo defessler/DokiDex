@@ -96,6 +96,8 @@ public static class StudioHost
         // Instant catalog (no status wait) — the SPA renders these cards + starters immediately, then fills in
         // readiness from /home (which blocks on the live status probe). Keeps the default Home view from waiting.
         api.MapGet("/home/catalog", () => Results.Json(HomeCatalog.Capabilities));
+        // Quick-start router: the Home "just start typing" box calls this on submit -> { view, prompt, kind }.
+        api.MapGet("/home/route", (string? q) => Results.Json(HomeCatalog.RouteQuickStart(q)));
 
         // Explicit mode switch from the dashboard = user intent, so it switches directly (the eviction-confirm
         // applies to the implicit auto-switch-on-generate path).
