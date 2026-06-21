@@ -1,5 +1,7 @@
 # Technical Design Document — Fully-Local Agentic Coding Stack
 
+> **See also (as-built, 2026-06-21):** this is the original design for the core coding stack (inference · harness · search). DokiDex has since grown image/video/music/edit generation, speech (TTS/STT), the WPF control panel, and the **DokiGen Studio web app** (guided Home hub + in-app chat assistant + the chat→media round-trip). For everything currently supported see **[CAPABILITIES.md](CAPABILITIES.md)**; for the as-built architecture see **[wiki/10-how-it-works.md](wiki/10-how-it-works.md)**.
+
 | | |
 |---|---|
 | **Project** | DokiDex infrastructure |

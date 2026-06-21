@@ -7,7 +7,7 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
   <br><sub>The DokiDex control panel — one GPU group at a time, live RTX 5090 meter, per-service health (healthy / warming / stopped / crashed / not-installed), and one-click coder-model hot-swap.</sub>
 </p>
 
-**▶ Features (full index):** [docs/wiki/9-features.md](docs/wiki/9-features.md) · **How it all works (architecture):** [docs/wiki/10-how-it-works.md](docs/wiki/10-how-it-works.md) · **Design doc:** [docs/TDD.md](docs/TDD.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/wiki/11-media-recipes.md](docs/wiki/11-media-recipes.md)
+**▶ Capabilities (full writeup):** [docs/CAPABILITIES.md](docs/CAPABILITIES.md) · **Feature index:** [docs/wiki/9-features.md](docs/wiki/9-features.md) · **How it all works (architecture):** [docs/wiki/10-how-it-works.md](docs/wiki/10-how-it-works.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/wiki/11-media-recipes.md](docs/wiki/11-media-recipes.md)
 
 ## Run it
 
@@ -63,6 +63,7 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 - **Speech (TTS):** Chatterbox on `:8004` — uncensored (watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning; coexists with the coder LLM
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, coexists with the coder
 - **Control panel:** a native WPF cockpit (`doki panel`) that polls status in-process (native C#, ~2 s) and shells `doki.ps1` only for lifecycle actions (start/stop/verify/gen) — grouped live service cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, and a **DokiGen Studio** page (describe → pick a kind → **Generate** → inline preview → remix) — a no-CLI surface over `doki gen`
+- **DokiGen Studio (web app):** the user-facing studio on `127.0.0.1:5111` (also hosted in-process by the panel) — a guided **Home** command center + 11 areas: **Create / Director / Flow / Scene** (image/video/music/edit with a live sketch canvas, ControlNet stacking, LoRA mixing, multi-character scenes, node-graph flow, shot-list director), an in-app **Chat** assistant (curated tools + vision + document RAG + long-term **Memory**, and **generate / edit images in-thread** via a GPU-flip round-trip), **Cast / Voice** (personas + multi-speaker TTS dialogue), and **Library / Models / Status / Memory** managers. Full map: [docs/CAPABILITIES.md](docs/CAPABILITIES.md)
 
 ## Status
 

@@ -1,5 +1,7 @@
 # DokiGen Studio — design
 
+> **⚠️ Superseded (2026-06-21):** the live studio is the **web app** (`control/Web/wwwroot/index.html` on `127.0.0.1:5111`, also hosted in-process by the panel) — a guided **Home** hub + 11 areas (Create / Director / Chat / Cast / Voice / Flow / Scene / Library / Models / Status / Memory), including the in-app chat assistant and the chat→media round-trip. This doc is the original *WPF-panel Studio page* design (Phase 1 shell). For what's actually shipped, see **[CAPABILITIES.md](CAPABILITIES.md)** and **[superpowers/specs/2026-06-16-local-web-studio-design.md](superpowers/specs/2026-06-16-local-web-studio-design.md)**.
+
 **Status:** **Phase 1 (shell) built + render-verified** (2026-06-15) — the page, nav, design-mode sample,
 and inline framed preview all draw via `--render --page studio` with no backend/GPU; 14 `StudioViewModel`
 state-machine tests pass. **Phases 2–4 pending** (live gen wiring needs a media-mode card session). The
