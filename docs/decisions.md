@@ -1,5 +1,15 @@
 # Decision log
 
+## 2026-06-21 — Claude Code stays NATIVE on the local stack (skip cc-switch); GLM-4.7-Flash wired as a gated coder candidate; tool-call gate hardened (#19009)
+
+Three multi-agent (ultracode) evaluations this session; full reports in `docs/eval-cc-switch-2026-06.md` + `docs/eval-glm-4-7-2026-06.md`.
+
+**cc-switch (farion1231/cc-switch) → SKIP; use native Claude Code config.** The 105k-star Tauri GUI swaps provider profiles across ~7 agent tools, but its one relevant capability — an Anthropic↔OpenAI translation proxy — is **redundant here: llama.cpp's server already implements `POST /v1/messages` natively** (verified in b9616) and llama-swap proxies it, so Claude Code targets the local stack with pure config. Adopting it would add a plaintext-key SQLite store, an unsigned auto-updating installer (the SmartScreen/Defender shape we avoid), and whole-file `~/.claude` rewrites for ~zero gain. **Wired instead:** `~/.claude/dokidex.settings.json` (`ANTHROPIC_BASE_URL=http://127.0.0.1:8080`, model `coder-fast`, dummy `ANTHROPIC_AUTH_TOKEN`) + `cc-local` / `cc-cloud` PowerShell functions. Live-verified end-to-end (cc-local → coder-fast → correct output). Note: current Claude Code uses `ANTHROPIC_DEFAULT_HAIKU_MODEL`, not the deprecated `ANTHROPIC_SMALL_FAST_MODEL`.
+
+**GLM-4.7 (z.ai) → only GLM-4.7-Flash is local-viable; wired as an eval-gated bake-off candidate, NOT adopted.** The 355B flagship is cloud-only (4-bit ~192-225GB >> 96GB). GLM-4.7-Flash (30B-A3B) is a credible Qwen3-Coder-30B challenger: 17.5GB UD-Q4_K_XL, full-GPU, **runtime arch `deepseek2`/MLA (`Glm4MoeLiteForCausalLM`) — NOT `glm4moe`**, already supported by b9616 (no bump). Risks pinned: OPEN llama.cpp **#21915** (GLM gibberish on turn 2+ with `q8_0` KV — our exact `coder-fast` flags) and **#19009** (ignores `tool_choice` / loops in required+thinking mode). Wired commented in `serving/llama-swap.yaml` (KV-quant OFF, GLM sampling) + `setup.ps1 -LlmCandidates` (GGUF SHA-256 `b0d4fbc1…`, verified, Unsloth post-Jan-21 build). Expect a close fight vs Qwen3-Coder, not a clear win — gate before any swap.
+
+**Tool-call gate hardened (`serving/test-toolcall.ps1`) for #19009.** A single auto-mode call can't catch the GLM failure mode, so the acceptance script gained **T1b** (forced `tool_choice=required`) + **T3** (multi-hop loop must terminate within `-MaxHops`) + `-GlmSampling`; pure logic factored into helpers with **20 offline unit asserts** (`tests/test-toolcall.test.ps1`, AST-extracted, wired into `doki test`). Zero tool-call flakes stays the bar.
+
 ## 2026-06-19 — Legacy `.doc` (OLE binary Word) KB ingest (the LAST v0.15 ingest follow-up) → **DEFER** the reader + **FIX the silent garbage-attach** (clean rejection; NO heavy install)
 
 **Question.** The KB binary-ingest path (`doc_ingest_bin` → `extract_text`) supports `.pdf` (pypdf) and `.docx`
