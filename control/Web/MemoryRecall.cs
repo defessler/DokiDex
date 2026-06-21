@@ -25,6 +25,9 @@ namespace DokiDex.Web;
 // edit/delete, unlike the injection path (MemoryNote) which only needs the fact text. Mirrors memory_db.py's row.
 public sealed record MemoryRecord(int Id, string Content, string Tags);
 
+// POST /api/memory body: the fact to remember + optional comma tags (id + timestamp are server-set by the store).
+public sealed record MemorySaveRequest(string? Content, string? Tags);
+
 public static class MemoryRecall
 {
     // Recent notes pulled per turn (the newest-first memory set); ChatPrompt.MemoryBlock re-bounds to

@@ -946,6 +946,20 @@ public static class StudioHost
         api.MapGet("/pending-gen", () => Results.Json(PendingGenStore.List()));
         api.MapDelete("/pending-gen/{id}", (string id) => PendingGenStore.Delete(id) ? Results.Ok() : Results.NotFound());
 
+        // ---- editable long-term MEMORY (the persistent memory-mcp store that chat recall surfaces): list / save /
+        // delete, so a panel (or curl) can curate the facts that ride into every chat. Degrades when the memory-mcp
+        // sidecar is absent (list -> [], save -> 503). Content is a short fact, passed via the request body. ----
+        api.MapGet("/memory", async (CancellationToken ct) => Results.Json(await MemoryRecall.ListAsync(50, ct)));
+        api.MapPost("/memory", async (MemorySaveRequest body, CancellationToken ct) =>
+        {
+            var content = (body?.Content ?? "").Trim();
+            if (content.Length == 0) return Results.BadRequest(new { error = "content required" });
+            var id = await MemoryRecall.SaveAsync(content, body!.Tags, ct);
+            return id > 0 ? Results.Json(new { id }) : Results.Json(new { error = "memory store unavailable" }, statusCode: 503);
+        });
+        api.MapDelete("/memory/{id:int}", async (int id, CancellationToken ct) =>
+            await MemoryRecall.DeleteAsync(id, ct) ? Results.Ok() : Results.NotFound());
+
         // ---- multi-character composer (base scene + isolated per-character regions -> one raw SwarmUI prompt) ----
         // Pure compile (no GPU); the SPA generates the result via /api/generate with raw=true so the <object:..>
         // regional tags reach SwarmUI unrewritten.
