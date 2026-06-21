@@ -1633,7 +1633,7 @@
         const st=(p.status||'queued').toLowerCase();
         const card=$(`<div class="gcard ${st}"></div>`);
         const cnt=p.count>1?` ×${p.count}`:'';
-        const label = st==='queued'?'queued — switch to Media to render'
+        const label = st==='queued'?'queued'
           : st==='rendering'?'rendering…'
           : st==='done'?'done'
           : st==='failed'?'failed'
@@ -1659,6 +1659,16 @@
         else if(st==='failed' && p.error){ const e=document.createElement('div'); e.className='gerr'; e.textContent=p.error; card.appendChild(e); }
         el.appendChild(card);
       });
+      // The round-trip TRIGGER: queued gens don't auto-render (rendering flips the GPU to Media and evicts the chat
+      // LLM, so it must be a deliberate choice). One click drains the queue oldest-first — flip to Media, render
+      // (live progress/preview in the cards above), then flip back to the agent. Hidden while a render is in flight.
+      const queuedN = list.filter(p=>(p.status||'queued').toLowerCase()==='queued').length;
+      const busy = list.some(p=>(p.status||'').toLowerCase()==='rendering');
+      if(queuedN>0 && !busy){
+        const b=$(`<button class="primary gqbtn" type="button" title="Flip the GPU to Media, render the queued image(s), then flip back to chat">Render ${queuedN} queued image${queuedN>1?'s':''} →</button>`);
+        b.onclick=async()=>{ b.disabled=true; b.textContent='starting render — flipping to Media…'; try{ await fetch('/api/chat/render-queued',{method:'POST'}); }catch{} setTimeout(loadChatPendingGens, 1000); };
+        el.appendChild(b);
+      }
     }
     // Poll the chat-thread render cards while the chat view is active (started/stopped in setView). Kept off the
     // global pollStatus/pollJobs cadence so it only runs when chat is open and an id exists.
