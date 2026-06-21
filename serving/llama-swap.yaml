@@ -63,16 +63,28 @@ models:
       --jinja
 
   # Model V — VISION (gated). Lights up the studio's Describe (image->prompt) and Verify
-  # (output-adherence) surfaces; the in-app code already posts OpenAI image_url to :8080 and
-  # asks for model "vision" (LlmTiers.Vision). Qwen3-VL-8B-Instruct + its mmproj, full GPU (~7GB).
-  # Installed by setup.ps1 -Vision. Use the INSTRUCT (not Thinking) variant — chain-of-thought
-  # pollutes the single-line Describe and the PASS/FAIL Verify parser.
-  # Uncensored fallback: drop an abliterated Qwen2.5-VL GGUF + its mmproj into models\ and point
-  # the -m/--mmproj below at them (same "vision" name, same :8080 path).
-  # NOTE: this build (b9616) INCLUDES Qwen3-VL CLIP support — llama.cpp PR #16780 (merged 2025-10-30,
-  # needs b6887+; verified 2026-06-21, docs/research-llm-refresh-2026-06.md). Still smoke-test with one real
-  # image (verify-on-GPU). A Qwen3-VL-32B vision-UPGRADE candidate is staged in the bake-off block below.
+  # (output-adherence) surfaces; the in-app code posts OpenAI image_url to :8080 asking for model
+  # "vision" (LlmTiers.Vision). PROMOTED 2026-06-21 from the 8B to Qwen3-VL-32B-Instruct — eval-gated:
+  # the 32B reads fine UI text/telemetry the 8B cannot (docs/decisions.md). Q4_K_M ~18.4GiB + mmproj
+  # ~1.1GiB + q8 KV @32k fits 32GB (Q8_0 32.4GiB does NOT). --mmproj REQUIRED (Qwen3-VL CLIP via
+  # llama.cpp PR #16780, in this b9616 build). Use the INSTRUCT (not Thinking) variant. ~15s cold swap,
+  # ~2-4s/describe warm. The 8B is kept as "vision-8b" below (sub-second warm) for high-volume vision.
   "vision":
+    cmd: |
+      __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+      -m __DOKI_ROOT__\models\Qwen3-VL-32B-Instruct-Q4_K_M.gguf
+      --mmproj __DOKI_ROOT__\models\Qwen3-VL-32B-Instruct-mmproj-F16.gguf
+      --port ${PORT}
+      -ngl 99
+      -c 32768
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --jinja
+
+  # Fast fallback vision tier — Qwen3-VL-8B (~7GB, sub-second warm). Request "vision-8b" for
+  # high-volume / interactive vision where the 32B's extra accuracy isn't needed.
+  "vision-8b":
     cmd: |
       __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
       -m __DOKI_ROOT__\models\Qwen3-VL-8B-Instruct-Q4_K_M.gguf
@@ -116,9 +128,12 @@ models:
   #     -m __DOKI_ROOT__\models\GLM-4.7-Flash-UD-Q4_K_XL.gguf
   #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --repeat-penalty 1.0 --min-p 0.01 --jinja
   #
-  # DOWNLOADED + ACTIVE for bake-off (2026-06-21) — gpt-oss-20b (MXFP4, ggml-org/gpt-oss-20b-GGUF). Fits FULLY
-  # on-GPU (~17.9GB @131k, no --n-cpu-moe) — a fast mid-tier between coder-fast (30B) and the offloaded coder-big
-  # (120b). F16 KV on purpose (q8_0 KV reportedly hurts gpt-oss). Eval-gate before promoting to a tier.
+  # gpt-oss-20b (MXFP4, ggml-org/gpt-oss-20b-GGUF). Fits FULLY on-GPU (~17.9GB @131k, no --n-cpu-moe) — a fast
+  # general option between coder-fast (30B) and the offloaded coder-big (120b). F16 KV on purpose (q8_0 KV hurts
+  # gpt-oss). TOOL-CALL GATE PASSED 2026-06-21 (4/4, zero flakes, ~359 tok/s) + 3/3 direct coding probes -> kept
+  # as an on-demand tier (request "fast-candidate-gptoss20b"). The >=91% golden half is unmeasured (needs the
+  # candidate registered in the crush harness); coder-fast (30B coder) stays the coding default. NB: gpt-oss puts
+  # chain-of-thought in reasoning_content — give it a normal max_tokens or the visible content can come back empty.
   "fast-candidate-gptoss20b":
     cmd: |
       __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
@@ -129,18 +144,6 @@ models:
       --flash-attn on
       --jinja
 
-  # DOWNLOADED + ACTIVE for bake-off (2026-06-21) — Qwen3-VL-32B-Instruct (dense), vision UPGRADE over the 8B
-  # "vision" tier. Q4_K_M ~18.4GiB + mmproj ~1.1GiB + q8 KV @32k fits 32GB (Q8_0 32.4GiB does NOT). --mmproj is
-  # REQUIRED (Qwen3-VL CLIP via llama.cpp PR #16780, in this b9616 build). Bake-off vs the 8B before repointing "vision".
-  "vision-candidate-32b":
-    cmd: |
-      __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
-      -m __DOKI_ROOT__\models\Qwen3-VL-32B-Instruct-Q4_K_M.gguf
-      --mmproj __DOKI_ROOT__\models\Qwen3-VL-32B-Instruct-mmproj-F16.gguf
-      --port ${PORT}
-      -ngl 99
-      -c 32768
-      --flash-attn on
-      --cache-type-k q8_0
-      --cache-type-v q8_0
-      --jinja
+  # (Qwen3-VL-32B-Instruct was PROMOTED to the "vision" tier above on 2026-06-21 after the eval-gate
+  #  — it decisively out-read the 8B on fine UI text/telemetry. Its standalone "vision-candidate-32b"
+  #  bake-off entry was removed as redundant; the 8B remains available as "vision-8b".)
