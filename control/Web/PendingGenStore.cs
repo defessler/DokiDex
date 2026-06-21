@@ -14,7 +14,8 @@ namespace DokiDex.Web;
 // mode. This record is the durable, small subset of GenSubmit that survives the eventual GPU flip. Conversation
 // links it back to the chat thread for later surfacing (optional). Id/Created are SERVER-set — no client path => no traversal.
 public sealed record PendingGen(
-    string Id, string Prompt, string Kind, string? Model, int Count, string Created, string? Conversation);
+    string Id, string Prompt, string Kind, string? Model, int Count, string Created, string? Conversation,
+    string? Status = null, string? ResultRel = null, string? Error = null);   // lifecycle: queued -> rendering -> done/failed; ResultRel = finished media (gallery-relative); Error on failure
 
 // Pending-gen store — file-based under RepoPaths.Root/pending-gen/<id>.json (the durable install/repo root that
 // survives a mode-switch), mirroring ChatStore exactly (JSON via the same serializer, graceful try/catch). The
@@ -39,7 +40,8 @@ public static class PendingGenStore
             Model: model,
             Count: count,
             Created: DateTime.UtcNow.ToString("o"),
-            Conversation: conversation);
+            Conversation: conversation,
+            Status: "queued");
         try { Directory.CreateDirectory(Dir); File.WriteAllText(Path.Combine(Dir, rec.Id + ".json"), JsonSerializer.Serialize(rec)); }
         catch { }
         return rec;
@@ -68,6 +70,21 @@ public static class PendingGenStore
         var p = Path.Combine(Dir, n + ".json");
         try { return File.Exists(p) ? JsonSerializer.Deserialize<PendingGen>(File.ReadAllText(p), JsonOpts) : null; }
         catch { return null; }
+    }
+
+    // Re-persist a pending gen with a new lifecycle status (+ optional result path / error), preserving everything
+    // else (id, prompt, the Conversation backlink). The deferred renderer drives queued -> rendering -> done/failed
+    // so the chat SPA can poll /pending-gen and surface the finished media inline in its originating thread. Returns
+    // the updated record, or null for an unknown/unsafe id (loaded via the SafeName-guarded Load). Graceful: a disk
+    // hiccup returns the prior record rather than throwing — the renderer/agent paths must never crash on a write.
+    public static PendingGen? SetStatus(string? id, string status, string? resultRel = null, string? error = null)
+    {
+        var rec = Load(id);
+        if (rec is null) return null;
+        var updated = rec with { Status = status, ResultRel = resultRel, Error = error };
+        try { File.WriteAllText(Path.Combine(Dir, rec.Id + ".json"), JsonSerializer.Serialize(updated)); }
+        catch { return rec; }
+        return updated;
     }
 
     public static bool Delete(string? id)

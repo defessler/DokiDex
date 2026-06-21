@@ -86,4 +86,59 @@ public class PendingGenStoreTests
         Assert.True(PendingGenStore.Delete(rec.Id));
         Assert.Null(PendingGenStore.Load(rec.Id));
     }
+
+    [Fact]
+    public void Enqueue_starts_a_pending_gen_in_the_queued_status_with_no_result()
+    {
+        // The render round-trip (P1) is a lifecycle: queued -> rendering -> done/failed. A freshly-queued gen
+        // starts "queued" with no result/error so the deferred renderer + the chat SPA can poll its progress.
+        var rec = PendingGenStore.Enqueue("p", "image", null, 1, "conv-1");
+        try
+        {
+            Assert.Equal("queued", rec.Status);
+            Assert.Null(rec.ResultRel);
+            Assert.Null(rec.Error);
+            Assert.Equal("queued", PendingGenStore.Load(rec.Id)!.Status);   // durable
+        }
+        finally { PendingGenStore.Delete(rec.Id); }
+    }
+
+    [Fact]
+    public void SetStatus_moves_a_pending_gen_through_rendering_to_done_with_a_result_path()
+    {
+        var rec = PendingGenStore.Enqueue("p", "image", null, 1, "conv-9");
+        try
+        {
+            Assert.Equal("rendering", PendingGenStore.SetStatus(rec.Id, "rendering")!.Status);
+
+            var done = PendingGenStore.SetStatus(rec.Id, "done", resultRel: "2026/06/img_001.png");
+            Assert.Equal("done", done!.Status);
+            Assert.Equal("2026/06/img_001.png", done.ResultRel);
+            Assert.Equal("conv-9", done.Conversation);   // backlink + identity preserved across the rewrite
+            Assert.Equal(rec.Id, done.Id);
+            Assert.Equal("done", PendingGenStore.Load(rec.Id)!.Status);   // durable
+        }
+        finally { PendingGenStore.Delete(rec.Id); }
+    }
+
+    [Fact]
+    public void SetStatus_records_a_failure_message()
+    {
+        var rec = PendingGenStore.Enqueue("p", "image", null, 1, null);
+        try
+        {
+            var failed = PendingGenStore.SetStatus(rec.Id, "failed", error: "SwarmUI not reachable");
+            Assert.Equal("failed", failed!.Status);
+            Assert.Equal("SwarmUI not reachable", failed.Error);
+            Assert.Null(failed.ResultRel);
+        }
+        finally { PendingGenStore.Delete(rec.Id); }
+    }
+
+    [Fact]
+    public void SetStatus_on_an_unknown_or_unsafe_id_returns_null()
+    {
+        Assert.Null(PendingGenStore.SetStatus("nonexistent-id-xyz", "done"));
+        Assert.Null(PendingGenStore.SetStatus("../escape", "done"));   // traversal-guarded like Load/Delete
+    }
 }
