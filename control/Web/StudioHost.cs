@@ -48,6 +48,7 @@ public static class StudioHost
         builder.Services.AddSingleton<GenerationJobs>();
         builder.Services.AddSingleton<GalleryService>();
         builder.Services.AddSingleton<ModelManager>();
+        builder.Services.AddSingleton<ChatGenCoordinator>(sp => new ChatGenCoordinator(sp.GetRequiredService<DokiService>()));
 
         var app = builder.Build();
 
@@ -959,6 +960,14 @@ public static class StudioHost
         // it so the user can pick it up after flipping the GPU to MEDIA). Id is server-generated => no client path. ----
         api.MapGet("/pending-gen", () => Results.Json(PendingGenStore.List()));
         api.MapDelete("/pending-gen/{id}", (string id) => PendingGenStore.Delete(id) ? Results.Ok() : Results.NotFound());
+        ChatGenEndpoints.Map(api);   // GET /api/chat/pending-gens?conversation=<id> — per-thread render lifecycle for inline chat surfacing
+        // Drive the chat->media round-trip: flip the GPU to media, render the queued chat gens (oldest-first), flip back.
+        // Fire-and-forget so the HTTP call returns immediately; the coordinator is internally single-flight (a duplicate POST no-ops).
+        api.MapPost("/chat/render-queued", (ChatGenCoordinator coord) =>
+        {
+            _ = Task.Run(() => coord.DrainAsync(CancellationToken.None));
+            return Results.Json(new { started = true });
+        });
 
         // ---- editable long-term MEMORY (the persistent memory-mcp store that chat recall surfaces): list / save /
         // delete, so a panel (or curl) can curate the facts that ride into every chat. Degrades when the memory-mcp

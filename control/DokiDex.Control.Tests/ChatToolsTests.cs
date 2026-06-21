@@ -28,10 +28,10 @@ public class ChatToolsTests
         var root = doc.RootElement;
 
         Assert.Equal(JsonValueKind.Array, root.ValueKind);
-        Assert.Equal(4, root.GetArrayLength());   // gated 1 -> 4: + generate_image (the lone write-action tool)
+        Assert.Equal(5, root.GetArrayLength());   // gated 1 -> 5: + generate_image + edit_image (the write-action tools)
 
         // EVERY tool is a well-formed OpenAI function schema with a required string param the model fills first:
-        // the three READ tools take {query:string}; the one WRITE tool (generate_image) takes {prompt:string}.
+        // the three READ tools take {query:string}; the two WRITE tools (generate_image / edit_image) take {prompt:string}.
         foreach (var tool in root.EnumerateArray())
         {
             Assert.Equal("function", tool.GetProperty("type").GetString());
@@ -46,7 +46,7 @@ public class ChatToolsTests
         }
 
         var names = root.EnumerateArray().Select(t => t.GetProperty("function").GetProperty("name").GetString()).ToList();
-        Assert.Equal(new[] { "search_library", "web_search", "code_search", "generate_image" }, names);
+        Assert.Equal(new[] { "search_library", "web_search", "code_search", "generate_image", "edit_image" }, names);
     }
 
     [Fact]
@@ -184,6 +184,204 @@ public class ChatToolsTests
         var result = ChatTools.Run("generate_image", "{\"prompt\":\"   \"}");
         Assert.Contains("prompt", result, System.StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));   // this call queued nothing
+    }
+
+    // ----- edit_image: the refine/img2img sibling of generate_image. Same QUEUE-AND-NOTIFY contract, but it
+    // carries an init image + a strength so the deferred renderer runs img2img. The pure seams (MapEditArgs arg
+    // parse, ResolveEditSource default-source pick) are tested with NO disk; the Run path round-trips the store. -----
+
+    [Fact]
+    public void edit_image_schema_has_a_required_prompt_and_optional_source_and_strength()
+    {
+        // edit_image's params: a REQUIRED prompt (the edit instruction) + optional source (gallery-relative image
+        // name) + optional strength (the img2img "vary" dial). required names exactly prompt; the rest default in
+        // MapEditArgs (source => null => resolve to the most-recent done gen for this conversation; strength => 0.6).
+        var json = JsonSerializer.Serialize(ChatTools.EditImageSchema);
+        using var doc = JsonDocument.Parse(json);
+        var fn = doc.RootElement.GetProperty("function");
+        Assert.Equal("edit_image", fn.GetProperty("name").GetString());
+        var p = fn.GetProperty("parameters");
+        var props = p.GetProperty("properties");
+        Assert.Equal("string", props.GetProperty("prompt").GetProperty("type").GetString());
+        Assert.Equal("string", props.GetProperty("source").GetProperty("type").GetString());
+        Assert.Equal("number", props.GetProperty("strength").GetProperty("type").GetString());
+        var required = p.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(new[] { "prompt" }, required);
+    }
+
+    [Fact]
+    public void The_tools_array_now_includes_edit_image_as_the_curated_fifth_tool()
+    {
+        // Gated 4 -> 5: edit_image is the justified sibling of generate_image (refine/img2img), not sprawl. The
+        // request 'tools' array must carry it last, well-formed, so the LLM can select it.
+        var json = JsonSerializer.Serialize(ChatTools.ToolsJson);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(5, root.GetArrayLength());
+        var names = root.EnumerateArray().Select(t => t.GetProperty("function").GetProperty("name").GetString()).ToList();
+        Assert.Equal(new[] { "search_library", "web_search", "code_search", "generate_image", "edit_image" }, names);
+    }
+
+    [Theory]
+    // defaults: missing source => null (resolved later), missing strength => 0.6
+    [InlineData("{\"prompt\":\"make it bluer\"}", "make it bluer", null, 0.6)]
+    // source trimmed; explicit strength passes through
+    [InlineData("{\"prompt\":\"  same pose  \",\"source\":\"  2026/06/img_001.png  \",\"strength\":0.35}", "same pose", "2026/06/img_001.png", 0.35)]
+    // tolerant of a string-typed strength (some models emit "strength":"0.4")
+    [InlineData("{\"prompt\":\"x\",\"strength\":\"0.4\"}", "x", null, 0.4)]
+    // strength clamped to (0,1]: out-of-band high => 1, zero/negative => the 0.6 default (an invalid dial is ignored)
+    [InlineData("{\"prompt\":\"x\",\"strength\":5}", "x", null, 1.0)]
+    [InlineData("{\"prompt\":\"x\",\"strength\":0}", "x", null, 0.6)]
+    [InlineData("{\"prompt\":\"x\",\"strength\":-2}", "x", null, 0.6)]
+    // blank source => null (not "")
+    [InlineData("{\"prompt\":\"x\",\"source\":\"   \"}", "x", null, 0.6)]
+    public void MapEditArgs_parses_prompt_source_and_strength_with_defaults_and_clamp(string args, string ep, string? es, double estr)
+    {
+        var (prompt, source, strength) = ChatTools.MapEditArgs(args);
+        Assert.Equal(ep, prompt);
+        Assert.Equal(es, source);
+        Assert.Equal(estr, strength, 3);
+    }
+
+    [Theory]
+    [InlineData("{\"prompt\":\"   \"}")]   // whitespace prompt
+    [InlineData("{\"source\":\"x.png\"}")] // missing prompt
+    [InlineData("")]                        // no arguments at all
+    [InlineData("not json")]                // malformed
+    public void MapEditArgs_blank_or_missing_prompt_yields_empty_prompt(string args)
+    {
+        var (prompt, _, _) = ChatTools.MapEditArgs(args);
+        Assert.Equal("", prompt);   // the executor turns an empty prompt into the "need a prompt" line, never throws
+    }
+
+    [Fact]
+    public void ResolveEditSource_prefers_an_explicit_source_verbatim()
+    {
+        // An explicit source always wins — the conversation-history fallback is only consulted when none was given.
+        var list = new[]
+        {
+            new PendingGen("id1", "p", "image", null, 1, "2026-06-21T00:00:02Z", "conv-1", Status: "done", ResultRel: "newer.png"),
+        };
+        Assert.Equal("explicit.png", ChatTools.ResolveEditSource("explicit.png", "conv-1", list));
+    }
+
+    [Fact]
+    public void ResolveEditSource_defaults_to_the_most_recent_done_gen_for_this_conversation()
+    {
+        // No explicit source => pick the newest DONE PendingGen in THIS conversation that has a ResultRel. List()
+        // is newest-first, so the first matching record's ResultRel is the most-recent finished image to refine.
+        var list = new[]
+        {
+            new PendingGen("id3", "p", "image", null, 1, "t", "conv-1", Status: "done",      ResultRel: "newest.png"),
+            new PendingGen("id2", "p", "image", null, 1, "t", "conv-1", Status: "done",      ResultRel: "older.png"),
+            new PendingGen("id1", "p", "image", null, 1, "t", "conv-1", Status: "rendering", ResultRel: null),
+        };
+        Assert.Equal("newest.png", ChatTools.ResolveEditSource(null, "conv-1", list));
+    }
+
+    [Fact]
+    public void ResolveEditSource_ignores_other_conversations_and_not_done_or_resultless_records()
+    {
+        // The fallback must be conversation-scoped and only consider finished gens with a real ResultRel: a done
+        // gen in ANOTHER conversation, a queued/rendering gen, and a done gen with no ResultRel are all skipped.
+        var list = new[]
+        {
+            new PendingGen("id4", "p", "image", null, 1, "t", "conv-2", Status: "done",      ResultRel: "other-conv.png"),
+            new PendingGen("id3", "p", "image", null, 1, "t", "conv-1", Status: "queued",    ResultRel: null),
+            new PendingGen("id2", "p", "image", null, 1, "t", "conv-1", Status: "done",      ResultRel: null),
+            new PendingGen("id1", "p", "image", null, 1, "t", "conv-1", Status: "done",      ResultRel: "mine.png"),
+        };
+        Assert.Equal("mine.png", ChatTools.ResolveEditSource(null, "conv-1", list));
+        // Nothing usable at all => null (the executor turns that into the "need a source" line).
+        Assert.Null(ChatTools.ResolveEditSource(null, "conv-empty", list));
+        Assert.Null(ChatTools.ResolveEditSource(null, null, list));   // a null conversation never matches a backlink
+    }
+
+    [Fact]
+    public void FormatEditQueued_is_bounded_and_names_the_source_and_media_mode()
+    {
+        var text = ChatTools.FormatEditQueued("2026/06/img_001.png");
+        Assert.Contains("img_001.png", text);
+        Assert.Contains("Media mode", text, System.StringComparison.OrdinalIgnoreCase);
+        Assert.True(text.Length < 300, $"queued edit notice should stay bounded, was {text.Length}");
+    }
+
+    [Fact]
+    public void Run_for_edit_image_with_a_prompt_and_source_queues_a_pending_gen_with_initimage_and_strength()
+    {
+        // The img2img round-trip: an edit_image call must persist a PendingGen carrying InitImage (the source to
+        // refine) + Strength (the vary dial), kind "image", count 1, and the conversation backlink. Store round-trip
+        // mirrors the generate_image tests; clean up whatever this enqueues.
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];
+        var result = ChatTools.Run("edit_image",
+            "{\"prompt\":\"make it bluer\",\"source\":\"2026/06/img_001.png\",\"strength\":0.4}", convId);
+        var created = PendingGenStore.List().Where(p => !before.Contains(p.Id)).ToList();
+        try
+        {
+            Assert.Contains("Media mode", result, System.StringComparison.OrdinalIgnoreCase);
+            Assert.Single(created);
+            var rec = created[0];
+            Assert.Equal("make it bluer", rec.Prompt);
+            Assert.Equal("image", rec.Kind);            // edit_image queues into the image family
+            Assert.Equal(1, rec.Count);
+            Assert.Equal("2026/06/img_001.png", rec.InitImage);
+            Assert.Equal(0.4, rec.Strength!.Value, 3);
+            Assert.Equal(convId, rec.Conversation);     // backlink threaded for the inline-surface round-trip
+        }
+        finally { foreach (var p in created) PendingGenStore.Delete(p.Id); }
+    }
+
+    [Fact]
+    public void Run_for_edit_image_defaults_the_source_to_the_most_recent_done_gen_in_the_conversation()
+    {
+        // No explicit source: edit_image resolves it from history — the newest done gen in THIS conversation. We
+        // seed one done PendingGen with a ResultRel, then edit with no source and assert the queued edit's InitImage
+        // picked it up. Both records are cleaned up.
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];
+        var seed = PendingGenStore.Enqueue("a neon dragon", "image", null, 1, convId);
+        PendingGenStore.SetStatus(seed.Id, "done", resultRel: "2026/06/seeded.png");
+        try
+        {
+            ChatTools.Run("edit_image", "{\"prompt\":\"same dragon, new pose\"}", convId);
+            var edit = PendingGenStore.List().Single(p => p.Conversation == convId && p.InitImage == "2026/06/seeded.png");
+            Assert.Equal("same dragon, new pose", edit.Prompt);
+            Assert.NotNull(edit.Strength);   // the default vary dial was applied
+        }
+        finally
+        {
+            foreach (var p in PendingGenStore.List().Where(p => !before.Contains(p.Id))) PendingGenStore.Delete(p.Id);
+        }
+    }
+
+    [Fact]
+    public void Run_for_edit_image_with_a_blank_prompt_asks_for_a_prompt_and_does_not_queue()
+    {
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var result = ChatTools.Run("edit_image", "{\"prompt\":\"   \",\"source\":\"x.png\"}");
+        Assert.Contains("edit instruction", result, System.StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));   // queued nothing
+    }
+
+    [Fact]
+    public void Run_for_edit_image_with_no_source_and_no_history_asks_for_a_source_and_does_not_queue()
+    {
+        // A present prompt but NO source and an empty conversation history => the tool can't guess what to edit, so
+        // it returns a clear "which image" line WITHOUT touching disk (a fresh conversation id has zero done gens).
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];   // no done gens => nothing to default to
+        var result = ChatTools.Run("edit_image", "{\"prompt\":\"make it bluer\"}", convId);
+        Assert.Contains("image", result, System.StringComparison.OrdinalIgnoreCase);   // names that it needs a source image
+        Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));     // queued nothing
+    }
+
+    [Fact]
+    public void Run_with_an_unknown_tool_name_lists_edit_image_in_the_curated_set()
+    {
+        // The unknown-tool fall-through advertises the full curated set so the model can re-plan onto edit_image.
+        var result = ChatTools.Run("frobnicate", "{}");
+        Assert.Contains("edit_image", result);
     }
 
     [Theory]

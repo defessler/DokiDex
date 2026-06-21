@@ -119,6 +119,19 @@
     .toolsteps{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 5px}
     .toolsteps .tchip{display:inline-block;font-size:11px;color:var(--cyan);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #chatImagePicker .pcell:hover{border-color:var(--cyan)}
+    /* Render round-trip: inline chat cards for image gens queued from this thread (queued → rendering → done → failed) */
+    #chatPendingGens{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .gcard{align-self:flex-start;max-width:80%;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.4}
+    .gcard .ghdr{display:flex;align-items:center;gap:8px}
+    .gcard .gp{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+    .gcard .gstat{font-size:11px;white-space:nowrap}
+    .gcard .gstat.queued{color:var(--dim)} .gcard .gstat.rendering{color:var(--cyan)}
+    .gcard .gstat.done{color:var(--gold)} .gcard .gstat.failed{color:var(--danger)}
+    .gcard.failed{border-color:var(--danger)}
+    .gcard img{display:block;max-width:100%;margin-top:8px;border-radius:8px;border:1px solid var(--border)}
+    .gcard .gerr{margin-top:6px;color:var(--danger);font-size:12px;white-space:pre-wrap;word-break:break-word}
+    .gcard .gx{background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+    .gcard .gx:hover{color:var(--cyan)}
     /* per-conversation KNOWLEDGE BASE (RAG): attach .txt/.md docs to a thread; relevant chunks auto-injected each turn */
     #kbPanel summary .kbflag{display:none;margin-left:8px;font-size:10px;font-family:"Cascadia Mono",Consolas,monospace;color:#06121a;background:var(--cyan);border-radius:999px;padding:1px 8px;vertical-align:middle;font-weight:600}
     #kbPanel.active summary .kbflag{display:inline-block}
@@ -395,6 +408,10 @@
         </div>
       </details>
       <div id="chatLog"></div>
+      <!-- Render round-trip: image gens queued from THIS thread (generate_image / edit_image) surface their
+           lifecycle inline here — queued → rendering (live preview) → done (final image) → failed. Polled while
+           the chat view is active; the finished image appears in the conversation. -->
+      <div id="chatPendingGens"></div>
       <div class="row" style="align-items:flex-start;margin-top:8px">
         <textarea id="chatInput" placeholder="Message…  (Ctrl+Enter to send)" style="flex:1;min-height:72px"></textarea>
       </div>
@@ -569,7 +586,8 @@
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
-      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKbLibraries(); loadKb(); renderChatGuard(); document.getElementById('chatInput').focus(); }
+      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKbLibraries(); loadKb(); renderChatGuard(); startChatGenPoll(); document.getElementById('chatInput').focus(); }
+      else stopChatGenPoll();   // only poll the chat-thread render cards while chat is open
     }
 
     // ---- guided Home command center: render GET /api/home (catalog + live readiness) into grouped capability cards.
@@ -1598,6 +1616,55 @@
       });
       el.appendChild(wrap);
     }
+    // ---- Render round-trip surfacing IN THE CHAT THREAD: image gens the assistant queued from THIS conversation
+    // (generate_image / edit_image) show their lifecycle inline as small themed cards below the transcript —
+    // queued → rendering (live data-URL preview) → done (final image via the gallery media URL) → failed (Error).
+    // Scoped to _chatConv via GET /api/chat/pending-gens (the server filters by conversation), polled on a timer
+    // ONLY while the chat view is active. Mirrors the Create-view loadPendingGen pattern; the finished image lands
+    // inline in the conversation. DOM is rebuilt each poll (small list) so a status change just re-renders. ----
+    async function loadChatPendingGens(){
+      const el=document.getElementById('chatPendingGens'); if(!el) return;
+      if(!_chatConv){ el.innerHTML=''; return; }   // a fresh thread has no id yet → nothing queued from it
+      let list=[]; try{ list=await (await fetch('/api/chat/pending-gens?conversation='+encodeURIComponent(_chatConv))).json(); }catch{ return; }
+      if(!Array.isArray(list)){ el.innerHTML=''; return; }
+      el.innerHTML='';
+      // Oldest-first so cards read in the order they were requested (List() is newest-first; reverse for the thread).
+      list.slice().reverse().forEach(p=>{
+        const st=(p.status||'queued').toLowerCase();
+        const card=$(`<div class="gcard ${st}"></div>`);
+        const cnt=p.count>1?` ×${p.count}`:'';
+        const label = st==='queued'?'queued — switch to Media to render'
+          : st==='rendering'?'rendering…'
+          : st==='done'?'done'
+          : st==='failed'?'failed'
+          : esc(st);
+        const hdr=$(`<div class="ghdr"></div>`);
+        hdr.appendChild($(`<span class="gp" title="${esc(p.prompt)}">${esc(p.prompt)}<small class="hint"> (${esc(p.kind||'image')}${cnt})</small></span>`));
+        hdr.appendChild($(`<span class="gstat ${st}">${esc(label)}</span>`));
+        // queued/failed are terminal-from-the-thread states the user may want to clear; the durable file is deleted.
+        if(st==='queued'||st==='failed'){
+          const x=$(`<button class="gx" type="button" title="dismiss">✕</button>`);
+          x.onclick=async()=>{ try{ await fetch('/api/pending-gen/'+encodeURIComponent(p.id),{method:'DELETE'}); }catch{} loadChatPendingGens(); };
+          hdr.appendChild(x);
+        }
+        card.appendChild(hdr);
+        // rendering → show the in-flight preview data-URL when the coordinator has streamed one (warming-up frame).
+        if(st==='rendering' && p.preview){ const im=document.createElement('img'); im.src=p.preview; im.alt=''; card.appendChild(im); }
+        // done → the FINISHED image inline, from the gallery media URL for the result filename (ResultRel basename).
+        else if(st==='done' && p.resultRel){
+          const name=String(p.resultRel).split('/').pop();
+          const im=document.createElement('img'); im.src='/api/gallery/media/'+encodeURIComponent(name); im.alt=''; im.loading='lazy'; card.appendChild(im);
+        }
+        // failed → the error message, themed danger.
+        else if(st==='failed' && p.error){ const e=document.createElement('div'); e.className='gerr'; e.textContent=p.error; card.appendChild(e); }
+        el.appendChild(card);
+      });
+    }
+    // Poll the chat-thread render cards while the chat view is active (started/stopped in setView). Kept off the
+    // global pollStatus/pollJobs cadence so it only runs when chat is open and an id exists.
+    let _chatGenTimer=null;
+    function startChatGenPoll(){ if(_chatGenTimer) return; loadChatPendingGens(); _chatGenTimer=setInterval(()=>{ if(state.view==='chat') loadChatPendingGens(); }, 2000); }
+    function stopChatGenPoll(){ if(_chatGenTimer){ clearInterval(_chatGenTimer); _chatGenTimer=null; } }
     // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
     let _chatMsgs=[], _chatConv=null;
     // ---- per-conversation KNOWLEDGE BASE (RAG "chat with your documents") ----
@@ -2114,6 +2181,7 @@
       _chatMsgs.forEach((m,i)=>appendBubble(m.role==='assistant'?'assistant':'user', m.content, i));
       document.getElementById('chatHint').textContent='';
       loadKb();   // surface any docs already attached to this thread (+ the RAG-active flag / attached-library pill)
+      loadChatPendingGens();   // surface any render round-trip cards this thread already has queued/in-flight/done
       syncChatExport();
     }
     // Loaded persona cards (full PersonaCard objects from GET /api/personas) cached so readback can derive the
@@ -2212,7 +2280,7 @@
       try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
     }
     function newChat(){ _chatMsgs=[]; _chatConv=null; _chatKbId=null; document.getElementById('chatLog').innerHTML='';
-      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); syncChatExport(); }
+      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); loadChatPendingGens(); syncChatExport(); }
     // ADDITIVE chat-history search over the thread list: a blank box falls back to loadThreads(); else it
     // re-populates #chatThread's options from GET /api/chats/search (id + persona label + snippet), so selecting
     // a hit still flows through the existing onchange="openThread(this.value)" — zero new open code. Debounced;
@@ -2346,6 +2414,9 @@
       const bub=appendBubble('assistant', j.text, _chatMsgs.length-1);
       renderToolSteps(bub, j.steps);   // backend emits only `steps`
       hint.textContent='';
+      // A generate_image / edit_image tool call may have just enqueued a pending gen for THIS thread — surface its
+      // card immediately (now that _chatConv is set for a fresh thread) rather than waiting for the next poll tick.
+      loadChatPendingGens();
       if(fresh){ applyFreshKbId(j.kbId); loadThreads(); loadKb(); }   // FIX 1: refresh the scope if the default KB was auto-attached
     }
     // Non-streaming POST /api/chat — kept as the P2 transport fallback (real 503 contract).

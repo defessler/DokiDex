@@ -142,12 +142,46 @@ public static class ChatTools
         },
     };
 
-    // The 'tools' array placed into the request body. A deliberate gated expansion 1 -> 4 (search_library +
-    // web_search + code_search + generate_image); decisions.md warns open models lose tool-selection accuracy as
-    // the list grows, so the set stays SMALL and the descriptions stay sharp. generate_image is acceptable as the
-    // 4th BECAUSE it is the lone write-action among three read-tools and its description is crisply non-overlapping.
-    // Do not sprawl past this curated set.
-    public static readonly object[] ToolsJson = { SearchLibrarySchema, WebSearchSchema, CodeSearchSchema, GenerateImageSchema };
+    // edit_image — the justified SIBLING of generate_image: refine/img2img an EXISTING image ("make it bluer",
+    // "same character, new pose") instead of creating one from scratch. Same QUEUE-AND-NOTIFY, GPU-arbitration-safe
+    // contract — it never renders mid-chat and never evicts the resident LLM; it persists a pending-gen carrying an
+    // INIT IMAGE + a STRENGTH so the deferred renderer runs img2img. The sharp, disjoint description is the defense
+    // against the tool-selection cost of a 5th tool: it states the EDIT verb + that it transforms an existing image
+    // (vs generate_image's from-scratch create, vs search_library's find), and that `source` may be omitted to edit
+    // the most recently generated image in THIS conversation. Params: a required prompt (the edit instruction) + an
+    // optional source (gallery-relative image name) + an optional strength (the img2img "vary" dial).
+    public static readonly object EditImageSchema = new
+    {
+        type = "function",
+        function = new
+        {
+            name = "edit_image",
+            description = "Edit or refine an EXISTING image with img2img — change its colors, style, pose, or "
+                + "details while keeping its composition (e.g. 'make it bluer', 'same character, new pose'). Use "
+                + "this to TRANSFORM an image that already exists, NOT to create a new one from scratch "
+                + "(use generate_image) and NOT to find media (use search_library). Like generate_image this "
+                + "QUEUES the request; rendering happens after the user switches to Media mode. Omit `source` to "
+                + "edit the most recently generated image in this conversation.",
+            parameters = new
+            {
+                type = "object",
+                properties = new
+                {
+                    prompt = new { type = "string", description = "The edit instruction — what to change (e.g. 'make the sky a deep blue', 'turn it into winter')." },
+                    source = new { type = "string", description = "Gallery-relative name of the image to edit (e.g. '2026/06/img_001.png'). Omit to edit the most recent image generated in this conversation." },
+                    strength = new { type = "number", description = "How much to change, 0.0-1.0 (low = subtle tweak, high = strong reinterpretation). Default 0.6." },
+                },
+                required = new[] { "prompt" },
+            },
+        },
+    };
+
+    // The 'tools' array placed into the request body. A deliberate gated expansion 1 -> 5 (search_library +
+    // web_search + code_search + generate_image + edit_image); decisions.md warns open models lose tool-selection
+    // accuracy as the list grows, so the set stays SMALL and the descriptions stay sharp. generate_image is the lone
+    // write-action among three read-tools; edit_image is its JUSTIFIED sibling (refine/img2img of an existing image,
+    // crisply disjoint from create / find), NOT sprawl. Do not grow past this curated set.
+    public static readonly object[] ToolsJson = { SearchLibrarySchema, WebSearchSchema, CodeSearchSchema, GenerateImageSchema, EditImageSchema };
 
     // PURE: pull the trimmed {query} string out of an OpenAI tool-call arguments JSON STRING. A missing/blank
     // query, no arguments at all, or malformed JSON all yield "" (a blank query lists the most recent items) —
@@ -244,6 +278,74 @@ public static class ChatTools
         return (prompt, kind, model, count);
     }
 
+    // The default img2img "vary" strength for edit_image when the model omits one — a moderate change that keeps
+    // the source's composition while honoring the edit instruction (decisions.md's refine recipe sits near here).
+    private const double DefaultEditStrength = 0.6;
+
+    // PURE: map an edit_image tool-call arguments JSON STRING onto the (prompt, source, strength) fields the
+    // pending-gen store persists for an img2img edit. Sibling of MapGenArgs, kept just as tolerant:
+    //   • prompt   — trimmed; blank/missing/malformed => "" (the executor turns "" into the "need a prompt" line).
+    //   • source   — trimmed gallery-relative name; blank/missing => null (the executor resolves it to the most-
+    //                recent done gen in the conversation via ResolveEditSource). Never "".
+    //   • strength — the img2img vary dial in (0,1]; tolerant of a string-typed number ("0.4"). An out-of-range
+    //                HIGH value clamps to 1.0; a non-positive / missing / unparseable value falls back to the 0.6
+    //                default (a 0-or-negative dial is meaningless for img2img, so it's treated as "use the default").
+    // Total + side-effect-free, never throws — a sloppy model argument degrades to safe defaults. The unit-test seam.
+    public static (string prompt, string? source, double strength) MapEditArgs(string? argumentsJson)
+    {
+        var prompt = "";
+        string? source = null;
+        var strength = DefaultEditStrength;
+        if (string.IsNullOrWhiteSpace(argumentsJson)) return (prompt, source, strength);
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return (prompt, source, strength);
+
+            if (root.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String)
+                prompt = (p.GetString() ?? "").Trim();
+
+            if (root.TryGetProperty("source", out var s) && s.ValueKind == JsonValueKind.String)
+            {
+                var sv = (s.GetString() ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(sv)) source = sv;
+            }
+
+            if (root.TryGetProperty("strength", out var st))
+            {
+                double? parsed = null;
+                if (st.ValueKind == JsonValueKind.Number && st.TryGetDouble(out var sd)) parsed = sd;
+                else if (st.ValueKind == JsonValueKind.String && double.TryParse(st.GetString(),
+                             System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ss)) parsed = ss;
+                // Only a strictly-positive value overrides the default; clamp the high side to 1.0. A 0/negative
+                // (or unparseable) value keeps DefaultEditStrength rather than producing a no-op edit.
+                if (parsed is > 0) strength = Math.Min(parsed.Value, 1.0);
+            }
+        }
+        catch { /* keep safe defaults */ }
+        return (prompt, source, strength);
+    }
+
+    // PURE: decide which image edit_image should refine. An EXPLICIT source always wins (returned verbatim). When
+    // none was given, default to the most-recent FINISHED gen in THIS conversation: `all` is newest-first
+    // (PendingGenStore.List()), so the FIRST record that is done (Status "done", case-insensitive) AND carries a
+    // ResultRel (gallery-relative finished media) AND backlinks to this conversation is the image to edit. A null
+    // conversation never matches a backlink. Nothing usable => null (the executor turns that into "which image?").
+    // Total + side-effect-free (the disk read happens in the executor, which passes its List() in) — the test seam.
+    public static string? ResolveEditSource(string? source, string? conversation, IEnumerable<PendingGen> all)
+    {
+        var s = source?.Trim();
+        if (!string.IsNullOrWhiteSpace(s)) return s;
+        if (string.IsNullOrWhiteSpace(conversation) || all is null) return null;
+        foreach (var g in all)
+            if (string.Equals(g.Status, "done", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(g.ResultRel)
+                && string.Equals(g.Conversation, conversation, StringComparison.Ordinal))
+                return g.ResultRel;
+        return null;
+    }
+
     // Dispatch a tool by name, returning the tool RESULT TEXT that becomes the role:"tool" message content. An
     // unknown tool name yields a clear "unknown tool" text (the model can recover / re-plan) rather than throwing,
     // and the search_library executor is wrapped so a disk hiccup degrades to a graceful message — the agent loop
@@ -269,8 +371,13 @@ public static class ChatTools
                 var (prompt, kind, model, count) = MapGenArgs(argumentsJson);
                 return RunGenerateImage(prompt, kind, model, count, conversation);
             }
+            case "edit_image":
+            {
+                var (prompt, source, strength) = MapEditArgs(argumentsJson);
+                return RunEditImage(prompt, source, strength, conversation);
+            }
             default:
-                return $"unknown tool: '{name}'. Available tools are: search_library, web_search, code_search, generate_image.";
+                return $"unknown tool: '{name}'. Available tools are: search_library, web_search, code_search, generate_image, edit_image.";
         }
     }
 
@@ -352,6 +459,41 @@ public static class ChatTools
     // bloat context across the loop's hops. No ids leak.
     public static string FormatGenQueued(int count, string kind)
         => $"Queued {count} {kind}(s) for generation. Switch to Media mode to render them "
+            + "(the GPU can't run the image model while we're chatting).";
+
+    // edit_image executor: the img2img SIBLING of RunGenerateImage, same QUEUE-AND-NOTIFY, GPU-arbitration-safe
+    // contract (never switches GPU mode, never evicts the resident chat LLM). A blank prompt returns the "need a
+    // prompt" line WITHOUT touching disk. Otherwise it resolves the SOURCE to edit — the explicit `source`, else
+    // (via ResolveEditSource over PendingGenStore.List()) the most-recent finished gen in this conversation; with
+    // neither it returns a "which image?" line WITHOUT queueing (the deferred renderer needs an init image). Else it
+    // persists a durable pending-gen carrying InitImage + Strength (so the render runs img2img) and returns the
+    // bounded queued notice. The disk touches (List + Enqueue) are wrapped so the agent loop never crashes on the
+    // tool; the store itself already degrades, so on an Enqueue failure we still return an honest "queued" notice.
+    private static string RunEditImage(string prompt, string? source, double strength, string? conversation)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+            return "I need an edit instruction — tell me what to change (e.g. 'make it bluer') and I'll queue the edit.";
+
+        string? resolved;
+        try { resolved = ResolveEditSource(source, conversation, PendingGenStore.List()); }
+        catch { resolved = source?.Trim(); }   // the agent loop must never crash on a tool; fall back to any explicit source
+        if (string.IsNullOrWhiteSpace(resolved))
+            return "Which image should I edit? Name a source image from your library, or generate one first and "
+                + "I'll edit the most recent.";
+
+        // kind stays the image family ("image"); model null lets the recipe default pick the img2img/refine path.
+        // InitImage + Strength are what make this an EDIT rather than a from-scratch gen. Conversation is threaded
+        // so the finished edit can be surfaced inline in its originating chat thread (the P1 render round-trip).
+        try { PendingGenStore.Enqueue(prompt, "image", null, 1, conversation, initImage: resolved, strength: strength); }
+        catch { /* the agent loop must never crash on a tool; the notice below is still honest */ }
+        return FormatEditQueued(resolved);
+    }
+
+    // PURE: the bounded queued-edit notice. Names the source image being edited and that rendering needs a
+    // Media-mode switch (the GPU can't run the image model during chat). Side-effect-free + total => unit-tested;
+    // bounded so it can't bloat context across the loop's hops. No ids leak.
+    public static string FormatEditQueued(string source)
+        => $"Queued an edit of \"{source}\". Switch to Media mode to render it "
             + "(the GPU can't run the image model while we're chatting).";
 
     // PURE: the sidecar Result -> tool-text decision shared by RunWebSearch / RunCodeSearch (so it can be
