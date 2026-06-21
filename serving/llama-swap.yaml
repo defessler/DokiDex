@@ -69,8 +69,9 @@ models:
   # pollutes the single-line Describe and the PASS/FAIL Verify parser.
   # Uncensored fallback: drop an abliterated Qwen2.5-VL GGUF + its mmproj into models\ and point
   # the -m/--mmproj below at them (same "vision" name, same :8080 path).
-  # NOTE: confirm this llama.cpp build has Qwen3-VL CLIP support by loading one real image; if it
-  # errors with a tensor/clip mismatch, bump llama.cpp (itself an eval-gated change in this repo).
+  # NOTE: this build (b9616) INCLUDES Qwen3-VL CLIP support — llama.cpp PR #16780 (merged 2025-10-30,
+  # needs b6887+; verified 2026-06-21, docs/research-llm-refresh-2026-06.md). Still smoke-test with one real
+  # image (verify-on-GPU). A Qwen3-VL-32B vision-UPGRADE candidate is staged in the bake-off block below.
   "vision":
     cmd: |
       __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
@@ -114,3 +115,23 @@ models:
   #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
   #     -m __DOKI_ROOT__\models\GLM-4.7-Flash-UD-Q4_K_XL.gguf
   #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --repeat-penalty 1.0 --min-p 0.01 --jinja
+  #
+  # "fast-candidate-gptoss20b":   # gpt-oss-20b (MXFP4, ggml-org/gpt-oss-20b-GGUF). FITS FULLY ON-GPU — ~11.3GB
+  #                               # weights, ~17.9GB total even at 131k ctx, NO --n-cpu-moe offload (unlike coder-big).
+  #                               # A fast mid-tier between coder-fast (30B) and the offloaded coder-big (120b).
+  #                               # Verified 2026-06-21 (docs/research-llm-refresh-2026-06.md). q8_0 KV reportedly hurts
+  #                               # gpt-oss quality — try F16 KV first (the --cache-type lines are omitted on purpose); still fits.
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\gpt-oss-20b-mxfp4.gguf
+  #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --jinja
+  #
+  # "vision-candidate-32b":       # Qwen3-VL-32B-Instruct (dense) — UPGRADE over the 8B "vision" tier above.
+  #                               # Q4_K_M ~18.4GiB + mmproj (~1.1GB F16) + q8 KV fits 32GB (Q8_0 weights 32.4GiB do NOT).
+  #                               # Vision is upstream (llama.cpp PR #16780, in this b9616 build). Load --mmproj explicitly.
+  #                               # Verified 2026-06-21 (docs/research-llm-refresh-2026-06.md). Bake-off vs the 8B before promoting.
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\Qwen3-VL-32B-Instruct-Q4_K_M.gguf
+  #     --mmproj __DOKI_ROOT__\models\Qwen3-VL-32B-Instruct-mmproj-F16.gguf
+  #     --port ${PORT} -ngl 99 -c 32768 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --jinja
