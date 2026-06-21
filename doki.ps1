@@ -406,7 +406,7 @@ switch ($Command) {
         $failed = 0
         # 1. PowerShell suites — installer failure-recovery helpers + the `status json` contract
         #    the panel parses. Each runs in a child pwsh so its `exit` can't tear down this run.
-        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\doki-statusjson.test.ps1", "tests\doki-gen.test.ps1", "tests\verify-gated.test.ps1")) {
+        foreach ($rel in @("tests\setup-helpers.test.ps1", "tests\test-toolcall.test.ps1", "tests\doki-statusjson.test.ps1", "tests\doki-gen.test.ps1", "tests\verify-gated.test.ps1")) {
             $tp = Join-Path $root $rel
             if (Test-Path $tp) {
                 Write-Host "== $(Split-Path $tp -Leaf) ==" -ForegroundColor Cyan
