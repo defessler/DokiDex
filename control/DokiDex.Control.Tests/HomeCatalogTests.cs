@@ -1,4 +1,5 @@
 using System.Linq;
+using DokiDex.Control.Models;
 using DokiDex.Web;
 using Xunit;
 
@@ -90,5 +91,42 @@ public class HomeCatalogTests
         var annotated = HomeCatalog.Annotate(Snap("agent", up: new[] { "llama-swap" }));
         Assert.Equal(HomeCatalog.Capabilities.Count, annotated.Count);
         Assert.All(annotated, a => Assert.False(string.IsNullOrWhiteSpace(a.Readiness.Status)));
+    }
+
+    [Fact]
+    public void SnapshotFrom_maps_the_llm_group_to_agent_mode_and_healthy_services_to_up()
+    {
+        var doc = new StatusDoc
+        {
+            Gpu = new GpuStatus { ActiveGroup = "llm" },
+            Services = new()
+            {
+                new ServiceStatus { Name = "llama-swap", Healthy = true },
+                new ServiceStatus { Name = "tts", Healthy = false },
+            },
+        };
+        var snap = HomeCatalog.SnapshotFrom(doc);
+        Assert.Equal("agent", snap.Mode);                  // GPU group "llm" -> user term "agent"
+        Assert.Contains("llama-swap", snap.ServicesUp);
+        Assert.DoesNotContain("tts", snap.ServicesUp);     // unhealthy -> not up
+    }
+
+    [Fact]
+    public void SnapshotFrom_handles_media_group_and_a_null_doc()
+    {
+        Assert.Equal("media", HomeCatalog.SnapshotFrom(new StatusDoc { Gpu = new GpuStatus { ActiveGroup = "media" } }).Mode);
+        var none = HomeCatalog.SnapshotFrom(null);
+        Assert.Equal("none", none.Mode);                   // null doc -> idle
+        Assert.Empty(none.ServicesUp);
+    }
+
+    [Fact]
+    public void Voice_card_needs_tts_until_that_service_is_up()
+    {
+        // end-to-end through the catalog: Voice requires the tts service.
+        var withoutTts = HomeCatalog.Annotate(Snap("agent", up: new[] { "llama-swap" })).First(c => c.Capability.Id == "voice");
+        Assert.Equal("needs-setup", withoutTts.Readiness.Status);
+        var withTts = HomeCatalog.Annotate(Snap("agent", up: new[] { "llama-swap", "tts" })).First(c => c.Capability.Id == "voice");
+        Assert.Equal("ready", withTts.Readiness.Status);
     }
 }

@@ -85,6 +85,15 @@ public static class StudioHost
                 : Results.Json(doc);
         });
 
+        // ---- the guided Home command center: the capability catalog, each entry annotated with live readiness
+        // (ready / needs-mode / needs-setup + a next-step) from the SAME status the dashboard uses, plus the GPU
+        // snapshot for the meter. The SPA Home view renders this; all the logic is in the pure HomeCatalog. ----
+        api.MapGet("/home", async (DokiService doki, CancellationToken ct) =>
+        {
+            var doc = await doki.GetStatusAsync(ct);
+            return Results.Json(new { gpu = doc?.Gpu, cards = HomeCatalog.Annotate(HomeCatalog.SnapshotFrom(doc)) });
+        });
+
         // Explicit mode switch from the dashboard = user intent, so it switches directly (the eviction-confirm
         // applies to the implicit auto-switch-on-generate path).
         api.MapPost("/mode/{profile}", (string profile, DokiService doki) =>

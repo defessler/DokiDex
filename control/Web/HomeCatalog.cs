@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DokiDex.Control.Models;
 
 namespace DokiDex.Web;
 
@@ -53,6 +54,22 @@ public static class HomeCatalog
     // Annotate every catalog capability with its readiness against a snapshot (the GET /api/home payload).
     public static IReadOnlyList<HomeCard> Annotate(HomeStatusSnapshot snap)
         => Capabilities.Select(c => new HomeCard(c, Resolve(c.Requires, snap))).ToList();
+
+    // Build the readiness snapshot from the live StatusDoc: the GPU's ActiveGroup -> the user-facing mode term (the
+    // 'llm' group is "agent" mode; 'media' stays 'media'; else idle 'none'), and every HEALTHY service -> "up". Pure
+    // + null-safe (a null doc -> idle, nothing up). Models-present is left empty (no catalog entry gates on a model
+    // today; add ModelManager wiring here if one ever does).
+    public static HomeStatusSnapshot SnapshotFrom(StatusDoc? doc)
+    {
+        var group = doc?.Gpu?.ActiveGroup ?? "none";
+        var mode = string.Equals(group, "llm", StringComparison.OrdinalIgnoreCase) ? "agent" : group;
+        var up = new HashSet<string>(
+            (doc?.Services ?? new List<ServiceStatus>())
+                .Where(s => s is { Healthy: true } && !string.IsNullOrWhiteSpace(s.Name))
+                .Select(s => s.Name),
+            StringComparer.OrdinalIgnoreCase);
+        return new HomeStatusSnapshot(mode, up, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
 
     // terse catalog helpers
     private static CapabilityRequires Need(string? mode = null, string? service = null, string? model = null) => new(mode, service, model);
