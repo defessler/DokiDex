@@ -573,10 +573,19 @@
     function homeEsc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
     async function loadHome(){
       const el = document.getElementById('view-home'); if(!el) return;
-      try { _homeData = await (await fetch('/api/home')).json(); }
+      // Phase 1 — render the catalog (cards + starters) INSTANTLY; badges show "checking…". No status wait.
+      let caps;
+      try { caps = await (await fetch('/api/home/catalog')).json(); }
       catch { el.innerHTML = '<p class="hint">Home unavailable — is the server running?</p>'; return; }
+      _homeData = { gpu:{}, cards: caps.map(c => ({ capability:c, readiness:{ status:'pending' } })) };
+      renderHome();
+      // Phase 2 — fill live readiness + GPU (slow when services are down); re-render the same cards in place.
+      try { _homeData = await (await fetch('/api/home')).json(); renderHome(); } catch { /* keep catalog-only */ }
+    }
+    function renderHome(){
+      const el = document.getElementById('view-home'); if(!el || !_homeData) return;
       const g = _homeData.gpu || {};
-      const mode = g.activeGroup==='llm' ? 'Agent (LLM)' : (g.activeGroup==='media' ? 'Media' : 'Idle');
+      const mode = g.activeGroup==='llm' ? 'Agent (LLM)' : (g.activeGroup==='media' ? 'Media' : (g.activeGroup ? 'Idle' : 'checking…'));
       const vram = (g.usedMB!=null && g.totalMB) ? ` · ${(g.usedMB/1024).toFixed(1)}/${(g.totalMB/1024).toFixed(0)} GB` : '';
       let html = `<div class="row" style="margin-bottom:20px">
           <div><div style="font-size:20px;font-weight:300;letter-spacing:1px">Welcome to <b style="color:var(--gold)">DokiDex</b></div>
@@ -594,6 +603,8 @@
       const cap = c.capability, r = c.readiness;
       const badge = r.status==='ready'
         ? `<span style="font-size:11px;color:var(--cyan)">● Ready</span>`
+        : r.status==='pending'
+        ? `<span class="hint" style="font-size:11px">· checking…</span>`
         : `<span onclick="homeReadyClick('${r.action||''}')" title="${homeEsc(r.nextStep||'')}" style="font-size:11px;color:var(--gold);cursor:pointer">▲ ${homeEsc(r.nextStep||'Needs setup')}</span>`;
       const starters = (cap.starters||[]).map((s,i) =>
         `<button class="ghost" style="font-size:11px;padding:5px 9px;margin:3px 3px 0 0" onclick="runStarter('${cap.id}',${i})">${homeEsc(s.label)}</button>`

@@ -93,6 +93,9 @@ public static class StudioHost
             var doc = await doki.GetStatusAsync(ct);
             return Results.Json(new { gpu = doc?.Gpu, cards = HomeCatalog.Annotate(HomeCatalog.SnapshotFrom(doc)) });
         });
+        // Instant catalog (no status wait) — the SPA renders these cards + starters immediately, then fills in
+        // readiness from /home (which blocks on the live status probe). Keeps the default Home view from waiting.
+        api.MapGet("/home/catalog", () => Results.Json(HomeCatalog.Capabilities));
 
         // Explicit mode switch from the dashboard = user intent, so it switches directly (the eviction-confirm
         // applies to the implicit auto-switch-on-generate path).
