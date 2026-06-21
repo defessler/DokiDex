@@ -569,7 +569,7 @@
 
     // ---- guided Home command center: render GET /api/home (catalog + live readiness) into grouped capability cards.
     //      Starters launch an area pre-filled (teach by doing); a non-ready badge routes to where you fix it. ----
-    let _homeData = null;
+    let _homeData = null, _homeRecent = null;
     function homeEsc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
     async function loadHome(){
       const el = document.getElementById('view-home'); if(!el) return;
@@ -581,6 +581,12 @@
       renderHome();
       // Phase 2 — fill live readiness + GPU (slow when services are down); re-render the same cards in place.
       try { _homeData = await (await fetch('/api/home')).json(); renderHome(); } catch { /* keep catalog-only */ }
+      // Recent work — latest visual generations (reuses the gallery); rendered as a thumbnail strip below the cards.
+      try {
+        const items = await (await fetch('/api/gallery?view=active')).json();
+        _homeRecent = (items||[]).filter(it => ['image','edit','frame','video'].includes(it.kind)).slice(0,6);
+        renderHome();
+      } catch { /* no recent strip */ }
     }
     function renderHome(){
       const el = document.getElementById('view-home'); if(!el || !_homeData) return;
@@ -601,7 +607,16 @@
         if(!cards.length) continue;
         html += `<h2>${label}</h2><div class="grid">` + cards.map(homeCardHtml).join('') + `</div>`;
       }
+      if(_homeRecent && _homeRecent.length){
+        html += `<h2>Recent work</h2><div style="display:flex;gap:10px;flex-wrap:wrap">` + _homeRecent.map(homeRecentTile).join('') + `</div>`;
+      }
       el.innerHTML = html;
+    }
+    function homeRecentTile(n){
+      const url = `/api/gallery/media/${encodeURIComponent(n.name)}`;
+      const st = "width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--border);background:var(--bg);display:block";
+      const media = n.kind==='video' ? `<video src="${url}" muted style="${st}"></video>` : `<img src="${url}" loading="lazy" style="${st}">`;
+      return `<a href="#" onclick="setView('library');return false" title="${homeEsc(n.prompt||n.name)}">${media}</a>`;
     }
     function homeCardHtml(c){
       const cap = c.capability, r = c.readiness;
