@@ -613,11 +613,16 @@
       const starters = (cap.starters||[]).map((s,i) =>
         `<button class="ghost" style="font-size:11px;padding:5px 9px;margin:3px 3px 0 0" onclick="runStarter('${cap.id}',${i})">${homeEsc(s.label)}</button>`
       ).join('');
+      const guide = (cap.guide||[]).length
+        ? `<details style="margin-top:10px"><summary class="hint" style="cursor:pointer;font-size:11px">How it works</summary>
+            <ol style="margin:7px 0 0;padding-left:18px;color:var(--dim);font-size:11px;line-height:1.6">${cap.guide.map(s=>`<li>${homeEsc(s)}</li>`).join('')}</ol></details>`
+        : '';
       return `<div class="card"><div class="body">
           <div style="font-size:15px"><span style="font-size:18px">${cap.icon||''}</span> <b>${homeEsc(cap.name)}</b></div>
           <div class="hint" style="margin:6px 0 9px">${homeEsc(cap.blurb)}</div>
           <div style="margin-bottom:8px">${badge}</div>
           <div style="display:flex;flex-wrap:wrap">${starters}</div>
+          ${guide}
         </div></div>`;
     }
     function homeReadyClick(action){ if((action||'').startsWith('model:')) setView('models'); else setView('status'); }

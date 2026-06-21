@@ -155,4 +155,14 @@ public class HomeCatalogTests
         Assert.Equal("image", r.Kind);
         Assert.True(string.IsNullOrEmpty(r.Prompt));
     }
+
+    [Fact]
+    public void Every_capability_has_a_non_blank_mini_guide()
+    {
+        Assert.All(HomeCatalog.Capabilities, c =>
+        {
+            Assert.True(c.Guide.Count >= 2, $"{c.Id} needs a mini-guide (>= 2 steps)");
+            Assert.All(c.Guide, step => Assert.False(string.IsNullOrWhiteSpace(step)));
+        });
+    }
 }

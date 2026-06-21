@@ -17,7 +17,11 @@ public sealed record CapabilityStarter(string Label, string View, string? Prompt
 // One capability area on the guided Home hub.
 public sealed record HomeCapability(
     string Id, string Group, string Name, string Icon, string Blurb,
-    CapabilityRequires Requires, IReadOnlyList<CapabilityStarter> Starters);
+    CapabilityRequires Requires, IReadOnlyList<CapabilityStarter> Starters)
+{
+    // Mini-guide: 2-4 short "how it works" steps, shown collapsed on the card (Phase 2). Defaults to none.
+    public IReadOnlyList<string> Guide { get; init; } = Array.Empty<string>();
+}
 
 // A snapshot of live state the readiness resolver joins against (built by GET /api/home from the status probe).
 public sealed record HomeStatusSnapshot(string? Mode, ISet<string> ServicesUp, ISet<string> ModelsPresent);
@@ -107,16 +111,16 @@ public static class HomeCatalog
                 S("a neon dragon over a rainy city at night", "create", "a neon dragon over a rainy city at night", "image"),
                 S("a 5-second clip of waves at sunset", "create", "waves crashing on a beach at sunset", "video"),
                 S("an upbeat synthwave track", "create", "an upbeat retro synthwave track, 120 bpm", "music"),
-            }),
+            }) { Guide = new[] { "Pick a kind (image / video / music) and describe what you want.", "Choose a model or leave it on Auto.", "Generate — results land in your Library." } },
         new("director", "make", "Director", "\U0001F3AC", "Turn a script or idea into an ordered shot list, then generate the shots.",
             Need(mode: "agent"), new[]
             {
                 S("storyboard a 6-shot product teaser", "director", "a 6-shot teaser for a sleek smart-watch"),
-            }),
+            }) { Guide = new[] { "Describe the scene or paste a short script.", "Director drafts an ordered shot list.", "Send the shots to Create to render them." } },
         new("flow", "make", "Flow", "\U0001FAA2", "Chain steps into a node graph and run them in order.",
-            Need(mode: "media"), new[] { S("open the node canvas", "flow") }),
+            Need(mode: "media"), new[] { S("open the node canvas", "flow") }) { Guide = new[] { "Add steps as nodes and connect them.", "Each node feeds its output to the next.", "Run the graph to execute in order." } },
         new("scene", "make", "Scene", "\U0001FA84", "Compose a base scene with isolated per-character regions in a single render.",
-            Need(mode: "media"), new[] { S("compose a two-character scene", "scene") }),
+            Need(mode: "media"), new[] { S("compose a two-character scene", "scene") }) { Guide = new[] { "Sketch a base scene and mark character regions.", "Prompt each region separately.", "Render once — the regions compose together." } },
 
         // ---- Talk ----
         new("chat", "talk", "Chat", "\U0001F4AC", "Talk to your local uncensored assistant — with tools, vision, documents, and long-term memory.",
@@ -124,18 +128,18 @@ public static class HomeCatalog
             {
                 S("brainstorm ten project names", "chat", "brainstorm ten punchy names for a local AI art studio"),
                 S("summarize a document you attach", "chat", "summarize the document I'm about to attach"),
-            }),
+            }) { Guide = new[] { "Type a message; attach images or documents if you like.", "It can search your library, the web, and your code.", "It remembers facts across chats." } },
         new("cast", "talk", "Cast", "\U0001F3AD", "Build and reuse character cards (personas) for chat and scenes.",
-            Need(), new[] { S("create a character card", "cast") }),
+            Need(), new[] { S("create a character card", "cast") }) { Guide = new[] { "Create a character card with a name + persona.", "Reuse it in Chat or Scene.", "Edit it anytime." } },
         new("voice", "talk", "Voice", "\U0001F50A", "Turn text into speech with cloneable voices (Chatterbox).",
-            Need(service: "tts"), new[] { S("read a line aloud", "voice", "Welcome to DokiDex.") }),
+            Need(service: "tts"), new[] { S("read a line aloud", "voice", "Welcome to DokiDex.") }) { Guide = new[] { "Type or paste the text to speak.", "Pick or clone a voice.", "Generate the audio clip." } },
 
         // ---- Manage ----
         new("library", "manage", "Library", "\U0001F5BC️", "Browse, search, rate, and remix everything you've generated.",
-            Need(), new[] { S("see your latest creations", "library") }),
+            Need(), new[] { S("see your latest creations", "library") }) { Guide = new[] { "Browse everything you've generated.", "Search, rate, and favorite.", "Remix any item back into Create." } },
         new("models", "manage", "Models", "\U0001F4E6", "Install, switch, and manage the local image / video / LLM models.",
-            Need(), new[] { S("see installed models", "models") }),
+            Need(), new[] { S("see installed models", "models") }) { Guide = new[] { "See installed image / video / LLM models.", "Install or remove from the catalog.", "Switch the active model." } },
         new("status", "manage", "Status", "\U0001F4CA", "Live service health, the GPU meter, and the agent / media mode switch.",
-            Need(), new[] { S("check what's running", "status") }),
+            Need(), new[] { S("check what's running", "status") }) { Guide = new[] { "See each service's health + the GPU meter.", "Switch between Agent and Media mode.", "Start or stop individual services." } },
     };
 }
