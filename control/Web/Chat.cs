@@ -121,8 +121,9 @@ public static class Chat
         // KB context-injection: retrieve the conversation's top-K relevant doc chunks for the latest turn (null +
         // no injection when there's no attached KB / the embed server is down — the no-KB path stays unchanged).
         var activeDocs = await RetrieveDocs(conv.KbId, userMessage, ct).ConfigureAwait(false);
+        var activeMemories = await MemoryRecall.RetrieveAsync(ct).ConfigureAwait(false);   // long-term [Memory] recall (global; gated on the store existing, degrades to empty)
 
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs);
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs, activeMemories);
 
         var temperature = 0.8;
         var maxTokens = 1024;
@@ -209,9 +210,10 @@ public static class Chat
         // KB context-injection (same as SendAsync): the attached docs are injected unconditionally each turn,
         // independent of the tool registry — the [Documents] block rides alongside any tool calls the loop makes.
         var activeDocs = await RetrieveDocs(conv.KbId, userMessage, ct).ConfigureAwait(false);
+        var activeMemories = await MemoryRecall.RetrieveAsync(ct).ConfigureAwait(false);   // long-term [Memory] recall (global; gated on the store existing, degrades to empty)
 
         // The agent loop is text-only (no vision-in-chat this slice): keep the requested speed tier as-is.
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, activeDocs: activeDocs);
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, activeDocs: activeDocs, activeMemories: activeMemories);
 
         // A MUTABLE working transcript for the loop: we append the assistant tool-call turns + tool results onto a
         // copy of the built messages, then re-call. The persisted conversation only ever stores the user turn + the
@@ -315,8 +317,9 @@ public static class Chat
         // KB context-injection (same as SendAsync): retrieve the conversation's relevant doc chunks before the
         // first token; a down embed server / no attached KB degrades to no injection (the no-KB stream unchanged).
         var activeDocs = await RetrieveDocs(conv.KbId, userMessage, ct).ConfigureAwait(false);
+        var activeMemories = await MemoryRecall.RetrieveAsync(ct).ConfigureAwait(false);   // long-term [Memory] recall (global; gated on the store existing, degrades to empty)
 
-        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs);
+        var messages = ChatPrompt.Build(card, history, userMessage, HistoryTurnBudget, activeLore, imageDataUrl, activeDocs, activeMemories);
 
         // Hand the conversation id AND its effective KbId to the endpoint up front (so the SPA can capture the id
         // before any token AND refresh _chatKbId for a fresh send that auto-attached the default KB — FIX 1).

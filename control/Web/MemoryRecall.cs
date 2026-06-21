@@ -29,7 +29,12 @@ public static class MemoryRecall
 
     private static string Script => Path.Combine(RepoPaths.Root, "serving", "memory-mcp", "memory_db.py");
 
-    public static bool Installed => File.Exists(Script);
+    // The default memory store DB (memory_db.py's DB_PATH when MEMORY_DB isn't overridden). Recall is gated on the
+    // DB EXISTING so a chat with NO saved memories pays ZERO cost (no per-turn subprocess) — the store is created by
+    // the SAVE paths (the memory-mcp server / seed.py / a future chat save-tool), never by this read path.
+    private static string DbPath => Path.Combine(RepoPaths.Root, "serving", "memory-mcp", "memory.db");
+
+    public static bool Installed => File.Exists(Script) && File.Exists(DbPath);
 
     // PURE: argv for `uv run python memory_db.py recent N` (the newest-first memory set). N clamped to [1,50].
     public static IReadOnlyList<string> BuildRecentArgs(int limit)
