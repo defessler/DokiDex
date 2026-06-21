@@ -69,3 +69,31 @@ def delete(mem_id):
     c.commit()
     c.close()
     return True
+
+
+# CLI dispatch — lets the C# chat surface (MemoryRecall) shell `python memory_db.py <cmd> ...` one-shot,
+# exactly like DocSearch shells doc_index.py. Prints JSON to stdout; a bad command / error prints {"error":...}
+# and exits non-zero. The MCP server (memory_mcp.py) still imports the functions above unchanged.
+if __name__ == "__main__":
+    import sys
+    import json as _json
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    try:
+        if cmd == "recent":
+            print(_json.dumps(recent(int(sys.argv[2]) if len(sys.argv) > 2 else 10)))
+        elif cmd == "search":
+            q = sys.argv[2] if len(sys.argv) > 2 else ""
+            lim = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+            print(_json.dumps(search(q, lim)))
+        elif cmd == "save":
+            content = sys.argv[2] if len(sys.argv) > 2 else ""
+            tags = sys.argv[3] if len(sys.argv) > 3 else ""
+            print(_json.dumps({"id": save(content, tags)}))
+        elif cmd == "delete":
+            print(_json.dumps({"ok": delete(int(sys.argv[2]))}))
+        else:
+            print(_json.dumps({"error": "usage: memory_db.py {recent|search|save|delete} ..."}))
+            sys.exit(2)
+    except Exception as e:
+        print(_json.dumps({"error": str(e)}))
+        sys.exit(1)

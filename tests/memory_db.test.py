@@ -63,6 +63,28 @@ try:
     check(all(m["id"] != a for m in memory_db.recent(10)), "delete removes the row")
     check(all(m["id"] != a for m in memory_db.search("Blackwell")), "delete keeps the FTS index consistent")
 
+    # --- CLI dispatch (the C# MemoryRecall sidecar shells `python memory_db.py <cmd>` like DocSearch->doc_index.py) ---
+    import subprocess
+    import json as _json
+    _mod = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "serving", "memory-mcp", "memory_db.py")
+
+    def _cli(*a):
+        return subprocess.run([sys.executable, _mod, *a], capture_output=True, text=True, env={**os.environ})
+
+    _r = _cli("save", "CLI saved fact", "clitag")
+    check(_r.returncode == 0, "cli save exits 0")
+    _saved = _json.loads(_r.stdout or "{}")
+    check(isinstance(_saved.get("id"), int) and _saved["id"] > 0, 'cli save prints {"id":N}')
+
+    _rows = _json.loads(_cli("recent", "5").stdout or "[]")
+    check(isinstance(_rows, list) and any(m.get("content") == "CLI saved fact" for m in _rows),
+          "cli recent prints a JSON array incl. the saved note")
+
+    _rows = _json.loads(_cli("search", "CLI saved", "5").stdout or "[]")
+    check(any(m.get("content") == "CLI saved fact" for m in _rows), "cli search finds a note by content")
+
+    check(_cli("bogus-cmd").returncode != 0, "cli unknown command exits non-zero")
+
     # --- seed.py: idempotent refresh that matches the exact 'seed' tag token (not a substring) ---
     import seed  # noqa: E402 — same temp MEMORY_DB; module import has no side effects
     trap1 = memory_db.save("seedlings need watering", "garden,seedling")   # substring traps a naive
