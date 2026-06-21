@@ -21,6 +21,10 @@ namespace DokiDex.Web;
 // unchanged (the no-memory path). Same contract as DocSearch.RetrieveAsync (20s cap + KillTree).
 //
 // Pure seams (unit-tested, no process): BuildRecentArgs, BuildSearchArgs, ParseMemoryJson, ToMemoryNotes.
+// One editable memory row for the admin surface (the /api/memory list + a future panel): the id is needed to
+// edit/delete, unlike the injection path (MemoryNote) which only needs the fact text. Mirrors memory_db.py's row.
+public sealed record MemoryRecord(int Id, string Content, string Tags);
+
 public static class MemoryRecall
 {
     // Recent notes pulled per turn (the newest-first memory set); ChatPrompt.MemoryBlock re-bounds to
@@ -56,10 +60,18 @@ public static class MemoryRecall
 
     private static async Task<IReadOnlyList<string>> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
     {
+        var (ok, stdout) = await RunRawAsync(args, ct).ConfigureAwait(false);
+        return ok ? ParseMemoryJson(stdout) : Array.Empty<string>();
+    }
+
+    // Spawn `uv run python memory_db.py <args>` one-shot and return (exit==0, stdout). 20s cap + KillTree; never
+    // throws/hangs. The shared runner behind both the recall read path and the editable-admin save/list/delete.
+    private static async Task<(bool ok, string stdout)> RunRawAsync(IReadOnlyList<string> args, CancellationToken ct)
+    {
         using Process? p = StartOrNull(args);
         try
         {
-            if (p is null) return Array.Empty<string>();
+            if (p is null) return (false, "");
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             var outTask = p.StandardOutput.ReadToEndAsync(ct);
@@ -67,11 +79,10 @@ public static class MemoryRecall
             await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
             var stdout = await outTask.ConfigureAwait(false);
             await errTask.ConfigureAwait(false);
-            if (p.ExitCode != 0) return Array.Empty<string>();
-            return ParseMemoryJson(stdout);
+            return (p.ExitCode == 0, stdout);
         }
-        catch (OperationCanceledException) { KillTree(p); return Array.Empty<string>(); }
-        catch { KillTree(p); return Array.Empty<string>(); }
+        catch (OperationCanceledException) { KillTree(p); return (false, ""); }
+        catch { KillTree(p); return (false, ""); }
     }
 
     private static Process? StartOrNull(IReadOnlyList<string> args)
@@ -124,4 +135,78 @@ public static class MemoryRecall
         => contents is { Count: > 0 }
             ? contents.Select(c => new MemoryNote("", c)).ToList()
             : Array.Empty<MemoryNote>();
+
+    // ---- editable-memory admin (the explicit "editable memory agent": /api/memory save/list/delete + a future
+    //      panel). Memory notes are SHORT facts, so save passes content as a single argv via ArgumentList (no shell,
+    //      proper escaping). Pure argv/parse seams are unit-tested; the async methods share the degrade contract. ----
+
+    // PURE: argv for `uv run python memory_db.py save CONTENT TAGS` / `delete ID`.
+    public static IReadOnlyList<string> BuildSaveArgs(string content, string? tags)
+        => new[] { Script, "save", content ?? "", tags ?? "" };
+
+    public static IReadOnlyList<string> BuildDeleteArgs(int id)
+        => new[] { Script, "delete", id.ToString() };
+
+    // PURE: read the {"id":N} memory_db save prints; 0 on anything malformed (never throws).
+    public static int ParseSavedId(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return 0;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("id", out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i))
+                return i;
+        }
+        catch { /* not JSON */ }
+        return 0;
+    }
+
+    // PURE: parse memory_db's JSON array to editable MemoryRecords (id + content + tags). Blank-content rows and any
+    // malformed/non-array input are dropped (never throws). The admin list needs ids (to edit/delete), unlike recall.
+    public static IReadOnlyList<MemoryRecord> ParseMemoryRecords(string? json)
+    {
+        var rows = new List<MemoryRecord>();
+        if (string.IsNullOrWhiteSpace(json)) return rows;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return rows;
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind != JsonValueKind.Object) continue;
+                var content = el.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(content)) continue;
+                var id = el.TryGetProperty("id", out var iv) && iv.ValueKind == JsonValueKind.Number && iv.TryGetInt32(out var ii) ? ii : 0;
+                var tags = el.TryGetProperty("tags", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
+                rows.Add(new MemoryRecord(id, content, tags));
+            }
+        }
+        catch { return new List<MemoryRecord>(); }
+        return rows;
+    }
+
+    // Save one memory note; returns its new id, or 0 on blank content / missing sidecar / failure. Never throws/hangs.
+    public static async Task<int> SaveAsync(string content, string? tags, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(content) || !File.Exists(Script)) return 0;
+        var (ok, stdout) = await RunRawAsync(BuildSaveArgs(content, tags), ct).ConfigureAwait(false);
+        return ok ? ParseSavedId(stdout) : 0;
+    }
+
+    // List the editable memory rows (newest-first); empty on any failure. Gated on the store existing (Installed).
+    public static async Task<IReadOnlyList<MemoryRecord>> ListAsync(int limit, CancellationToken ct)
+    {
+        if (!Installed) return Array.Empty<MemoryRecord>();
+        var (ok, stdout) = await RunRawAsync(BuildRecentArgs(limit), ct).ConfigureAwait(false);
+        return ok ? ParseMemoryRecords(stdout) : Array.Empty<MemoryRecord>();
+    }
+
+    // Delete one memory row by id; false on any failure (best-effort, never throws/hangs).
+    public static async Task<bool> DeleteAsync(int id, CancellationToken ct)
+    {
+        if (!File.Exists(Script)) return false;
+        var (ok, _) = await RunRawAsync(BuildDeleteArgs(id), ct).ConfigureAwait(false);
+        return ok;
+    }
 }
