@@ -140,6 +140,40 @@ public class ChatToolsTests
     }
 
     [Fact]
+    public void Run_for_generate_image_threads_the_conversation_id_into_the_queued_pending_gen()
+    {
+        // The render round-trip (P1) needs a finished gen to map back to the chat thread it was requested in.
+        // Run must thread the originating conversation id into the PendingGen.Conversation backlink — it was
+        // hardcoded null, so a completed gen could never be surfaced inline in its conversation.
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];
+        ChatTools.Run("generate_image", "{\"prompt\":\"a neon dragon\"}", convId);
+        var created = PendingGenStore.List().Where(p => !before.Contains(p.Id)).ToList();
+        try
+        {
+            Assert.Single(created);
+            Assert.Equal(convId, created[0].Conversation);
+        }
+        finally { foreach (var p in created) PendingGenStore.Delete(p.Id); }
+    }
+
+    [Fact]
+    public void Run_for_generate_image_without_a_conversation_leaves_the_backlink_null()
+    {
+        // Backward-compatible default: the 2-arg Run (no conversation) still enqueues a null backlink (a stateless
+        // caller / non-chat dispatch), so the new overload can't silently fabricate a wrong link.
+        var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
+        ChatTools.Run("generate_image", "{\"prompt\":\"a quiet meadow\"}");
+        var created = PendingGenStore.List().Where(p => !before.Contains(p.Id)).ToList();
+        try
+        {
+            Assert.Single(created);
+            Assert.Null(created[0].Conversation);
+        }
+        finally { foreach (var p in created) PendingGenStore.Delete(p.Id); }
+    }
+
+    [Fact]
     public void Run_for_generate_image_with_a_blank_prompt_asks_for_a_prompt_and_does_not_queue()
     {
         // IDENTITY snapshot, not a raw global Count: PendingGenStore.List() reads the shared on-disk pending-gen/

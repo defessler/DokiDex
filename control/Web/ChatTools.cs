@@ -248,7 +248,7 @@ public static class ChatTools
     // unknown tool name yields a clear "unknown tool" text (the model can recover / re-plan) rather than throwing,
     // and the search_library executor is wrapped so a disk hiccup degrades to a graceful message — the agent loop
     // must never crash on a tool. Names are matched case-insensitively, exact.
-    public static string Run(string? name, string? argumentsJson)
+    public static string Run(string? name, string? argumentsJson, string? conversation = null)
     {
         switch ((name ?? "").Trim().ToLowerInvariant())
         {
@@ -267,7 +267,7 @@ public static class ChatTools
             case "generate_image":
             {
                 var (prompt, kind, model, count) = MapGenArgs(argumentsJson);
-                return RunGenerateImage(prompt, kind, model, count);
+                return RunGenerateImage(prompt, kind, model, count, conversation);
             }
             default:
                 return $"unknown tool: '{name}'. Available tools are: search_library, web_search, code_search, generate_image.";
@@ -336,11 +336,13 @@ public static class ChatTools
     // it persists a durable pending-gen (survives the eventual GPU flip) and returns the bounded queued notice. The
     // single disk touch (PendingGenStore.Enqueue) is wrapped so the agent loop never crashes on the tool; the store
     // itself already degrades gracefully, so on any failure we still return an honest "queued" notice.
-    private static string RunGenerateImage(string prompt, string kind, string? model, int count)
+    private static string RunGenerateImage(string prompt, string kind, string? model, int count, string? conversation)
     {
         if (string.IsNullOrWhiteSpace(prompt))
             return "I need a prompt describing the image to generate. Tell me what to create and I'll queue it.";
-        try { PendingGenStore.Enqueue(prompt, kind, model, count, conversation: null); }
+        // Thread the originating conversation id into the pending record so the finished gen can be surfaced
+        // inline in that chat thread later (the P1 render round-trip); null for non-chat / stateless callers.
+        try { PendingGenStore.Enqueue(prompt, kind, model, count, conversation); }
         catch { /* the agent loop must never crash on a tool; the notice below is still honest */ }
         return FormatGenQueued(count, kind);
     }

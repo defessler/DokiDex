@@ -252,7 +252,7 @@ public static class Chat
             var results = new List<string>(turn.ToolCalls.Count);
             foreach (var tc in turn.ToolCalls)
             {
-                var result = ChatTools.Run(tc.Name, tc.ArgumentsJson);
+                var result = ChatTools.Run(tc.Name, tc.ArgumentsJson, conv.Id);
                 steps.Add(new ToolStep(tc.Name, tc.ArgumentsJson, result));
                 results.Add(result);
             }
