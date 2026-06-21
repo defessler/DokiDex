@@ -1,5 +1,26 @@
 # Decision log
 
+## 2026-06-21 — Guided Home command center SHIPPED (Phase 1); PowerShell 7 reinstalled
+
+Per "make the app self-guiding": brainstormed (full dialogue) -> spec
+(`docs/superpowers/specs/2026-06-21-guided-home-hub-design.md`) -> built + verified Phase 1.
+
+- **Backend (unit-tested):** `HomeCatalog` — the 10 Studio areas as a declarative catalog (Make/Talk/Manage),
+  each with blurb + `requires{mode/service/model}` + clickable starters; a PURE readiness resolver (precedence:
+  mode-mismatch > missing-service > missing-model > ready) + `SnapshotFrom(StatusDoc)` (GPU group `llm` -> "agent");
+  `GET /api/home` joins the catalog with the SAME live status the dashboard uses. 13 unit tests.
+- **SPA (live-verified on :5111):** a new DEFAULT `Home` view renders `/api/home` into grouped capability cards
+  with live readiness badges (Ready / needs-mode / needs-setup -> routes to where you fix it) + clickable starters
+  that launch an area pre-filled, plus a welcome header + GPU/mode meter. Smoke test: `/api/home` returned all 10
+  cards with correct readiness (mode `none` -> Create/Chat/etc. needs-mode, Voice needs-setup, Library/Models/Status
+  ready); the served SPA carries the Home view.
+- **Phase 2 (deferred):** expandable mini-guides, recent-work thumbnails, the quick-start box, and the cold-load
+  latency (the first `/api/home` blocks on `GetStatusAsync` probing down services, ~16s cold — render the catalog
+  instantly and fetch readiness async).
+
+**Env fixed:** PowerShell 7 reinstalled (`winget install Microsoft.PowerShell` -> pwsh 7.6.2 on PATH), so the
+control-panel build / `doki test` / release run natively again (no more exit `9009`).
+
 ## 2026-06-21 — Chat surface advanced: generate-from-chat foundation + long-term memory wired to the EXISTING memory-mcp; guided Home hub in design
 
 Built incrementally atop the v0.7.0 chat surface (TDD, all green via a `pwsh`->`powershell.exe` build shim — see env note).
