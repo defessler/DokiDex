@@ -26,6 +26,12 @@ public sealed record ChatTurn(string Role, string Content, string? Ts);
 // Lorebook, is unconditional, costs zero agent hops, and works on the non-tool send/stream paths too).
 public sealed record DocChunk(string Source, string Content, double Score);
 
+// One long-term memory note injected as durable cross-conversation context (the persistent-memory analog of a
+// DocChunk). Key = a short label (e.g. "name", "prefers"); Value = the remembered fact. Rendered as ONE bounded
+// "[Memory]" system turn by ChatPrompt.Build — unconditional context-injection like [World Info]/[Documents], NOT a
+// 5th chat tool (the curated tool set stays put). Sourced from the persistent memory-mcp store (serving/memory-mcp).
+public sealed record MemoryNote(string Key, string Value);
+
 // The pure, unit-tested assembly of what reaches llama-swap: a persona system bundle + a most-recent-wins
 // trimmed history + the new user turn, as an OpenAI message[]. This is the single source of truth for the
 // prompt; the live LLM call (LocalLlm.ChatTurnsAsync) is a thin wrapper over the array this produces.
@@ -49,9 +55,16 @@ public static class ChatPrompt
     // stays the plain-string content, preserving the EXACT pre-P5 output. History turns are always plain strings.
     public static List<object> Build(PersonaCard? card, IReadOnlyList<ChatTurn> history, string userMessage,
         int historyTurnBudget, IReadOnlyList<LoreEntry>? activeLore = null, string? imageDataUrl = null,
-        IReadOnlyList<DocChunk>? activeDocs = null)
+        IReadOnlyList<DocChunk>? activeDocs = null, IReadOnlyList<MemoryNote>? activeMemories = null)
     {
         var msgs = new List<object> { new { role = "system", content = SystemBundle(card) } };
+
+        // P2: one bounded [Memory] system turn of durable cross-conversation facts, placed right after the persona
+        // bundle and BEFORE [World Info]/[Documents] (memory is the most persistent, always-true context). A
+        // null/empty list adds nothing, so the no-memory output is byte-for-byte the prior output.
+        var memory = MemoryBlock(activeMemories);
+        if (memory.Length > 0)
+            msgs.Add(new { role = "system", content = "[Memory]\n" + memory });
 
         // P3: one [World Info] system turn placed AFTER the card bundle and BEFORE history (only when non-empty).
         if (activeLore is { Count: > 0 })
@@ -147,6 +160,42 @@ public static class ChatPrompt
             if (src.Length > 0) sb.Append("## ").Append(src).Append('\n');
             sb.Append(body);
             used += overhead + body.Length;
+            shown++;
+        }
+        return sb.ToString();
+    }
+
+    // Long-term memory block caps (mirrors DocsMaxChunks/DocsMaxChars): at most this many notes, and a cumulative
+    // char budget so the injected [Memory] block can't blow past max_tokens across turns.
+    public const int MemoryMaxNotes = 20;
+    public const int MemoryMaxChars = 2000;
+
+    // PURE + bounded: render long-term memory notes into the "[Memory]" block body, capped to MemoryMaxNotes notes
+    // and MemoryMaxChars cumulative chars (the [World Info]/[Documents] discipline). Each note is "- <key>: <value>"
+    // (or "- <value>" when no key); null entries and blank Values are skipped. A null/empty list yields "" so Build
+    // injects nothing (byte-for-byte no-memory). The char budget counts the rendered lines incl. "- " + newlines —
+    // total + side-effect-free, so the bound can't silently drift.
+    public static string MemoryBlock(IReadOnlyList<MemoryNote>? notes)
+    {
+        if (notes is not { Count: > 0 }) return "";
+        var sb = new StringBuilder();
+        var used = 0;
+        var shown = 0;
+        foreach (var n in notes)
+        {
+            if (n is null || string.IsNullOrWhiteSpace(n.Value)) continue;
+            if (shown >= MemoryMaxNotes || used >= MemoryMaxChars) break;
+
+            var key = string.IsNullOrWhiteSpace(n.Key) ? "" : n.Key.Trim();
+            var line = key.Length > 0 ? $"- {key}: {n.Value.Trim()}" : $"- {n.Value.Trim()}";
+            var overhead = sb.Length > 0 ? 1 : 0;   // inter-note newline, charged to the same budget
+            if (used + overhead >= MemoryMaxChars) break;
+            var budget = MemoryMaxChars - used - overhead;
+            if (line.Length > budget) line = line[..(budget - 1)] + "…";
+
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(line);
+            used += overhead + line.Length;
             shown++;
         }
         return sb.ToString();

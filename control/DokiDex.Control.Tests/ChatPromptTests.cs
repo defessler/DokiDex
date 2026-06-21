@@ -450,4 +450,99 @@ public class ChatPromptTests
             Assert.Equal(Read(withDefault[i]), Read(withEmpty[i]));
         }
     }
+
+    // ---- Long-term memory injection (P2): when the conversation has recalled memory notes, ONE bounded "[Memory]"
+    //      system turn is injected right after the persona bundle and BEFORE [World Info]/[Documents] (memory is the
+    //      most persistent, always-true context). Null/empty preserves byte-for-byte the no-memory output. Bounded
+    //      by (MemoryMaxNotes, MemoryMaxChars) — the persistent-memory analog of the [Documents] block. ----
+
+    private static MemoryNote M(string key, string value) => new(key, value);
+
+    [Fact]
+    public void Active_memories_inject_one_memory_system_turn_after_card_before_history()
+    {
+        var hist = new List<ChatTurn> { U("first user"), A("first reply") };
+        var mem = new List<MemoryNote> { M("name", "Doug"), M("prefers", "uncensored, terse answers") };
+        var msgs = ChatPrompt.Build(Card(system: "You are Doki."), hist, "the new turn",
+            historyTurnBudget: 20, activeMemories: mem);
+
+        Assert.Equal(5, msgs.Count); // system + [Memory] + 2 history + user
+
+        Assert.Equal("system", Read(msgs[0]).role);
+        Assert.Contains("You are Doki.", Read(msgs[0]).content);
+
+        var (r1, c1) = Read(msgs[1]);
+        Assert.Equal("system", r1);
+        Assert.Contains("Memory", c1);
+        Assert.Contains("Doug", c1);
+        Assert.Contains("uncensored, terse answers", c1);
+
+        Assert.Equal(("user", "first user"), Read(msgs[2]));
+        Assert.Equal(("assistant", "first reply"), Read(msgs[3]));
+        Assert.Equal(("user", "the new turn"), Read(msgs[4]));
+    }
+
+    [Fact]
+    public void Memory_then_lore_then_documents_inject_in_order_before_history()
+    {
+        var mem = new List<MemoryNote> { M("name", "Doug") };
+        var lore = new List<LoreEntry> { new(Keys: "dragon", Content: "Dragons rule.", Enabled: true) };
+        var docs = new List<DocChunk> { D("doc.txt", "A document fact.") };
+        var msgs = ChatPrompt.Build(Card(), new List<ChatTurn>(), "go",
+            historyTurnBudget: 20, activeLore: lore, activeDocs: docs, activeMemories: mem);
+
+        // system, then [Memory], then [World Info], then [Documents], then the user turn.
+        Assert.Equal(5, msgs.Count);
+        Assert.Equal("system", Read(msgs[0]).role);
+        Assert.Contains("Memory", Read(msgs[1]).content);
+        Assert.Contains("Doug", Read(msgs[1]).content);
+        Assert.Contains("World Info", Read(msgs[2]).content);
+        Assert.Contains("Documents", Read(msgs[3]).content);
+        Assert.Equal(("user", "go"), Read(msgs[4]));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    public void Null_or_empty_active_memories_preserves_the_exact_default_output(IReadOnlyList<MemoryNote>? mem)
+    {
+        var hist = new List<ChatTurn> { U("first user"), A("first reply") };
+        var withDefault = ChatPrompt.Build(Card(), hist, "go", historyTurnBudget: 20);
+        var withNull = ChatPrompt.Build(Card(), hist, "go", historyTurnBudget: 20, activeMemories: mem);
+        var withEmpty = ChatPrompt.Build(Card(), hist, "go", historyTurnBudget: 20, activeMemories: new List<MemoryNote>());
+
+        Assert.Equal(withDefault.Count, withNull.Count);
+        Assert.Equal(withDefault.Count, withEmpty.Count);
+        for (int i = 0; i < withDefault.Count; i++)
+        {
+            Assert.Equal(Read(withDefault[i]), Read(withNull[i]));
+            Assert.Equal(Read(withDefault[i]), Read(withEmpty[i]));
+        }
+    }
+
+    [Fact]
+    public void MemoryBlock_keeps_exactly_MemoryMaxNotes_when_more_are_supplied()
+    {
+        var notes = Enumerable.Range(0, ChatPrompt.MemoryMaxNotes + 5).Select(i => M($"k{i}", $"fact {i}")).ToList();
+        var block = ChatPrompt.MemoryBlock(notes);
+        Assert.Equal(ChatPrompt.MemoryMaxNotes, block.Split('\n').Length);   // one note per line
+        Assert.Contains("fact 0", block);
+        Assert.DoesNotContain($"fact {ChatPrompt.MemoryMaxNotes}", block);   // the (cap+1)-th never makes it
+    }
+
+    [Fact]
+    public void MemoryBlock_is_bounded_by_max_chars_and_skips_null_and_blank_values()
+    {
+        var notes = new List<MemoryNote> { null!, M("a", "  "), M("", "kept fact"), M("big", new string('z', ChatPrompt.MemoryMaxChars + 200)) };
+        var block = ChatPrompt.MemoryBlock(notes);
+        Assert.Contains("kept fact", block);                 // blank-value notes skipped, this one survives
+        Assert.True(block.Length <= ChatPrompt.MemoryMaxChars,
+            $"[Memory] block must be <= {ChatPrompt.MemoryMaxChars} chars, was {block.Length}");
+    }
+
+    [Fact]
+    public void MemoryBlock_null_or_empty_yields_empty_string()
+    {
+        Assert.Equal("", ChatPrompt.MemoryBlock(null));
+        Assert.Equal("", ChatPrompt.MemoryBlock(new List<MemoryNote>()));
+    }
 }
