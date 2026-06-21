@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-06-21 — Chat→media round-trip SHIPPED + full capabilities writeup; FOCUS-3 media-frontier research (v0.27.0)
+
+**Round-trip (generate-from-chat, completed).** The chat assistant now generates AND edits images in-thread. Built in parallel via a worktree-isolated multi-agent workflow (3 file-disjoint components), then integrated: (1) `ChatGenCoordinator` — drains `PendingGenStore.Queued()` over the single mutually-exclusive GPU (flip to media → render via the proven `SwarmGen` path → lifecycle rendering+preview → done+ResultRel+sidecar → flip back to the agent LLM); pure NeedsFlip/BuildGenRequest seams + a full GPU-free drain test. (2) `edit_image` tool (refine/img2img — the 5th curated chat tool). (3) inline chat-thread surfacing (queued → preview → final image) + a deliberate **"Render N queued →"** trigger button (auto-rendering is wrong — a drain evicts the chat LLM). 767/767 tests; live HTTP surface verified. The shared seam (PendingGen InitImage/Strength/Preview + FilterQueued) was committed FIRST so the parallel agents forked from a stable API. The trigger button was a seam the parallel split missed — caught by end-to-end verification, not the (green) unit tests. Design: `research-chat-media-roundtrip-2026-06.md`. NOTE: the first real SwarmUI render (live, on the install) is the remaining first-use check — deferred (heavy + real-install side effects); the reused components are proven.
+
+**Capabilities writeup.** `CAPABILITIES.md` — the definitive "everything we support" map, from a 3-agent codebase sweep. Refreshed README (it omitted the whole Studio web app) + superseded/see-also banners on stale design docs (`dokigen-studio-design.md`, `TDD.md`) + a feature-index pointer.
+
+**FOCUS-3 media-frontier research** (`research-focus3-media-frontier-2026-06.md`): lip-sync ANSWERED — EchoMimicV3 (Apache-2.0, 12-16GB) best permissive avatar, MuseTalk best real-time, LatentSync best quality but license-gated; real-time canvas = StreamDiffusion+SD-Turbo (StreamDiffusionV2 is Linux-only video, not the canvas). Video/audio/LLM refresh remain OPEN (candidates surfaced — LTX-2.3-fp8, Wan2.5, ACE-Step-1.5, DiffRhythm2, VibeVoice, Qwen3-Coder-Next, Qwen3-VL-32B — none verified yet).
+
 ## 2026-06-21 — Guided Home command center SHIPPED (Phase 1); PowerShell 7 reinstalled
 
 Per "make the app self-guiding": brainstormed (full dialogue) -> spec
