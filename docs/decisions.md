@@ -1,5 +1,17 @@
 # Decision log
 
+## 2026-06-21 — Chat surface advanced: generate-from-chat foundation + long-term memory wired to the EXISTING memory-mcp; guided Home hub in design
+
+Built incrementally atop the v0.7.0 chat surface (TDD, all green via a `pwsh`->`powershell.exe` build shim — see env note).
+
+**P1 generate-from-chat (foundation only).** The `generate_image` tool already queued a gen durably; the missing piece is the render round-trip. Shipped the dependency-zero foundation: the tool now threads the originating **conversation backlink** into the PendingGen (was hardcoded `null`), and PendingGen gained a **render-status lifecycle** (`queued -> rendering -> done/failed` + `ResultRel`, via `SetStatus`). DEFERRED: the renderer + a backend **GPU-flip coordinator** + frontend inline-injection — they add a 2nd controller of the single GPU and need live on-GPU verification (the repo's verify-on-GPU rule).
+
+**P2 long-term chat memory — wire to the EXISTING store, not a greenfield clone.** Correction to the roadmap's "clone KbStore": the repo already ships `serving/memory-mcp/memory_db.py` (sqlite+FTS5), so memory is INTEGRATION. Shipped: a `[Memory]` prompt-injection block in `ChatPrompt.Build` (sibling of `[Documents]`; unconditional injection, NOT a 5th tool — respects the curated-toolset rule); a JSON **CLI** on `memory_db.py`; `MemoryRecall` (shells `uv run python memory_db.py`, degrades to empty) wired into all 3 chat send paths, **gated on `memory.db` existing** so an empty store costs nothing; editable CRUD seams + `/api/memory` GET/POST/DELETE. The SPA memory panel is deferred pending the Home-hub design.
+
+**Guided Home hub (in design).** Per the request to make the app self-guiding, brainstorming a `Home` command-center view: grouped state-aware capability cards (Make / Talk / Manage) with clickable starters + expandable mini-guides, recent-work, a quick-start box, and a GPU/mode meter — catalog-driven. Spec pending user approval.
+
+**Env note:** PowerShell 7 (`pwsh`) is uninstalled on this box — it blocks the control-panel build / `doki test` / release with exit `9009`. Reinstall: `winget install Microsoft.PowerShell`.
+
 ## 2026-06-21 — Claude Code stays NATIVE on the local stack (skip cc-switch); GLM-4.7-Flash wired as a gated coder candidate; tool-call gate hardened (#19009)
 
 Three multi-agent (ultracode) evaluations this session; full reports in `docs/eval-cc-switch-2026-06.md` + `docs/eval-glm-4-7-2026-06.md`.
