@@ -15,7 +15,11 @@ namespace DokiDex.Web;
 // links it back to the chat thread for later surfacing (optional). Id/Created are SERVER-set — no client path => no traversal.
 public sealed record PendingGen(
     string Id, string Prompt, string Kind, string? Model, int Count, string Created, string? Conversation,
-    string? Status = null, string? ResultRel = null, string? Error = null);   // lifecycle: queued -> rendering -> done/failed; ResultRel = finished media (gallery-relative); Error on failure
+    string? Status = null, string? ResultRel = null, string? Error = null,
+    string? InitImage = null, double? Strength = null, string? Preview = null);
+    // lifecycle: queued -> rendering -> done/failed; ResultRel = finished media (gallery-relative); Error on failure.
+    // InitImage/Strength = edit/img2img source (the edit_image tool). Preview = in-flight data-URL while rendering
+    // (the ChatGenCoordinator streams it so the chat thread can show a warming-up preview before the final image).
 
 // Pending-gen store — file-based under RepoPaths.Root/pending-gen/<id>.json (the durable install/repo root that
 // survives a mode-switch), mirroring ChatStore exactly (JSON via the same serializer, graceful try/catch). The
@@ -31,7 +35,8 @@ public static class PendingGenStore
     // Append a pending gen with a server-generated, traversal-free id (timestamp + short guid, all SafeName-legal),
     // writing its JSON file and returning the record. Graceful: a disk hiccup still returns the in-memory record
     // (the caller's notice is honest about "queued"), the agent loop never crashes on the tool.
-    public static PendingGen Enqueue(string prompt, string kind, string? model, int count, string? conversation)
+    public static PendingGen Enqueue(string prompt, string kind, string? model, int count, string? conversation,
+                                     string? initImage = null, double? strength = null)
     {
         var rec = new PendingGen(
             Id: $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}",
@@ -41,7 +46,9 @@ public static class PendingGenStore
             Count: count,
             Created: DateTime.UtcNow.ToString("o"),
             Conversation: conversation,
-            Status: "queued");
+            Status: "queued",
+            InitImage: initImage,
+            Strength: strength);
         try { Directory.CreateDirectory(Dir); File.WriteAllText(Path.Combine(Dir, rec.Id + ".json"), JsonSerializer.Serialize(rec)); }
         catch { }
         return rec;
@@ -63,6 +70,15 @@ public static class PendingGenStore
         return outp.OrderByDescending(p => p.Created, StringComparer.Ordinal).ToList();
     }
 
+    // PURE: the coordinator's drain order — queued items, OLDEST first (FIFO) so an earlier-queued chat renders
+    // first. Single source of truth for "what renders next", unit-tested with no disk/GPU.
+    public static IReadOnlyList<PendingGen> FilterQueued(IEnumerable<PendingGen> all)
+        => all.Where(p => string.Equals(p.Status, "queued", StringComparison.OrdinalIgnoreCase))
+              .OrderBy(p => p.Created, StringComparer.Ordinal).ToList();
+
+    // The queued chat-gens awaiting render, oldest-first — the ChatGenCoordinator's work queue.
+    public static IReadOnlyList<PendingGen> Queued() => FilterQueued(List());
+
     public static PendingGen? Load(string? id)
     {
         var n = RecipeStore.SafeName(id);
@@ -77,11 +93,11 @@ public static class PendingGenStore
     // so the chat SPA can poll /pending-gen and surface the finished media inline in its originating thread. Returns
     // the updated record, or null for an unknown/unsafe id (loaded via the SafeName-guarded Load). Graceful: a disk
     // hiccup returns the prior record rather than throwing — the renderer/agent paths must never crash on a write.
-    public static PendingGen? SetStatus(string? id, string status, string? resultRel = null, string? error = null)
+    public static PendingGen? SetStatus(string? id, string status, string? resultRel = null, string? error = null, string? preview = null)
     {
         var rec = Load(id);
         if (rec is null) return null;
-        var updated = rec with { Status = status, ResultRel = resultRel, Error = error };
+        var updated = rec with { Status = status, ResultRel = resultRel, Error = error, Preview = preview };
         try { File.WriteAllText(Path.Combine(Dir, rec.Id + ".json"), JsonSerializer.Serialize(updated)); }
         catch { return rec; }
         return updated;

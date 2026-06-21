@@ -141,4 +141,48 @@ public class PendingGenStoreTests
         Assert.Null(PendingGenStore.SetStatus("nonexistent-id-xyz", "done"));
         Assert.Null(PendingGenStore.SetStatus("../escape", "done"));   // traversal-guarded like Load/Delete
     }
+
+    // ---- round-trip seam for the chat->media round-trip build (edit_image + the coordinator + inline surfacing) ----
+
+    [Fact]
+    public void Enqueue_persists_init_image_and_strength_for_edits()
+    {
+        var rec = PendingGenStore.Enqueue("refine", "image", null, 1, "conv-e", initImage: "2026/06/src.png", strength: 0.55);
+        try
+        {
+            var loaded = PendingGenStore.Load(rec.Id)!;
+            Assert.Equal("2026/06/src.png", loaded.InitImage);   // edit_image source survives the disk round-trip
+            Assert.Equal(0.55, loaded.Strength);
+        }
+        finally { PendingGenStore.Delete(rec.Id); }
+    }
+
+    [Fact]
+    public void SetStatus_threads_an_in_flight_preview_then_clears_it_on_done()
+    {
+        var rec = PendingGenStore.Enqueue("p", "image", null, 1, null);
+        try
+        {
+            var r = PendingGenStore.SetStatus(rec.Id, "rendering", preview: "data:image/jpeg;base64,zz");
+            Assert.Equal("rendering", r!.Status);
+            Assert.Equal("data:image/jpeg;base64,zz", r.Preview);
+            var done = PendingGenStore.SetStatus(rec.Id, "done", resultRel: "x.png");
+            Assert.Null(done!.Preview);   // the final image replaces the warming-up preview (no stale lingering)
+        }
+        finally { PendingGenStore.Delete(rec.Id); }
+    }
+
+    [Fact]
+    public void FilterQueued_keeps_only_queued_oldest_first()
+    {
+        var all = new[]
+        {
+            new PendingGen("c", "p", "image", null, 1, "2026-06-21T10:02:00Z", null, Status: "done"),
+            new PendingGen("a", "p", "image", null, 1, "2026-06-21T10:00:00Z", null, Status: "queued"),
+            new PendingGen("b", "p", "image", null, 1, "2026-06-21T10:01:00Z", null, Status: "queued"),
+            new PendingGen("d", "p", "image", null, 1, "2026-06-21T10:03:00Z", null, Status: "rendering"),
+        };
+        Assert.Equal(new[] { "a", "b" }, PendingGenStore.FilterQueued(all).Select(p => p.Id).ToArray());   // queued only, FIFO
+        Assert.Empty(PendingGenStore.FilterQueued(all.Where(p => p.Status != "queued")));
+    }
 }
