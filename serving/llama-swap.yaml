@@ -104,3 +104,13 @@ models:
   #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
   #     -m __DOKI_ROOT__\models\Qwen3-Coder-Next-80B-A3B-Q4_K_XL.gguf
   #     --port ${PORT} -ngl 99 --n-cpu-moe 18 -c 131072 -b 2048 -ub 2048 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cache-reuse 256 --jinja
+  #
+  # "coder-candidate-glm":        # GLM-4.7-Flash (30B-A3B, MIT). Runtime arch = deepseek2/MLA (Glm4MoeLiteForCausalLM) — NOT glm4moe.
+  #                               # ~17.5GB UD-Q4_K_XL, full-GPU (no offload); same class as coder-fast. Thinking-by-default:
+  #                               # send /no_think to match coder-fast's non-thinking, low-TTFT role.
+  #                               # KV-quant OFF on purpose (no --cache-type / --cache-reuse): OPEN llama.cpp #21915 makes GLM
+  #                               # emit gibberish on the 2nd+ turn with q8_0 KV. Re-test KV-quant as a separate bake-off variable.
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\GLM-4.7-Flash-UD-Q4_K_XL.gguf
+  #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --repeat-penalty 1.0 --min-p 0.01 --jinja

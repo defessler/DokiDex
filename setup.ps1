@@ -168,11 +168,13 @@ if ($Vision) {
 # After download, uncomment the matching block in serving\llama-swap.yaml, then gate via serving\test-toolcall.ps1
 # + evals\run-suite.ps1 (>=91% golden AND zero tool-call flakes) BEFORE making it a tier model. Run text-only.
 if ($LlmCandidates) {
-    Info "LLM bake-off candidates (Qwen3.6-27B / Qwen3.6-35B-A3B / Qwen3-Coder-Next-80B — ~60GB total)"
+    Info "LLM bake-off candidates (Qwen3.6-27B / Qwen3.6-35B-A3B / Qwen3-Coder-Next-80B / GLM-4.7-Flash — ~77GB total)"
     $mdir = Join-Path $root "models"
     Fetch-Gguf "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-UD-Q4_K_XL.gguf"                       (Join-Path $mdir "Qwen3.6-27B-UD-Q4_K_XL.gguf")
     Fetch-Gguf "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"               (Join-Path $mdir "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf")
     Fetch-Gguf "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF/resolve/main/Qwen3-Coder-Next-80B-A3B-Q4_K_XL.gguf"        (Join-Path $mdir "Qwen3-Coder-Next-80B-A3B-Q4_K_XL.gguf")
+    # GLM-4.7-Flash (30B-A3B, deepseek2/MLA runtime). SHA-256 b0d4fbc1211f891b4cfbf2a497160bfe06a49412420068904d426b7a13f4ba7f, 17,520,169,312 bytes (Unsloth post-Jan-21 fixed build; verify with Get-FileHash -Algorithm SHA256).
+    Fetch-Gguf "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-UD-Q4_K_XL.gguf"                    (Join-Path $mdir "GLM-4.7-Flash-UD-Q4_K_XL.gguf")
     Info "Candidates downloaded. Uncomment the matching llama-swap.yaml block, then run the eval gate before adopting."
 }
 

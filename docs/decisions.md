@@ -1056,8 +1056,8 @@ on a single 32GB+DDR5 box with clean tool-calls.
 (invented)" is now **stale** — Qwen3.6-35B-A3B shipped 2026-04-16 (Apache-2.0, public GGUFs),
 as did Qwen3.6-27B (dense) and Qwen3-Coder-Next-80B-A3B (the FULL model — only its damaged
 REAP-48B prune was ever tested here). The repo's own re-judge trigger ("a genuinely new ~30B
-agentic-coder GGUF") has fired, and the pinned llama.cpp b9616 (2026-06-15) already supports
-the qwen35moe / GLM-MoE / Qwen3-VL archs, so they're servable with no upgrade. These are
+agentic-coder GGUF") has fired, and the pinned llama.cpp b9616 (2026-06-12) already supports
+the qwen35moe / deepseek2 (GLM-4.7-Flash MLA, *not* glm4moe) / Qwen3-VL archs, so they're servable with no upgrade. These are
 **bake-off candidates, not adoptions** — wired commented in `serving/llama-swap.yaml` +
 downloadable via `setup.ps1 -LlmCandidates`; gate via `serving/test-toolcall.ps1` +
 `evals/run-suite.ps1` (≥91% golden AND zero tool-call flakes) before any swap.
