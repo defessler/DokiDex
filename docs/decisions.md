@@ -14,9 +14,10 @@ Per "make the app self-guiding": brainstormed (full dialogue) -> spec
   that launch an area pre-filled, plus a welcome header + GPU/mode meter. Smoke test: `/api/home` returned all 10
   cards with correct readiness (mode `none` -> Create/Chat/etc. needs-mode, Voice needs-setup, Library/Models/Status
   ready); the served SPA carries the Home view.
-- **Phase 2 (deferred):** expandable mini-guides, recent-work thumbnails, the quick-start box, and the cold-load
-  latency (the first `/api/home` blocks on `GetStatusAsync` probing down services, ~16s cold — render the catalog
-  instantly and fetch readiness async).
+- **Phase 2 (SHIPPED — v0.26.0):** the cold-load fix (cards render in ~130ms via `GET /api/home/catalog`, readiness
+  async), the quick-start box (`GET /api/home/route`: a question -> Chat, else -> Create with an inferred kind — pure
+  `RouteQuickStart`), expandable per-card mini-guides (`HomeCapability.Guide`), and a recent-work thumbnail strip
+  (reuses `/api/gallery`, hidden when empty). 20 HomeCatalog unit tests; each slice live-smoked on :5111.
 
 **Env fixed:** PowerShell 7 reinstalled (`winget install Microsoft.PowerShell` -> pwsh 7.6.2 on PATH), so the
 control-panel build / `doki test` / release run natively again (no more exit `9009`).
