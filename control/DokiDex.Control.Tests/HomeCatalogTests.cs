@@ -72,7 +72,7 @@ public class HomeCatalogTests
     [Fact]
     public void Catalog_starters_target_real_views_and_have_labels()
     {
-        var views = new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status" }.ToHashSet();
+        var views = new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status", "memory" }.ToHashSet();
         foreach (var c in HomeCatalog.Capabilities)
         {
             Assert.False(string.IsNullOrWhiteSpace(c.Name));

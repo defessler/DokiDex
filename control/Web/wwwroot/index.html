@@ -155,6 +155,7 @@
       <button id="nav-scene" onclick="setView('scene')">Scene</button>
       <button id="nav-library" onclick="setView('library')">Library</button>
       <button id="nav-models" onclick="setView('models')">Models</button>
+      <button id="nav-memory" onclick="setView('memory')">Memory</button>
       <button id="nav-status" onclick="setView('status')">Status</button>
       <button onclick="toggleKeyHelp()" title="keyboard shortcuts (?)">⌨</button>
     </nav>
@@ -519,6 +520,9 @@
     <section id="view-models" style="display:none">
       <div id="models"><p class="hint">Loading…</p></div>
     </section>
+    <section id="view-memory" style="display:none">
+      <div id="memoryPanel"><p class="hint">Loading…</p></div>
+    </section>
   </main>
   <script>
     const $ = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
@@ -553,7 +557,7 @@
     // ===== DD-PURE-END =====
 
     function setView(v){ state.view=v;
-      for (const x of ['home','create','director','chat','cast','voice','flow','scene','status','library','models']) {
+      for (const x of ['home','create','director','chat','cast','voice','flow','scene','status','library','models','memory']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
@@ -561,6 +565,7 @@
       if (v==='create') loadPendingGen();
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
       if (v==='models') loadModels();
+      if (v==='memory') loadMemory();
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
@@ -661,6 +666,45 @@
       const q = (document.getElementById('quickStart')?.value || '').trim(); if(!q) return;
       let r; try { r = await (await fetch('/api/home/route?q=' + encodeURIComponent(q))).json(); } catch { return; }
       applyStarter(r.view, r.prompt, r.kind);
+    }
+
+    // ---- Memory panel (the "Manage > Memory" view): list / add / delete the long-term facts chat recalls, over the
+    //      /api/memory CRUD endpoints. Same-origin fetches (the local-security middleware accepts them, like the
+    //      gallery rate/delete calls). ----
+    async function loadMemory(){
+      const el = document.getElementById('memoryPanel'); if(!el) return;
+      let rows;
+      try { rows = await (await fetch('/api/memory')).json(); }
+      catch { el.innerHTML = '<p class="hint">Memory store unavailable — it appears once the assistant saves its first fact.</p>'; return; }
+      const list = (rows||[]).length
+        ? rows.map(m => `<div class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+            <div style="flex:1"><div>${homeEsc(m.content)}</div>${m.tags?`<div class="hint" style="font-size:11px;margin-top:3px">${homeEsc(m.tags)}</div>`:''}</div>
+            <button class="ghost" style="font-size:12px" onclick="delMemory(${m.id})">Delete</button>
+          </div>`).join('')
+        : '<p class="hint">No memories yet — add one below, or the assistant saves facts as you chat.</p>';
+      el.innerHTML = `<h2>Long-term memory</h2>
+        <p class="hint" style="margin-bottom:14px">Facts the assistant recalls in every chat. Add, review, or remove them.</p>
+        <div style="margin-bottom:16px">${list}</div>
+        <div class="row" style="gap:8px">
+          <input id="memContent" placeholder="A fact to remember…" onkeydown="if(event.key==='Enter')addMemory()" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 13px;font-size:14px;font-family:inherit">
+          <input id="memTags" placeholder="tags (optional)" onkeydown="if(event.key==='Enter')addMemory()" style="width:170px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 13px;font-size:14px;font-family:inherit">
+          <button class="primary" onclick="addMemory()">Add</button>
+        </div>
+        <div class="hint" id="memHint" style="margin-top:8px"></div>`;
+    }
+    async function addMemory(){
+      const content = (document.getElementById('memContent')?.value||'').trim();
+      const tags = (document.getElementById('memTags')?.value||'').trim();
+      if(!content) return;
+      const h = document.getElementById('memHint'); if(h) h.textContent='saving…';
+      try {
+        const res = await fetch('/api/memory', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ content, tags }) });
+        if(res.ok){ loadMemory(); } else { const j = await res.json().catch(()=>({})); if(h) h.textContent = j.error || 'could not save'; }
+      } catch { if(h) h.textContent='could not save'; }
+    }
+    async function delMemory(id){
+      try { await fetch('/api/memory/'+id, { method:'DELETE' }); } catch {}
+      loadMemory();
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];

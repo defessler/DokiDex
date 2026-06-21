@@ -141,5 +141,7 @@ public static class HomeCatalog
             Need(), new[] { S("see installed models", "models") }) { Guide = new[] { "See installed image / video / LLM models.", "Install or remove from the catalog.", "Switch the active model." } },
         new("status", "manage", "Status", "\U0001F4CA", "Live service health, the GPU meter, and the agent / media mode switch.",
             Need(), new[] { S("check what's running", "status") }) { Guide = new[] { "See each service's health + the GPU meter.", "Switch between Agent and Media mode.", "Start or stop individual services." } },
+        new("memory", "manage", "Memory", "\U0001F9E0", "Review and curate the long-term facts your assistant remembers.",
+            Need(), new[] { S("manage what the assistant remembers", "memory") }) { Guide = new[] { "See every fact the assistant has saved.", "Add a fact, or delete ones that are wrong.", "Chat recalls these automatically in every conversation." } },
     };
 }
