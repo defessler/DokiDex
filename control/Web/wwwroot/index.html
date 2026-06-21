@@ -145,7 +145,8 @@
   <header>
     <span class="brand">D O K I <b>DEX</b></span>
     <nav>
-      <button id="nav-create" class="on" onclick="setView('create')">Create</button>
+      <button id="nav-home" class="on" onclick="setView('home')">Home</button>
+      <button id="nav-create" onclick="setView('create')">Create</button>
       <button id="nav-director" onclick="setView('director')">Director</button>
       <button id="nav-chat" onclick="setView('chat')">Chat</button>
       <button id="nav-cast" onclick="setView('cast')">Cast</button>
@@ -160,7 +161,9 @@
     <span id="gpuPill" class="gpu-pill"></span>
   </header>
   <main>
-    <section id="view-create">
+    <section id="view-home"><p class="hint">Loading…</p></section>
+
+    <section id="view-create" style="display:none">
       <div id="guard"></div>
       <div id="pendingGen"></div>
       <textarea id="prompt" placeholder="Describe what to generate…  (__wildcards__ supported · Ctrl+Enter to generate)"></textarea>
@@ -550,10 +553,11 @@
     // ===== DD-PURE-END =====
 
     function setView(v){ state.view=v;
-      for (const x of ['create','director','chat','cast','voice','flow','scene','status','library','models']) {
+      for (const x of ['home','create','director','chat','cast','voice','flow','scene','status','library','models']) {
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
+      if (v==='home') loadHome();
       if (v==='create') loadPendingGen();
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
       if (v==='models') loadModels();
@@ -561,6 +565,58 @@
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
       if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKbLibraries(); loadKb(); renderChatGuard(); document.getElementById('chatInput').focus(); }
+    }
+
+    // ---- guided Home command center: render GET /api/home (catalog + live readiness) into grouped capability cards.
+    //      Starters launch an area pre-filled (teach by doing); a non-ready badge routes to where you fix it. ----
+    let _homeData = null;
+    function homeEsc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+    async function loadHome(){
+      const el = document.getElementById('view-home'); if(!el) return;
+      try { _homeData = await (await fetch('/api/home')).json(); }
+      catch { el.innerHTML = '<p class="hint">Home unavailable — is the server running?</p>'; return; }
+      const g = _homeData.gpu || {};
+      const mode = g.activeGroup==='llm' ? 'Agent (LLM)' : (g.activeGroup==='media' ? 'Media' : 'Idle');
+      const vram = (g.usedMB!=null && g.totalMB) ? ` · ${(g.usedMB/1024).toFixed(1)}/${(g.totalMB/1024).toFixed(0)} GB` : '';
+      let html = `<div class="row" style="margin-bottom:20px">
+          <div><div style="font-size:20px;font-weight:300;letter-spacing:1px">Welcome to <b style="color:var(--gold)">DokiDex</b></div>
+          <div class="hint">Everything you can make, talk to, and manage — and what's ready right now.</div></div>
+          <span class="gpu-pill" style="margin-left:auto">GPU: <b>${mode}</b>${vram} · <a href="#" onclick="setView('status');return false" style="color:var(--cyan);text-decoration:none">manage ›</a></span>
+        </div>`;
+      for (const [key,label] of [['make','Make'],['talk','Talk'],['manage','Manage']]){
+        const cards = (_homeData.cards||[]).filter(c => c.capability.group===key);
+        if(!cards.length) continue;
+        html += `<h2>${label}</h2><div class="grid">` + cards.map(homeCardHtml).join('') + `</div>`;
+      }
+      el.innerHTML = html;
+    }
+    function homeCardHtml(c){
+      const cap = c.capability, r = c.readiness;
+      const badge = r.status==='ready'
+        ? `<span style="font-size:11px;color:var(--cyan)">● Ready</span>`
+        : `<span onclick="homeReadyClick('${r.action||''}')" title="${homeEsc(r.nextStep||'')}" style="font-size:11px;color:var(--gold);cursor:pointer">▲ ${homeEsc(r.nextStep||'Needs setup')}</span>`;
+      const starters = (cap.starters||[]).map((s,i) =>
+        `<button class="ghost" style="font-size:11px;padding:5px 9px;margin:3px 3px 0 0" onclick="runStarter('${cap.id}',${i})">${homeEsc(s.label)}</button>`
+      ).join('');
+      return `<div class="card"><div class="body">
+          <div style="font-size:15px"><span style="font-size:18px">${cap.icon||''}</span> <b>${homeEsc(cap.name)}</b></div>
+          <div class="hint" style="margin:6px 0 9px">${homeEsc(cap.blurb)}</div>
+          <div style="margin-bottom:8px">${badge}</div>
+          <div style="display:flex;flex-wrap:wrap">${starters}</div>
+        </div></div>`;
+    }
+    function homeReadyClick(action){ if((action||'').startsWith('model:')) setView('models'); else setView('status'); }
+    function runStarter(capId, i){
+      const cap = (_homeData?.cards||[]).find(c => c.capability.id===capId)?.capability; if(!cap) return;
+      const s = cap.starters[i]; if(!s) return;
+      if(s.view==='create'){
+        document.getElementById('prompt').value = s.prompt || '';
+        if(s.kind){ state.kind = s.kind; renderControls(); }
+        setView('create'); document.getElementById('prompt').focus();
+      } else if(s.view==='chat'){
+        setView('chat');
+        const ci = document.getElementById('chatInput'); if(ci){ if(s.prompt) ci.value = s.prompt; ci.focus(); }
+      } else { setView(s.view); }
     }
     // ---- 3D blockout -> depth map (server-side software rasterizer) ----
     let sceneBoxes=[{x:0,y:0,z:0,size:1}];
@@ -2488,6 +2544,7 @@
     // Restore a persisted live-pane width, re-clamped against the current container (defends a stale oversized value).
     (function(){ try{ const raw=parseFloat(localStorage.getItem('dd.livepaneW')); if(raw>0){ const p=document.getElementById('livePaneWrap'); const cw=(p&&p.parentElement&&p.parentElement.clientWidth)||960; setLivepaneW(clampWidth(raw, cw)); } }catch{} })();
     renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); loadImageModels(); document.getElementById('prompt').focus();
+    loadHome();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
   </script>
