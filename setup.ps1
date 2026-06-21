@@ -765,6 +765,15 @@ if ($Models -eq "full") {
     $cwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\WanFoley.json"
     if (Test-Path $wf) { New-Item -ItemType Directory -Force (Split-Path $cwf) | Out-Null; Copy-Item $wf $cwf -Force; Ok "WanFoley workflow installed" }
     else { Warn "media-assets\WanFoley.json not present (authored at build time); skipping" }
+
+    # LTX23 custom workflow (Lightricks LTX-2.3 22B -> native audio+video MP4 in one pass, via the ComfyUI-LTXVideo
+    # node). Unlike the gated InstantID/PuLID/InfiniteTalk/LatentSync sidecars (whose runnable JSON is still an
+    # on-GPU authoring step), LTX-2.3 was VERIFIED end-to-end (native audio+video render), so the runnable workflow
+    # is committed to the repo and deployed here exactly like WanFoley (copy-or-Warn). `doki gen "..." -Ltx`.
+    $lxWf  = Join-Path $root "media-assets\LTX23.json"
+    $lxCwf = Join-Path $swarm "src\BuiltinExtensions\ComfyUIBackend\CustomWorkflows\LTX23.json"
+    if (Test-Path $lxWf) { New-Item -ItemType Directory -Force (Split-Path $lxCwf) | Out-Null; Copy-Item $lxWf $lxCwf -Force; Ok "LTX23 workflow installed" }
+    else { Warn "media-assets\LTX23.json not present (authored at build time); skipping" }
 }
 
 # 5h-bis. InstantID face-identity reference (GATED sidecar, -FaceId) — SDXL-based, so it REUSES the anime

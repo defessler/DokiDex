@@ -9,13 +9,18 @@
 
 # switches -> exactly one kind, with an ambiguity guard (so `gen -Video -Music` fails loudly, not silently).
 function Resolve-GenKind {
-    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$FaceId, [switch]$Pulid, [switch]$InfiniteTalk, [switch]$LatentSync, [switch]$Speak)
+    param([switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley, [switch]$Ltx, [switch]$FaceId, [switch]$Pulid, [switch]$InfiniteTalk, [switch]$LatentSync, [switch]$Speak)
     $picked = @()
     if ($Video) { $picked += 'video' }
     if ($Music) { $picked += 'music' }
     if ($Edit)  { $picked += 'edit'  }
     if ($I2v)   { $picked += 'i2v'   }
     if ($Foley) { $picked += 'foley' }
+    # -Ltx = LTX-2.3 native audio+video (Lightricks LTX-2.3 22B, run as a SwarmUI custom ComfyUI workflow via the
+    # ComfyUI-LTXVideo node). Unlike Wan/-Video, LTX-2.3 generates the VIDEO *and* a synced native soundtrack from
+    # the text prompt in ONE pass (no separate Foley step, no driving -Audio). Resolves to the LTX23 custom workflow
+    # exactly the way 'foley' resolves to WanFoley; the idea rides the standard ${prompt} injection point.
+    if ($Ltx)   { $picked += 'ltx'   }
     if ($FaceId) { $picked += 'faceid' }
     if ($Pulid) { $picked += 'pulid' }
     if ($InfiniteTalk) { $picked += 'infinitetalk' }
@@ -29,7 +34,7 @@ function Resolve-GenKind {
     # transport (HTTP server in the LLM group). -Speak is opt-in only and requires `doki up media` + the on-GPU
     # per-engine TtsSuite-<engine> workflow (see docs/decisions.md).
     if ($Speak) { $picked += 'speech' }
-    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -FaceId / -Pulid / -InfiniteTalk / -LatentSync / -Speak (got: $($picked -join ', '))" }
+    if ($picked.Count -gt 1) { throw "pick ONE of -Video / -Music / -Edit / -I2v / -Foley / -Ltx / -FaceId / -Pulid / -InfiniteTalk / -LatentSync / -Speak (got: $($picked -join ', '))" }
     if ($picked.Count -eq 1) { return $picked[0] }
     return 'image'
 }
@@ -107,7 +112,7 @@ function Resolve-TtsEngine {
 # verbatim from docs/wiki/11-media-recipes.md. No prompt, no session — Build-GenBody merges those in later.
 function Get-GenRecipe {
     param(
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'ltx', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [string]$Upscaler, [string]$Engine
     )
     $r = switch ($Kind) {
@@ -165,6 +170,13 @@ function Get-GenRecipe {
         'i2v'   { @{ model = 'SwarmUI_Z-Image-Turbo-FP8Mix.safetensors'; steps = 8; cfgscale = 1; width = 832; height = 480; videomodel = 'wan2.2_ti2v_5B_fp16.safetensors'; videoframes = 49; videosteps = 20; videocfg = 3.5; videofps = 24; videoresolution = 'Image'; videoformat = 'h264-mp4' } }
         # video + synced SFX via the WanFoley custom ComfyUI workflow -> one muxed mp4 with 48 kHz audio.
         'foley' { @{ comfyuicustomworkflow = 'WanFoley'; seed = -1 } }
+        # LTX-2.3 native AUDIO+VIDEO via the LTX23 custom ComfyUI workflow (Lightricks LTX-2.3 22B on the
+        # ComfyUI-LTXVideo node) -> one mp4 with a synced native soundtrack from the SAME text prompt, in a single
+        # pass (no separate Foley step, no driving -Audio input). Resolves to a single workflow exactly like 'foley';
+        # the idea rides the standard ${prompt} injection and seed -1 lets SwarmUI pick a random seed (the LTX23.json
+        # noise node carries the ${seed} placeholder). VERIFIED at rest (native audio+video render) — committed as the
+        # runnable media-assets\LTX23.json and deployed to CustomWorkflows by setup.ps1 (like WanFoley), NOT gated.
+        'ltx' { @{ comfyuicustomworkflow = 'LTX23'; seed = -1 } }
         # face-identity transfer via the InstantID custom ComfyUI workflow (SDXL): pass the reference face as the
         # init image (doki gen -FaceId -InitImage <face.png>). Ergonomic alias for -Workflow InstantID; the
         # workflow JSON wires the init image to InstantID's FaceAnalysis/LoadImage node. GATED: needs the -FaceId
@@ -307,7 +319,7 @@ function Get-GenPromptFields {
 function Get-ModelFamilyOverride {
     param(
         [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'ltx', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image'
     )
     if (-not $Model -or $Kind -ne 'image') { return @{} }
     if ($Model -like 'flux-2-klein*') {
@@ -377,7 +389,7 @@ function Build-GenBody {
         [string]$ControlNets,
         [string]$EndImageB64, [bool]$Reference = $false, [double]$RefWeight = 0.6,
         [string]$Interpolate, [int]$InterpolateMult = 2, [string]$Workflow, [string]$Tile, [string]$Model,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image'
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'ltx', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image'
     )
     $body = @{ session_id = $SessionId; images = $(if ($Count -gt 1) { $Count } else { 1 }) }
     foreach ($kv in $Recipe.GetEnumerator())      { $body[$kv.Key] = $kv.Value }
@@ -469,7 +481,7 @@ function Build-GenBody {
 function Invoke-Gen {
     param(
         [Parameter(Mandatory)][string]$Prompt,
-        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
+        [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'ltx', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
         [string]$Engine,   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...): picks the TtsSuite-<engine> workflow
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
         [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,

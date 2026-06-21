@@ -21,6 +21,7 @@ Assert ((Resolve-GenKind -Music) -eq 'music') "-Music -> music"
 Assert ((Resolve-GenKind -Edit)  -eq 'edit')  "-Edit  -> edit"
 Assert ((Resolve-GenKind -I2v)   -eq 'i2v')   "-I2v   -> i2v"
 Assert ((Resolve-GenKind -Foley) -eq 'foley') "-Foley -> foley"
+Assert ((Resolve-GenKind -Ltx)   -eq 'ltx')   "-Ltx   -> ltx (LTX-2.3 native audio+video custom workflow)"
 Assert ((Resolve-GenKind -FaceId) -eq 'faceid') "-FaceId -> faceid (InstantID face-identity)"
 Assert ((Resolve-GenKind -Pulid) -eq 'pulid') "-Pulid -> pulid (PuLID-Flux face-identity)"
 Assert ((Resolve-GenKind -InfiniteTalk) -eq 'infinitetalk') "-InfiniteTalk -> infinitetalk (audio-driven talking-video)"
@@ -31,6 +32,9 @@ Assert $ambiguous                             "-Video -Music -> throws (ambiguou
 $ambiguous2 = $false
 try { Resolve-GenKind -FaceId -Foley | Out-Null } catch { $ambiguous2 = $true }
 Assert $ambiguous2                            "-FaceId -Foley -> throws (ambiguous)"
+$ambiguousLtx = $false
+try { Resolve-GenKind -Ltx -Video | Out-Null } catch { $ambiguousLtx = $true }
+Assert $ambiguousLtx                          "-Ltx -Video -> throws (ambiguous; two video kinds)"
 $ambiguousPulid = $false
 try { Resolve-GenKind -Pulid -FaceId | Out-Null } catch { $ambiguousPulid = $true }
 Assert $ambiguousPulid                        "-Pulid -FaceId -> throws (ambiguous)"
@@ -115,6 +119,31 @@ Assert ($i2v.videomodel -eq 'wan2.2_ti2v_5B_fp16.safetensors' -and $i2v.videofra
 Assert ($i2v.videoresolution -eq 'Image' -and $i2v.videosteps -eq 20) "i2v -> videoresolution=Image + videosteps (the I2V trigger trio)"
 $fol = Get-GenRecipe -Kind foley
 Assert ($fol.comfyuicustomworkflow -eq 'WanFoley' -and $fol.seed -eq -1) "foley -> WanFoley custom workflow + seed -1"
+# ltx = LTX-2.3 native audio+video custom-workflow kind (Lightricks LTX-2.3 22B via ComfyUI-LTXVideo). Maps to
+# comfyuicustomworkflow=LTX23 + seed -1, EXACTLY like foley (one workflow; the idea rides ${prompt}). Unlike foley
+# there's no second SFX model and no driving -Audio — LTX synthesizes the synced soundtrack from the SAME prompt.
+$ltx = Get-GenRecipe -Kind ltx
+Assert ($ltx.comfyuicustomworkflow -eq 'LTX23' -and $ltx.seed -eq -1) "ltx -> LTX23 custom workflow + seed -1 (native audio+video, one pass)"
+
+# --- Invoke-Gen: -Ltx takes ONLY the idea (no -InitImage / -Audio); the prompt rides the standard ${prompt}
+# injection through the LTX23 custom workflow, exactly like foley. GPU/network-free via -BodyOnly (stops before any
+# /API call). Proves the body carries comfyuicustomworkflow=LTX23 + the prompt, and that LTX does NOT smuggle an
+# audio/init key (it synthesizes its own native soundtrack from the text — there is no driving-audio channel).
+$ltxOk = $true; $ltxBody = $null
+try { $ltxBody = Invoke-Gen -Prompt 'a corgi running on a beach at sunset, waves crashing' -Kind ltx -BodyOnly } catch { $ltxOk = $false }
+Assert $ltxOk                                              "-Ltx with just an idea -> does NOT throw (no init image / no audio required)"
+$ltxObj = $null; try { $ltxObj = $ltxBody | ConvertFrom-Json } catch {}
+Assert ($ltxObj -and $ltxObj.comfyuicustomworkflow -eq 'LTX23') "-Ltx -BodyOnly -> body carries comfyuicustomworkflow=LTX23"
+Assert ($ltxObj -and $ltxObj.prompt -eq '<mpprompt:a corgi running on a beach at sunset, waves crashing>') "-Ltx -BodyOnly -> the idea rides \${prompt} via the standard rewriter wrap (video-family)"
+Assert ($ltxObj -and -not $ltxObj.initimage)              "-Ltx -BodyOnly -> no init image key (text->AV, not img2video)"
+Assert ($ltxObj -and -not $ltxObj.inputaudio)             "-Ltx -BodyOnly -> no driving-audio key (LTX synthesizes its own native soundtrack)"
+# -Audio is meaningless for LTX (no driving-audio channel) and must be rejected loudly, like every non-audio kind
+# (mirrors the -Video -Audio guard) — LTX is NOT in the -Audio allow-list (infinitetalk/latentsync/speech only).
+$ltxAudReject = $false; $ltxAudErr = $null
+try { Invoke-Gen -Prompt 'a corgi on a beach' -Kind ltx -Audio 'x.wav' | Out-Null } catch { $ltxAudReject = $true; $ltxAudErr = "$($_.Exception.Message)" }
+Assert $ltxAudReject                                       "-Ltx -Audio -> throws (LTX has no driving-audio channel; it makes its own native audio)"
+Assert ($ltxAudErr -match '(?i)-Audio only applies to') "-Ltx -Audio -> the error names the audio kind-guard (clear, up-front)"
+
 # faceid = the InstantID custom-workflow alias (SDXL face-identity). Maps to comfyuicustomworkflow=InstantID;
 # the reference face rides the init-image channel (doki gen -FaceId -InitImage <face.png>), NOT a new key.
 $fid = Get-GenRecipe -Kind faceid
@@ -653,6 +682,17 @@ $spdOut = & pwsh -NoProfile -File $dokiPs1 gen "Default engine please." -Speak -
 $spdLine = @($spdOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
 $spdSeam = $null; try { $spdSeam = $spdLine | ConvertFrom-Json } catch { }
 Assert ($spdSeam -and $spdSeam.comfyuicustomworkflow -eq 'TtsSuite-IndexTTS2') "doki.ps1 gen -Speak (no -Engine) -> defaults to TtsSuite-IndexTTS2 (engine defaulted, not dropped)"
+
+# LTX mirror: -Ltx must forward through doki.ps1 (the param block + the Resolve-GenKind call) to the LTX23 recipe
+# (a dropped switch/forward would mean `doki gen -Ltx` silently falls back to an image gen). Shell the real doki.ps1
+# -BodyOnly (no GPU/network) and assert the emitted body carries comfyuicustomworkflow=LTX23 + the prompt rides
+# ${prompt}. LTX-2.3 is the VERIFIED native audio+video custom workflow (committed media-assets\LTX23.json).
+$lxOut = & pwsh -NoProfile -File $dokiPs1 gen "a corgi running on a beach at sunset, waves crashing" -Ltx -BodyOnly 2>&1
+$lxLine = @($lxOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^\s*\{.*\}\s*$' })[-1]
+$lxSeam = $null; try { $lxSeam = $lxLine | ConvertFrom-Json } catch { }
+Assert ($null -ne $lxSeam) "doki.ps1 gen -Ltx -BodyOnly -> emits a parseable JSON body"
+Assert ($lxSeam -and $lxSeam.comfyuicustomworkflow -eq 'LTX23') "doki.ps1 forwards -Ltx -> body carries comfyuicustomworkflow=LTX23 (native audio+video)"
+Assert ($lxSeam -and $lxSeam.prompt -eq '<mpprompt:a corgi running on a beach at sunset, waves crashing>') "doki.ps1 -Ltx body -> the idea rides \${prompt} via the standard rewriter wrap (video-family)"
 
 # --- Expand-Wildcards: __name__ -> a random line from <name>.txt, seed-reproducible, unknown left as-is ---
 $wcDir = Join-Path ([System.IO.Path]::GetTempPath()) "dokidex-wc-$([guid]::NewGuid().ToString('N'))"

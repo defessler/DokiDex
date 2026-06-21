@@ -5,7 +5,7 @@
 #   .\doki.ps1 status                      show services + health
 #   .\doki.ps1 restart [profile]           down, then up
 #   .\doki.ps1 logs <llama-swap|fim|media> tail a service log
-#   .\doki.ps1 gen "<idea>" [-Video|-Music|-Edit]  text->image/video/music (SwarmUI; needs `up media`)
+#   .\doki.ps1 gen "<idea>" [-Video|-Music|-Edit|-Ltx]  text->image/video/music/AV (SwarmUI; needs `up media`)
 #   .\doki.ps1 index                       (re)build the codebase RAG index for the code_search MCP tool
 #
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
@@ -22,6 +22,7 @@ param(
     # -Realism (Z-Image realism LoRA, image/edit/i2v), -InitImage <png> (required for -Edit; img2img /
     # animate-still otherwise), -Raw (skip the :8013 rewriter), -Out <file>, -NoOpen.
     [switch]$Video, [switch]$Music, [switch]$Edit, [switch]$I2v, [switch]$Foley,
+    [switch]$Ltx,      # LTX-2.3 native audio+video (Lightricks LTX-2.3 22B via the ComfyUI-LTXVideo node) — one mp4 with a synced native soundtrack from the SAME text prompt, in one pass (no -Audio). Runs the committed LTX23 custom workflow (deployed by setup.ps1 like WanFoley); VERIFIED.
     [switch]$FaceId,   # InstantID face-identity transfer (SDXL) — pass the reference face as -InitImage; needs setup.ps1 -FaceId + the on-GPU InstantID workflow
     [switch]$Pulid,    # PuLID-Flux face-identity transfer (FLUX.1-dev) — pass the reference face as -InitImage; needs setup.ps1 -Pulid (non-gated ~17GB FLUX fp8 base; Alpha/stale node) + the on-GPU PuLID workflow
     [switch]$InfiniteTalk,   # audio-driven talking-video (MeiGen InfiniteTalk on Wan2.1-I2V-14B) — portrait via -InitImage, audio via -Audio; needs setup.ps1 -InfiniteTalk + the on-GPU InfiniteTalk workflow (~82GB base)
@@ -395,9 +396,9 @@ switch ($Command) {
         & python (Join-Path $serving "memory-mcp\code_index.py") $root
     }
     "gen" {
-        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-FaceId|-Pulid|-InfiniteTalk|-LatentSync|-Speak] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Engine <tts-engine>] [-Raw] [-Out <file>] [-NoOpen]" }
+        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-Ltx|-FaceId|-Pulid|-InfiniteTalk|-LatentSync|-Speak] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Engine <tts-engine>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
-        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -FaceId:$FaceId -Pulid:$Pulid -InfiniteTalk:$InfiniteTalk -LatentSync:$LatentSync -Speak:$Speak
+        $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -Ltx:$Ltx -FaceId:$FaceId -Pulid:$Pulid -InfiniteTalk:$InfiniteTalk -LatentSync:$LatentSync -Speak:$Speak
         $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Engine $Engine -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlNets $ControlNets -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $Tile -Model $Model -InitImage $InitImage -MaskImage $MaskImage -Audio $Audio -Out $Out -BodyOnly:$BodyOnly
         if ($BodyOnly) { $genResult } else { $null = $genResult }   # -BodyOnly prints the GenerateText2Image body JSON for the web host (live-progress WS path)
     }
