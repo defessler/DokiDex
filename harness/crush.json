@@ -24,6 +24,12 @@
           "name": "Qwen3-Coder-30B-A3B @64k (coexists with FIM autocomplete)",
           "context_window": 65536,
           "default_max_tokens": 8192
+        },
+        {
+          "id": "fast-candidate-gptoss20b",
+          "name": "gpt-oss-20b (GPU, fast; CoT in reasoning_content)",
+          "context_window": 131072,
+          "default_max_tokens": 8192
         }
       ]
     }
