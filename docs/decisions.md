@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-06-21 — Full-send upgrade COMPLETE: eval-gate (vision tier promoted) + EchoMimicV3 isolated render
+
+Closed out the four-model full-send. All four now live + verified:
+- **Eval-gate** (real-image Describe compare + tool-call gate, via subagent): **vision tier PROMOTED 8B -> Qwen3-VL-32B** — it decisively out-reads the 8B on fine UI text/telemetry (read live dashboard numbers + per-service model names the 8B missed entirely), the exact Describe/Verify capability the tier needs. The 8B is kept as `vision-8b` (sub-second warm) for high-volume vision. **gpt-oss-20b** passed the tool-call gate (4/4, zero flakes, ~359 tok/s) + 3/3 direct coding probes -> kept as the on-demand `fast-candidate-gptoss20b`; coder-fast (30B) stays the coding default (gpt-oss's >=91% golden half is unmeasured — needs the candidate registered in the crush harness).
+- **EchoMimicV3** moved HELD -> DONE via an **ISOLATED env** (`media/echomimic-iso/`, gitignored; docs/echomimic-isolated.md) — the safe path for its tensorflow 2.15 dep. Own venv (torch 2.11+cu128, TF 2.15, smthemex/ComfyUI_EchoMimic @3a36b00f, minimal ComfyUI on :8198) rendered a talking-head (384², AAC audio, ~14GB peak) on the 5090. The WORKING ComfyUI was confirmed UNTOUCHED (Python 3.12 / torch 2.8 / no TF). It's a separate-launch capability, NOT a `doki gen` kind (the TF env can't live in the main ComfyUI). Finding: the working stack's Wan `.pth` are WanVideoWrapper-format, unreadable by stock ComfyUI loaders -> fetched the Comfy-Org repackaged `.safetensors` (SHA-256 verified).
+
+Resting state verified clean: agent stack up (:8080/:8004/:8005/:8090), media + iso ComfyUI down, GPU idle, no orphans. **Scorecard — all done:** gpt-oss-20b (on-demand) · Qwen3-VL-32B (vision tier) · LTX-2.3 (`doki gen -Ltx`) · EchoMimicV3 (isolated).
+
 ## 2026-06-21 — Model upgrades ADOPTED (full-send): gpt-oss-20b + Qwen3-VL-32B (LLM) + LTX-2.3 (video); EchoMimicV3 held
 
 Acting on the four research dives, downloaded + activated + GPU-verified the verified upgrades — parallel fetch via subagents (one per model), sequential GPU bake-off (one 32GB GPU). Targeted the dev repo `D:\Projects\DokiDex` (the active serving root; the saved `InstallRoot=D:\Programs\DokiDex` is a stale v0.8.0 standalone adoption — flagged, untouched).
