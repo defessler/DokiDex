@@ -1,6 +1,6 @@
 # Decision log
 
-## 2026-06-21 — Full-send upgrade COMPLETE: eval-gate (vision tier promoted) + EchoMimicV3 isolated render
+## 2026-06-21 — Full-send upgrade COMPLETE: eval-gate (vision tier promoted) + EchoMimicV3 isolated render (v0.28.0)
 
 Closed out the four-model full-send. All four now live + verified:
 - **Eval-gate** (real-image Describe compare + tool-call gate, via subagent): **vision tier PROMOTED 8B -> Qwen3-VL-32B** — it decisively out-reads the 8B on fine UI text/telemetry (read live dashboard numbers + per-service model names the 8B missed entirely), the exact Describe/Verify capability the tier needs. The 8B is kept as `vision-8b` (sub-second warm) for high-volume vision. **gpt-oss-20b** passed the tool-call gate (4/4, zero flakes, ~359 tok/s) + 3/3 direct coding probes -> kept as the on-demand `fast-candidate-gptoss20b`; coder-fast (30B) stays the coding default (gpt-oss's >=91% golden half is unmeasured — needs the candidate registered in the crush harness).
