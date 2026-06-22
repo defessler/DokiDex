@@ -66,6 +66,9 @@ Output: `media/echomimic-iso/ComfyUI/output/*.mp4` (h264 video + AAC audio, muxe
 
 ## Quality tuning
 
-The smoke render was intentionally tiny (384², 6 steps) for speed — quality is low. For real output
-bump width/height (e.g. 768×768), `length`, and steps; the README suggests `partial_video_length`
-~65 at 12GB (higher with more VRAM). Optionally add the lightx2v LoRA for the ~10-step fast path.
+The first smoke render was intentionally tiny (384², 6 steps) for speed. **Verified HQ config
+(2026-06-21):** 768×768, `length` 65, `partial_video_length` 65 (a discrete enum — 33/65/97/…, not a
+free int), 22 steps → **~18.5GB peak, ~5m46s, clean (no OOM)**. `run_render_test.py` is now set to
+these params (`run_render_test.py.bak` holds the original smoke params). Push further with more
+`length`/steps as VRAM allows; optionally add the lightx2v distill LoRA for the ~10-step fast path
+(not bundled in the iso env — the API driver runs the bundled V3 weights with `lora:"None"`).
