@@ -49,3 +49,24 @@
 {"ts":"2026-06-13T14:59:23","harness":"crush","model":"coder-candidate","task":"t7-wordcount-flag","pass":true,"seconds":19.6,"note":"CHECK: PASS"}
 {"ts":"2026-06-13T15:00:44","harness":"crush","model":"coder-candidate","task":"t8-extract-helper","pass":false,"seconds":79.5,"note":"CHECK: tests (incl. hidden) failed — behavior changed"}
 {"ts":"2026-06-13T15:01:04","harness":"crush","model":"coder-candidate","task":"t9-arch-doc","pass":true,"seconds":17.7,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T16:15:25","harness":"crush","model":"fast-candidate-gptoss20b","task":"t1-reverse-flag","pass":false,"seconds":1.5,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-21T16:15:29","harness":"crush","model":"fast-candidate-gptoss20b","task":"t2-slugify-bug","pass":false,"seconds":0.6,"note":"CHECK: tests failed"}
+{"ts":"2026-06-21T16:15:31","harness":"crush","model":"fast-candidate-gptoss20b","task":"t15-gcd","pass":false,"seconds":0.7,"note":"CHECK: tests (incl. hidden) failed"}
+{"ts":"2026-06-21T16:15:51","harness":"crush","model":"fast-candidate-gptoss20b","task":"t1-reverse-flag","pass":false,"seconds":0.8,"note":"CHECK: --reverse output wrong: '--reverse hello'"}
+{"ts":"2026-06-21T18:23:21","harness":"crush","model":"fast-candidate-gptoss20b","task":"t1-reverse-flag","pass":true,"seconds":32.0,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:24:09","harness":"crush","model":"fast-candidate-gptoss20b","task":"t1-reverse-flag","pass":true,"seconds":24.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:24:24","harness":"crush","model":"fast-candidate-gptoss20b","task":"t10-wordcount-whitespace","pass":true,"seconds":13.3,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:24:46","harness":"crush","model":"fast-candidate-gptoss20b","task":"t11-stats-flag","pass":true,"seconds":19.0,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:24:57","harness":"crush","model":"fast-candidate-gptoss20b","task":"t12-duration-humanize","pass":true,"seconds":8.7,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:25:10","harness":"crush","model":"fast-candidate-gptoss20b","task":"t13-merge-intervals","pass":true,"seconds":11.6,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:25:20","harness":"crush","model":"fast-candidate-gptoss20b","task":"t14-base-convert","pass":true,"seconds":8.5,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:25:30","harness":"crush","model":"fast-candidate-gptoss20b","task":"t15-gcd","pass":true,"seconds":7.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:25:43","harness":"crush","model":"fast-candidate-gptoss20b","task":"t2-slugify-bug","pass":true,"seconds":11.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:26:04","harness":"crush","model":"fast-candidate-gptoss20b","task":"t3-kelvin","pass":true,"seconds":18.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:26:23","harness":"crush","model":"fast-candidate-gptoss20b","task":"t4-csv-quotes","pass":true,"seconds":17.1,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:26:34","harness":"crush","model":"fast-candidate-gptoss20b","task":"t5-inventory-bug","pass":true,"seconds":9.0,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:26:47","harness":"crush","model":"fast-candidate-gptoss20b","task":"t6-roman-from","pass":true,"seconds":11.9,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:27:03","harness":"crush","model":"fast-candidate-gptoss20b","task":"t7-wordcount-flag","pass":true,"seconds":11.4,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:27:23","harness":"crush","model":"fast-candidate-gptoss20b","task":"t8-extract-helper","pass":false,"seconds":18.6,"note":"CHECK: tests (incl. hidden) failed ΓÇö behavior changed"}
+{"ts":"2026-06-21T18:27:35","harness":"crush","model":"fast-candidate-gptoss20b","task":"t9-arch-doc","pass":true,"seconds":10.6,"note":"CHECK: PASS"}
+{"ts":"2026-06-21T18:28:23","harness":"crush","model":"fast-candidate-gptoss20b","task":"t8-extract-helper","pass":false,"seconds":22.4,"note":"CHECK: tests (incl. hidden) failed ΓÇö behavior changed"}
