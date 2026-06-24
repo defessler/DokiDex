@@ -1,5 +1,15 @@
 # Decision log
 
+## 2026-06-24 — Studio capability auto-discovery + codebase audit/research + security hardening (v0.29.0)
+
+Surfaced the v0.28 model upgrades in the app, then audited + hardened the codebase.
+
+- **Auto-discovery (feat):** the app now DISCOVERS gen kinds + LLM tiers from serving instead of hardcoding them in 3 drifting places. `serving/doki-gen.ps1` `Get-GenKindCatalog` + a `-ListKinds` emitter (mirrors `-BodyOnly`) → C# `CapabilityCatalog` (shell + cache + static fallback) + `GET /api/capabilities`; `LlmTiers` became a data role-table validated against the live llama-swap `/v1/models` list (reusing `StatusProbe`). Result: a **"video + audio" (LTX-2.3) Create pill** + a **"reasoning" (gpt-oss-20b) chat tier** appear automatically. `KindSyncTests` guards C#↔PS drift. (The frontend `loadCapabilities` was completed by hand after a plan-mode reminder leaked into the edit subagents.)
+- **User docs:** `docs/tutorial.md` (full DokiGen Studio guide) + `docs/quickstart.md` (5-minute app path), linked from the README — the studio web app had no hands-on guide (the wiki is coding/CLI-centric).
+- **Codebase audit (6-agent workflow → `docs/audit-2026-06.md`):** 45 findings; verdict — disciplined codebase (pure/testable services, argv-array shelling = no shell injection, real test suite). The two God-files (`StudioHost.cs` 1,296 lines, `index.html` 2,741 lines) are the dominant structural debt.
+- **Security hardening (the 7 audit P1s, +24 tests):** CSRF no-Origin POST hole CLOSED; `edit_image` arbitrary-file-read CLOSED; broken gated kinds (added `Audio`/`Engine`) fixed; `CUDA_VISIBLE_DEVICES` parent-session leak fixed; SHA-256 verification added on model downloads; `SwarmGen.TryHandle` covered. `doki test` green (xUnit 830/830 + Pester).
+- **Research → roadmap:** `docs/research-harness-models-2026-06.md` (AI agent-harness architecture + how frontier/open models are built + a per-model comparison + what drives performance & the harness's role; 14 prioritized actions) → fused into `docs/stack-improvement-2026-06.md`. NEXT (eval-gated, not yet applied): per-role tool-call sampling, strip gpt-oss `reasoning_content` from history, GBNF tool-arg grammar + retry, freeze system-prompt bytes for cache reuse, raise `coder-big` prefill batch.
+
 ## 2026-06-21 — Full-send upgrade COMPLETE: eval-gate (vision tier promoted) + EchoMimicV3 isolated render (v0.28.0)
 
 Closed out the four-model full-send. All four now live + verified:
