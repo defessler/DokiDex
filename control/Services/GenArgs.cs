@@ -45,6 +45,8 @@ public sealed record GenRequest(
     string? Workflow = null,           // run an installed SwarmUI custom ComfyUI workflow by name (SUPIR/InstantID/own)
     string? Tile = null,               // seamless-tileable output (true/x/y); image/edit only
     string? Model = null,              // checkpoint override (manual picker / Auto router); null = recipe default
+    string? Audio = null,              // -Audio: driving audio for infinitetalk/latentsync/speech (P1 audit fix — these were broken from the panel)
+    string? Engine = null,             // -Engine: TtsSuite engine selector for -Speak (P1 audit fix)
     bool Ephemeral = false)            // real-time canvas preview: a throwaway render — NOT a Library item, NOT a
                                        // Results card. Persistence-only flag (never reaches argv): the artifact
                                        // goes to %TEMP%, gets no gallery sidecar, and is excluded from Recent().
@@ -138,6 +140,10 @@ public static class GenCli
         if (r.Seed >= 0) { a.Add("-Seed"); a.Add(r.Seed.ToString()); }
         if (r.Count > 1) { a.Add("-Count"); a.Add(r.Count.ToString()); }
         if (r.Strength >= 0) { a.Add("-Strength"); a.Add(r.Strength.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        // -Audio (driving voice/audio) is required by infinitetalk/latentsync and optional for speech; -Engine
+        // selects the TtsSuite workflow for speech. Gated on Kind so they never reach a recipe that rejects them.
+        if (!string.IsNullOrWhiteSpace(r.Audio) && r.Kind is "infinitetalk" or "latentsync" or "speech") { a.Add("-Audio"); a.Add(r.Audio!); }
+        if (!string.IsNullOrWhiteSpace(r.Engine) && r.Kind is "speech") { a.Add("-Engine"); a.Add(r.Engine!); }
         a.Add("-NoOpen");
         return a;
     }

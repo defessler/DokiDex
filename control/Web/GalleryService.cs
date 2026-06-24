@@ -14,6 +14,8 @@ public sealed record RateRequest(bool? Favorite, bool? Trash);
 public sealed class GalleryService
 {
     private static readonly string[] MediaExt = { ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mp3", ".wav", ".flac" };
+    // Exposed for path-safety checks in ChatTools (P1-2 fix: validate edit_image source extensions).
+    internal static readonly HashSet<string> MediaExtensions = new(MediaExt, StringComparer.OrdinalIgnoreCase);
 
     private static string Root => DokiService.GenDir;
 

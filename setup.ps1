@@ -142,13 +142,27 @@ else {
     else { Remove-Item "$embedGguf.part" -Force -ErrorAction SilentlyContinue; Warn "embed model download failed — code_search stays off until it's present" }
 }
 
+# Known SHA-256 digests for integrity-verified downloads (leaf filename -> lowercase hex). A file NOT in this
+# table is not auto-verified (out-of-band / no published hash) and downloads as before. Get-Model + Fetch-Gguf
+# check this before promoting the .part. (P1 audit fix: downloads were promoted on curl exit 0 alone.)
+$Hashes = @{
+    'GLM-4.7-Flash-UD-Q4_K_XL.gguf' = 'b0d4fbc1211f891b4cfbf2a497160bfe06a49412420068904d426b7a13f4ba7f'
+}
+
 # Self-contained GGUF fetcher (Get-Model is defined later, in the media section; this works anywhere).
 function Fetch-Gguf($url, $dest) {
     if (Test-Path $dest) { Ok "have $(Split-Path $dest -Leaf)"; return }
     New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
     Info "downloading $(Split-Path $dest -Leaf) ..."
     curl.exe -L --fail --retry 3 -o "$dest.part" $url
-    if ($LASTEXITCODE -eq 0) { Move-Item -Force "$dest.part" $dest; Ok "downloaded $(Split-Path $dest -Leaf)" }
+    if ($LASTEXITCODE -eq 0) {
+        $leaf = Split-Path $dest -Leaf
+        $known = $null; try { if ($Hashes) { $known = $Hashes[$leaf] } } catch {}
+        if ($known -and (Get-FileHash -Algorithm SHA256 -LiteralPath "$dest.part").Hash -ine $known) {
+            Remove-Item "$dest.part" -Force -ErrorAction SilentlyContinue; Warn "SHA-256 mismatch for $leaf — refusing to install"; return
+        }
+        Move-Item -Force "$dest.part" $dest; Ok "downloaded $(Split-Path $dest -Leaf)"
+    }
     else { Remove-Item "$dest.part" -Force -ErrorAction SilentlyContinue; Warn "download failed: $url" }
 }
 
@@ -349,7 +363,9 @@ if ($Sam) {
     $ckpt = Join-Path $samRoot "sam_vit_b.pth"
     if (-not (Test-Path $ckpt)) {
         Info "downloading SAM vit_b checkpoint (~375MB) ..."
-        Invoke-WebRequest "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth" -OutFile $ckpt
+        # not auto-verified (no SHA-256 published upstream); atomic .part-promote like the model downloads.
+        curl.exe -L --fail --retry 3 -o "$ckpt.part" "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+        if ($LASTEXITCODE -eq 0) { Move-Item -Force "$ckpt.part" $ckpt } else { Remove-Item "$ckpt.part" -Force -ErrorAction SilentlyContinue; Warn "SAM checkpoint download failed" }
     } else { Ok "SAM checkpoint present" }
     Ok "SAM ready -> audio-tools/sam (the edit canvas 'SAM' click mode uses it; magic-wand works without it)."
 }
@@ -584,6 +600,12 @@ function Get-Model($url, $dest) {
     if ($LASTEXITCODE -ne 0) {
         Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         Warn "download failed: $url"; return
+    }
+    $leaf = Split-Path $dest -Leaf
+    $known = $null; try { if ($Hashes) { $known = $Hashes[$leaf] } } catch {}
+    if ($known -and (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash -ine $known) {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        Warn "SHA-256 mismatch for $leaf (expected $known) — refusing to install"; return
     }
     Move-Item -Force $tmp $dest
     Ok "$(Split-Path $dest -Leaf) ($([math]::Round((Get-Item $dest).Length/1GB,2)) GB)"

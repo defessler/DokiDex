@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -481,6 +482,16 @@ public static class ChatTools
             return "Which image should I edit? Name a source image from your library, or generate one first and "
                 + "I'll edit the most recent.";
 
+        // Scope-validate the resolved source: reject path traversal (contains ".."), absolute paths, and
+        // non-media extensions before the name reaches the deferred renderer's -InitImage argument. This
+        // blocks an LLM-generated "../../passwords.txt" from being shipped to doki-gen.ps1 as an init
+        // image. We do NOT require the file to exist at queue time — gallery images generated in this
+        // session may not yet be on disk; the renderer validates existence at render time (P1-2 fix).
+        if (!IsGallerySafePath(resolved))
+            return $"The source \"{resolved}\" is not a valid gallery image path. "
+                + "Use a name or relative path from your media library.";
+
+
         // kind stays the image family ("image"); model null lets the recipe default pick the img2img/refine path.
         // InitImage + Strength are what make this an EDIT rather than a from-scratch gen. Conversation is threaded
         // so the finished edit can be surfaced inline in its originating chat thread (the P1 render round-trip).
@@ -495,6 +506,24 @@ public static class ChatTools
     public static string FormatEditQueued(string source)
         => $"Queued an edit of \"{source}\". Switch to Media mode to render it "
             + "(the GPU can't run the image model while we're chatting).";
+
+    // PURE: reject source paths that could escape the gallery (path traversal / absolute paths / wrong extension).
+    // Checks structural safety WITHOUT requiring the file to exist — gallery images generated in the same session
+    // may not yet be on disk; the renderer validates existence at render time. Blocks "../../passwords.txt" and
+    // absolute Windows paths before they reach doki-gen.ps1 -InitImage. Side-effect-free + total => unit-testable.
+    internal static bool IsGallerySafePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        // Reject absolute paths (drive letter or UNC)
+        if (Path.IsPathRooted(path)) return false;
+        // Reject traversal sequences anywhere in the path
+        var norm = path.Replace('\\', '/');
+        var parts = norm.Split('/');
+        if (parts.Any(p => p == ".." || p == ".")) return false;
+        // Require a media extension (same allowlist as GalleryService)
+        var ext = Path.GetExtension(norm).ToLowerInvariant();
+        return GalleryService.MediaExtensions.Contains(ext);
+    }
 
     // PURE: the sidecar Result -> tool-text decision shared by RunWebSearch / RunCodeSearch (so it can be
     // unit-tested with NO process). `formatted` is the bounded formatter output — the results block when rowCount

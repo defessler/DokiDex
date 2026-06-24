@@ -9,10 +9,11 @@
 # Usage:  .\start-embed.ps1 [-Detach] [-PidFile <p>] [-LogFile <l>]
 param([switch]$Detach, [string]$PidFile, [string]$LogFile)
 
-# Hide the GPU from THIS process: a CUDA-built llama-server still grabs a ~100-300MB CUDA context at
+# Hide the GPU from the EMBED CHILD: a CUDA-built llama-server still grabs a ~100-300MB CUDA context at
 # -ngl 0, which would quietly steal VRAM the coder needs. With no visible device it runs pure CPU -> a
-# truly 0-VRAM embed server that coexists with the full-size coder. (Child procs inherit this env.)
-$env:CUDA_VISIBLE_DEVICES = "-1"
+# truly 0-VRAM embed server that coexists with the full-size coder. CUDA_VISIBLE_DEVICES=-1 is scoped to
+# the launch below (set -> launch [child snapshots the env] -> restore), so it never leaks into the parent
+# doki session and blinds later GPU services like TTS/STT. (P1 audit fix.)
 
 $server = Join-Path $PSScriptRoot "llama.cpp\llama-server.exe"
 $model  = Join-Path (Split-Path $PSScriptRoot) "models\nomic-embed-text-v1.5.f16.gguf"
@@ -30,14 +31,24 @@ $argList = @(
     "--alias", "embed"        # id in /v1/models + /v1/embeddings (code_index.py EMBED_MODEL default)
 )
 
-if ($Detach) {
-    $sp = @{ FilePath = $server; ArgumentList = $argList; WindowStyle = "Hidden"; PassThru = $true }
-    if ($LogFile) { $sp.RedirectStandardOutput = $LogFile; $sp.RedirectStandardError = "$LogFile.err" }
-    $p = Start-Process @sp
-    Start-Sleep -Milliseconds 400   # a doomed launch (bad args / corrupt model / missing dll) exits within this window
-    if ($p.HasExited) { Write-Warning "embed server exited immediately (code $($p.ExitCode))$(if ($LogFile) { "; see $LogFile.err" }) — not writing pid"; return }
-    if ($PidFile) { Set-Content $PidFile $p.Id }
-    Write-Host "embed server starting in background on http://127.0.0.1:8090 (pid $($p.Id))"
-} else {
-    & $server @argList
+# Scope CUDA_VISIBLE_DEVICES=-1 to the embed child ONLY: set it, launch (Start-Process / `&` snapshot the
+# parent env into the child), then restore the parent in `finally` so later doki children (TTS/STT) keep
+# their GPU. `finally` also runs on the early `return` below. (P1 audit fix: was leaking -1 into the session.)
+$prevCuda = $env:CUDA_VISIBLE_DEVICES
+$env:CUDA_VISIBLE_DEVICES = "-1"
+try {
+    if ($Detach) {
+        $sp = @{ FilePath = $server; ArgumentList = $argList; WindowStyle = "Hidden"; PassThru = $true }
+        if ($LogFile) { $sp.RedirectStandardOutput = $LogFile; $sp.RedirectStandardError = "$LogFile.err" }
+        $p = Start-Process @sp
+        Start-Sleep -Milliseconds 400   # a doomed launch (bad args / corrupt model / missing dll) exits within this window
+        if ($p.HasExited) { Write-Warning "embed server exited immediately (code $($p.ExitCode))$(if ($LogFile) { "; see $LogFile.err" }) — not writing pid"; return }
+        if ($PidFile) { Set-Content $PidFile $p.Id }
+        Write-Host "embed server starting in background on http://127.0.0.1:8090 (pid $($p.Id))"
+    } else {
+        & $server @argList
+    }
+} finally {
+    if ($null -eq $prevCuda) { Remove-Item Env:\CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue }
+    else { $env:CUDA_VISIBLE_DEVICES = $prevCuda }
 }

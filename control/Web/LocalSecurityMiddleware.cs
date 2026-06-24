@@ -27,9 +27,13 @@ public sealed class LocalSecurityMiddleware
         var method = ctx.Request.Method;
         if (!HttpMethods.IsGet(method) && !HttpMethods.IsHead(method) && !HttpMethods.IsOptions(method))
         {
+            // Require an Origin header on every state-changing verb and verify it is in AllowedHosts.
+            // A missing Origin (HTML form POST, fetch(mode:'no-cors')) is also denied — the SPA's
+            // own fetch() always provides Origin, so legitimate traffic is never affected.
             var origin = ctx.Request.Headers.Origin.ToString();
-            if (!string.IsNullOrEmpty(origin)
-                && (!Uri.TryCreate(origin, UriKind.Absolute, out var o) || !AllowedHosts.Contains(o.Host)))
+            if (string.IsNullOrEmpty(origin)
+                || !Uri.TryCreate(origin, UriKind.Absolute, out var o)
+                || !AllowedHosts.Contains(o.Host))
             {
                 await Deny(ctx, "forbidden origin");
                 return;

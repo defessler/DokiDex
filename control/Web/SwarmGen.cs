@@ -80,7 +80,7 @@ public sealed class SwarmGen
     }
 
     // Parse one WS frame. Returns true when the gen is terminal (artifact found or error).
-    private static bool TryHandle(string frame, Action<Progress> onProgress, ref string? artifact, ref string? error)
+    internal static bool TryHandle(string frame, Action<Progress> onProgress, ref string? artifact, ref string? error)
     {
         JsonNode? node;
         try { node = JsonNode.Parse(frame); } catch { return false; }   // keepalive / non-JSON
