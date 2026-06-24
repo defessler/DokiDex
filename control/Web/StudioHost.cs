@@ -128,6 +128,8 @@ public static class StudioHost
         {
             if (string.IsNullOrWhiteSpace(body.Prompt)) return Results.BadRequest(new { error = "empty prompt" });
             var kind = (body.Kind ?? "image").Trim().ToLowerInvariant();
+            // Validate against all 12 known kinds (GenArgs.Kinds expanded to include gated kinds); a gated
+            // kind that isn't installed still validates here — the recipe arm in doki-gen.ps1 is the gate.
             if (Array.IndexOf(GenRequest.Kinds, kind) < 0) return Results.BadRequest(new { error = "unknown kind" });
             // checkpoint override: "auto" routes (prompt-aware pick among installed image bases); else pass through.
             var model = body.Model;
@@ -285,6 +287,31 @@ public static class StudioHost
                 return Results.Json(new { name, mediaUrl = $"/api/gallery/media/{Uri.EscapeDataString(name)}" });
             }
             catch { return Results.Json(new { error = "could not save" }, statusCode: 500); }
+        });
+
+        // ---- capability discovery: ready kinds (catalog order) + configured text speed tiers ----
+        // Kinds: ready-only subset of the 12-kind catalog, each {id,label,group} (no requires/ready fields needed).
+        // Tiers: text speed roles (fast/quality/reasoning) whose llama-swap model is currently configured.
+        // GPU-free: kinds come from CapabilityCatalog (shell+cache+static fallback); tiers from StatusProbe's
+        // existing ConfiguredModels (already populated by the /api/status path, reused here via a fresh probe).
+        api.MapGet("/capabilities", async (DokiService doki, CancellationToken ct) =>
+        {
+            var kinds = await CapabilityCatalog.GetKindsAsync(ct).ConfigureAwait(false);
+            var readyKinds = kinds
+                .Where(k => k.Ready)
+                .Select(k => new { id = k.Id, label = k.Label, group = k.Group })
+                .ToList();
+            // Reuse the existing status probe for configured models (no new HTTP: StatusProbe already GETs
+            // llama-swap /v1/models; the result is what's actually available right now).
+            var doc = await doki.GetStatusAsync(ct).ConfigureAwait(false);
+            var configuredModels = doc?.Services
+                .Where(s => s.ConfiguredModels is { Count: > 0 })
+                .SelectMany(s => s.ConfiguredModels!)
+                .ToList() ?? new System.Collections.Generic.List<string>();
+            var tiers = LlmTiers.Available(configuredModels)
+                .Select(t => new { id = t.Id, label = t.Label })
+                .ToList();
+            return Results.Json(new { kinds = readyKinds, tiers });
         });
 
         // ---- model & workflow manager (capability catalog + presence + direct download + delete) ----

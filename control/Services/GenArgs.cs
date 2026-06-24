@@ -49,8 +49,8 @@ public sealed record GenRequest(
                                        // Results card. Persistence-only flag (never reaches argv): the artifact
                                        // goes to %TEMP%, gets no gallery sidecar, and is excluded from Recent().
 {
-    // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind.
-    public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley" };
+    // the picker's kinds, in order, 1:1 with doki-gen.ps1 Resolve-GenKind / Get-GenKindCatalog.
+    public static readonly string[] Kinds = { "image", "video", "music", "edit", "i2v", "foley", "ltx", "faceid", "pulid", "infinitetalk", "latentsync", "speech" };
 
     // -Upscale (4x-UltraSharp) is a still-image post pass only; doki-gen.ps1 throws for other kinds.
     public static bool UpscaleApplies(string kind) => kind is "image" or "edit";
@@ -63,9 +63,9 @@ public sealed record GenRequest(
     // media file over the preview still). Used to name the temp file and pick the preview path.
     public static string OutExtensionFor(string kind) => kind switch
     {
-        "video" or "i2v" or "foley" => ".mp4",
-        "music"                     => ".mp3",
-        _                           => ".png",   // image, edit
+        "video" or "i2v" or "foley" or "ltx" or "infinitetalk" or "latentsync" => ".mp4",
+        "music" or "speech"                                                      => ".mp3",
+        _                                                                        => ".png",   // image, edit, faceid, pulid
     };
 
     public bool IsInline => IsInlineImageKind(Kind);
@@ -80,6 +80,8 @@ public static class GenCli
     private static readonly Dictionary<string, string> KindSwitch = new()
     {
         ["video"] = "-Video", ["music"] = "-Music", ["edit"] = "-Edit", ["i2v"] = "-I2v", ["foley"] = "-Foley",
+        ["ltx"] = "-Ltx", ["faceid"] = "-FaceId", ["pulid"] = "-Pulid",
+        ["infinitetalk"] = "-InfiniteTalk", ["latentsync"] = "-LatentSync", ["speech"] = "-Speak",
     };
 
     // Build the exact `doki.ps1 gen …` argv for a request. Pure + total -> unit-tested with no GPU.

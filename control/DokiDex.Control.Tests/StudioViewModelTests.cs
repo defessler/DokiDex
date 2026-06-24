@@ -13,8 +13,8 @@ public class StudioViewModelTests
     [Fact]
     public void Kinds_match_doki_gen_recipes()
     {
-        // the picker must mirror serving/doki-gen.ps1 Resolve-GenKind 1:1, in order
-        Assert.Equal(new[] { "image", "video", "music", "edit", "i2v", "foley" }, New().Kinds);
+        // the picker must mirror serving/doki-gen.ps1 Resolve-GenKind / Get-GenKindCatalog 1:1, in order
+        Assert.Equal(new[] { "image", "video", "music", "edit", "i2v", "foley", "ltx", "faceid", "pulid", "infinitetalk", "latentsync", "speech" }, New().Kinds);
     }
 
     [Fact]

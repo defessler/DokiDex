@@ -197,6 +197,8 @@ public static class LocalLlm
     // PURE: extract choices[0].delta.content from ONE upstream OpenAI SSE line. Returns null for the '[DONE]'
     // sentinel, any blank/keepalive/non-'data:' line, and a delta with no content (e.g. the role-only first
     // chunk). Token content (quotes/newlines) comes back verbatim. Unit-tested like Director.ParseShotlist.
+    // Also checks delta.reasoning_content as a fallback: gpt-oss-20b (the "reasoning" tier) streams its
+    // chain-of-thought there instead of content, so we surface that text rather than yielding silence.
     public static string? ParseSseDelta(string line)
     {
         if (string.IsNullOrWhiteSpace(line)) return null;
@@ -212,12 +214,22 @@ public static class LocalLlm
             if (!doc.RootElement.TryGetProperty("choices", out var choices)
                 || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
                 return null;
-            if (!choices[0].TryGetProperty("delta", out var delta)
-                || !delta.TryGetProperty("content", out var content)
-                || content.ValueKind != JsonValueKind.String)
-                return null;
-            var s = content.GetString();
-            return string.IsNullOrEmpty(s) ? null : s;
+            if (!choices[0].TryGetProperty("delta", out var delta)) return null;
+            // Primary: delta.content (all models, incl. standard text tokens from the reasoning model)
+            if (delta.TryGetProperty("content", out var content)
+                && content.ValueKind == JsonValueKind.String)
+            {
+                var s = content.GetString();
+                if (!string.IsNullOrEmpty(s)) return s;
+            }
+            // Fallback: delta.reasoning_content (gpt-oss-20b "reasoning" tier streams CoT here)
+            if (delta.TryGetProperty("reasoning_content", out var rc)
+                && rc.ValueKind == JsonValueKind.String)
+            {
+                var s = rc.GetString();
+                if (!string.IsNullOrEmpty(s)) return s;
+            }
+            return null;
         }
         catch { return null; }
     }
@@ -258,7 +270,14 @@ public static class LocalLlm
             if (!resp.IsSuccessStatusCode)
                 return new ChatResult(false, "", $"LLM returned {(int)resp.StatusCode} — is a model loaded? (start agent mode)");
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
-            var text = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+            var msg = doc.RootElement.GetProperty("choices")[0].GetProperty("message");
+            var text = msg.GetProperty("content").GetString() ?? "";
+            // gpt-oss-20b (the "reasoning" tier) puts chain-of-thought in reasoning_content and returns a
+            // brief or empty visible content. Fall back to reasoning_content so the reply is never blank.
+            if (string.IsNullOrWhiteSpace(text)
+                && msg.TryGetProperty("reasoning_content", out var rc)
+                && rc.ValueKind == JsonValueKind.String)
+                text = rc.GetString() ?? "";
             return new ChatResult(true, text, null);
         }
         catch (OperationCanceledException) { return new ChatResult(false, "", "cancelled"); }

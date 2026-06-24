@@ -29,7 +29,7 @@ param(
     [switch]$LatentSync,   # LIGHT lip-sync (ByteDance LatentSync, ~9.5GB / 8GB VRAM, OpenRAIL++/Apache) — RE-SYNCS an existing clip's mouth to -Audio (video-in, no portrait); needs setup.ps1 -LatentSync + the on-GPU LatentSync workflow
     [switch]$Speak,   # GATED TTS-Audio-Suite alternative speech (15 engines + RVC), run in the GPU-exclusive media group — text is the gen idea, optional zero-shot ref voice via -Audio, engine via -Engine. Needs setup.ps1 -TtsSuite + the on-GPU TtsSuite-<engine> workflow. Does NOT touch the coexisting-with-chat :8004 Chatterbox default.
     [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
-    [switch]$Face, [switch]$Realism, [switch]$BodyOnly,
+    [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [switch]$ListKinds,
     [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
     [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Upscaler, [string]$Segment,
     [string]$ControlNets,
@@ -396,8 +396,10 @@ switch ($Command) {
         & python (Join-Path $serving "memory-mcp\code_index.py") $root
     }
     "gen" {
-        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-Ltx|-FaceId|-Pulid|-InfiniteTalk|-LatentSync|-Speak] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Engine <tts-engine>] [-Raw] [-Out <file>] [-NoOpen]" }
         . (Join-Path $serving "doki-gen.ps1")
+        # -ListKinds: GPU-free catalog dump; $Arg is not required for this path.
+        if ($ListKinds) { Invoke-Gen -Prompt 'x' -ListKinds; break }
+        if ([string]::IsNullOrWhiteSpace($Arg)) { throw "usage: .\doki.ps1 gen ""<idea>"" [-Video|-Music|-Edit|-I2v|-Foley|-Ltx|-FaceId|-Pulid|-InfiniteTalk|-LatentSync|-Speak] [-Fast] [-Upscale] [-Refine] [-Face] [-Realism] [-InitImage <png>] [-Audio <wav/mp3>] [-Engine <tts-engine>] [-Raw] [-Out <file>] [-NoOpen]" }
         $kind = Resolve-GenKind -Video:$Video -Music:$Music -Edit:$Edit -I2v:$I2v -Foley:$Foley -Ltx:$Ltx -FaceId:$FaceId -Pulid:$Pulid -InfiniteTalk:$InfiniteTalk -LatentSync:$LatentSync -Speak:$Speak
         $genResult = Invoke-Gen -Prompt $Arg -Kind $kind -Engine $Engine -Fast:$Fast -Upscale:$Upscale -Refine:$Refine -Quality:$Quality -Raw:$Raw -NoOpen:$NoOpen -Face:$Face -Realism:$Realism -Upscaler $Upscaler -Seed $Seed -Count $Count -Strength $Strength -Aspect $Aspect -Lyrics $Lyrics -Duration $Duration -Bpm $Bpm -Lora $Lora -Negative $Negative -Segment $Segment -ControlNets $ControlNets -EndImage $EndImage -Reference:$Reference -RefWeight $RefWeight -Interpolate $Interpolate -InterpolateMult $InterpolateMult -Workflow $Workflow -Tile $Tile -Model $Model -InitImage $InitImage -MaskImage $MaskImage -Audio $Audio -Out $Out -BodyOnly:$BodyOnly
         if ($BodyOnly) { $genResult } else { $null = $genResult }   # -BodyOnly prints the GenerateText2Image body JSON for the web host (live-progress WS path)

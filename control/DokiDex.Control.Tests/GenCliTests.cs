@@ -15,17 +15,24 @@ public class GenCliTests
     }
 
     [Theory]
-    [InlineData("video", "-Video")]
-    [InlineData("music", "-Music")]
-    [InlineData("edit", "-Edit")]
-    [InlineData("i2v", "-I2v")]
-    [InlineData("foley", "-Foley")]
+    [InlineData("video",        "-Video")]
+    [InlineData("music",        "-Music")]
+    [InlineData("edit",         "-Edit")]
+    [InlineData("i2v",          "-I2v")]
+    [InlineData("foley",        "-Foley")]
+    [InlineData("ltx",          "-Ltx")]
+    [InlineData("faceid",       "-FaceId")]
+    [InlineData("pulid",        "-Pulid")]
+    [InlineData("infinitetalk", "-InfiniteTalk")]
+    [InlineData("latentsync",   "-LatentSync")]
+    [InlineData("speech",       "-Speak")]
     public void Each_kind_maps_to_its_switch(string kind, string sw)
     {
         var a = GenCli.BuildArgs(new GenRequest("x", kind, InitImage: "s.png", OutPath: "o"));
         Assert.Contains(sw, a);
         // exactly one kind switch is ever emitted
-        Assert.Single(a, t => t is "-Video" or "-Music" or "-Edit" or "-I2v" or "-Foley");
+        Assert.Single(a, t => t is "-Video" or "-Music" or "-Edit" or "-I2v" or "-Foley"
+            or "-Ltx" or "-FaceId" or "-Pulid" or "-InfiniteTalk" or "-LatentSync" or "-Speak");
     }
 
     [Fact]
@@ -185,12 +192,18 @@ public class GenCliTests
     }
 
     [Theory]
-    [InlineData("image", ".png")]
-    [InlineData("edit", ".png")]
-    [InlineData("video", ".mp4")]
-    [InlineData("i2v", ".mp4")]
-    [InlineData("foley", ".mp4")]
-    [InlineData("music", ".mp3")]
+    [InlineData("image",        ".png")]
+    [InlineData("edit",         ".png")]
+    [InlineData("faceid",       ".png")]
+    [InlineData("pulid",        ".png")]
+    [InlineData("video",        ".mp4")]
+    [InlineData("i2v",          ".mp4")]
+    [InlineData("foley",        ".mp4")]
+    [InlineData("ltx",          ".mp4")]
+    [InlineData("infinitetalk", ".mp4")]
+    [InlineData("latentsync",   ".mp4")]
+    [InlineData("music",        ".mp3")]
+    [InlineData("speech",       ".mp3")]
     public void Out_extension_matches_the_kinds_primary_artifact(string kind, string ext)
         => Assert.Equal(ext, GenRequest.OutExtensionFor(kind));
 

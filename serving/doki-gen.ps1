@@ -474,6 +474,27 @@ function Build-GenBody {
     return $body
 }
 
+# --- kind catalog (GPU-free, mirrors the C# CapabilityCatalog static fallback 1:1) -----------------------
+# Returns one object per kind in canonical order. The contract is shared with C#: id, label, group, ready, requires.
+# ready=false means the kind needs a setup.ps1 gate before it can generate; requires names that command.
+# -ListKinds (on Invoke-Gen) emits this as compact JSON and returns — no SwarmUI, no GPU.
+function Get-GenKindCatalog {
+    return @(
+        [PSCustomObject]@{ id='image';        label='image';          group='image'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='video';        label='video';          group='video'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='music';        label='music';          group='audio'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='edit';         label='edit';           group='image'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='i2v';          label='i2v';            group='video'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='foley';        label='foley';          group='video'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='ltx';          label='video + audio';  group='video'; ready=$true;  requires=$null }
+        [PSCustomObject]@{ id='faceid';       label='face id';        group='image'; ready=$false; requires='setup.ps1 -FaceId' }
+        [PSCustomObject]@{ id='pulid';        label='face id (flux)'; group='image'; ready=$false; requires='setup.ps1 -Pulid' }
+        [PSCustomObject]@{ id='infinitetalk'; label='talking video';  group='video'; ready=$false; requires='setup.ps1 -InfiniteTalk' }
+        [PSCustomObject]@{ id='latentsync';   label='lip sync';       group='video'; ready=$false; requires='setup.ps1 -LatentSync' }
+        [PSCustomObject]@{ id='speech';       label='speech';         group='audio'; ready=$false; requires='setup.ps1 -TtsSuite' }
+    )
+}
+
 # --- live orchestration (needs the card: `doki up media`) -------------------------------------------------
 # Probe SwarmUI, expand+build the request from the pure helpers above, POST GenerateText2Image, report the
 # artifact and (best-effort) open it. Deliberately does NOT auto-switch the GPU to media — that would evict a
@@ -484,7 +505,7 @@ function Invoke-Gen {
         [ValidateSet('image', 'video', 'music', 'edit', 'i2v', 'foley', 'ltx', 'faceid', 'pulid', 'infinitetalk', 'latentsync', 'speech')][string]$Kind = 'image',
         [string]$Engine,   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...): picks the TtsSuite-<engine> workflow
         [switch]$Fast, [switch]$Upscale, [switch]$Refine, [switch]$Quality, [switch]$Raw, [switch]$NoOpen,
-        [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [string]$Upscaler,
+        [switch]$Face, [switch]$Realism, [switch]$BodyOnly, [switch]$ListKinds, [string]$Upscaler,
         [int]$Seed = -1, [int]$Count = 1, [double]$Strength = -1, [string]$Aspect,
         [string]$Lyrics, [int]$Duration = 0, [int]$Bpm = 0, [string]$Lora, [string]$Negative, [string]$Segment,
         [string]$ControlNets,
@@ -581,6 +602,12 @@ function Invoke-Gen {
     $bpmArg      = $(if ($Kind -eq 'music') { $Bpm } else { 0 })
     $loraArg     = $(if ($Kind -in @('image', 'edit', 'i2v')) { $Lora } else { '' })   # LoRA mixer: image-family only
     $segmentArg  = $(if ($Kind -in @('image', 'edit', 'i2v')) { $Segment } else { '' })   # promptable segment: image-family only
+    # -ListKinds: print the kind catalog as compact JSON and return — GPU-free, no SwarmUI, no file I/O.
+    # The C# CapabilityCatalog shells this to stay single-sourced; it falls back to its static copy on failure.
+    if ($ListKinds) {
+        return (Get-GenKindCatalog | ConvertTo-Json -Depth 3 -Compress -AsArray)
+    }
+
     # -BodyOnly: print the exact GenerateText2Image body (recipe + prompt fields + optional init image) and
     # stop — no session, no SwarmUI call. The web host injects session_id after GetNewSession and drives
     # GenerateText2ImageWS itself for live progress, so the recipe stays single-sourced here.

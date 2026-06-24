@@ -544,7 +544,8 @@
   <script>
     const $ = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
     const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const KINDS = ['image','video','music','edit','i2v','foley'];
+    let KINDS = ['image','video','music','edit','i2v','foley'];   // ready gen-kind ids; refreshed from /api/capabilities (loadCapabilities)
+    const KIND_LABELS = { image:'image', video:'video', music:'music', edit:'edit', i2v:'i2v', foley:'foley' };   // id -> friendly pill label (e.g. ltx -> 'video + audio')
     const MODS = [['fast','Fast'],['refine','Refine'],['face','Face'],['realism','Realism'],['upscale','Upscale']];
     const VIDEO = new Set(['video','i2v','foley']);
     let state = { view:'create', kind:'image', mods:{}, mediaActive:false, llmActive:false, initImage:null, editMode:'sketch' };
@@ -787,7 +788,7 @@
     }
     function renderControls(){
       const k = document.getElementById('kinds'); k.innerHTML='';
-      KINDS.forEach(kind => { const b=$(`<button class="pill ${state.kind===kind?'on':''}">${kind}</button>`); b.onclick=()=>{state.kind=kind; renderControls();}; k.appendChild(b); });
+      KINDS.forEach(kind => { const b=$(`<button class="pill ${state.kind===kind?'on':''}">${esc(KIND_LABELS[kind]||kind)}</button>`); b.onclick=()=>{state.kind=kind; renderControls();}; k.appendChild(b); });
       const m = document.getElementById('mods'); m.innerHTML='';
       MODS.forEach(([id,label]) => { const l=$(`<label><input type="checkbox" ${state.mods[id]?'checked':''}/> ${label}</label>`); l.querySelector('input').onchange=(e)=>state.mods[id]=e.target.checked; m.appendChild(l); });
       updateMaskBox();
@@ -805,6 +806,25 @@
     // ControlNet stacking: 1-3 units, each {model, pre, strength, image}. unit 0's image is also fed by the sketch.
     let _cnModels=[], _cnLoaded=false;
     let cnUnits=[{model:'',pre:'',strength:1,image:null}];
+    // ---- capability discovery: refresh the Create gen-kind pills + the Chat speed tiers from /api/capabilities
+    //      (ready kinds + configured tiers). Degrades to the static KINDS / hardcoded <option>s if the fetch fails.
+    async function loadCapabilities(){
+      try{
+        const caps = await (await fetch('/api/capabilities')).json();
+        if(Array.isArray(caps.kinds) && caps.kinds.length){
+          KINDS = caps.kinds.map(k=>k.id);
+          caps.kinds.forEach(k=>{ KIND_LABELS[k.id]=k.label; });
+          if(!KINDS.includes(state.kind)) state.kind = KINDS[0];
+          renderControls();
+        }
+        const sel = document.getElementById('chatTier');
+        if(sel && Array.isArray(caps.tiers) && caps.tiers.length){
+          const cur = sel.value;
+          sel.innerHTML = caps.tiers.map(t=>`<option value="${esc(t.id)}">${esc(t.label)}</option>`).join('');
+          sel.value = caps.tiers.some(t=>t.id===cur) ? cur : caps.tiers[0].id;
+        }
+      }catch{ /* keep the static fallback pills + tier <option>s */ }
+    }
     async function loadControlNets(){
       if(_cnLoaded) return; _cnLoaded=true;
       try{ _cnModels = await (await fetch('/api/controlnet-models')).json(); }catch{ _cnModels=[]; }
@@ -2712,7 +2732,7 @@
     })();
     // Restore a persisted live-pane width, re-clamped against the current container (defends a stale oversized value).
     (function(){ try{ const raw=parseFloat(localStorage.getItem('dd.livepaneW')); if(raw>0){ const p=document.getElementById('livePaneWrap'); const cw=(p&&p.parentElement&&p.parentElement.clientWidth)||960; setLivepaneW(clampWidth(raw, cw)); } }catch{} })();
-    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); loadImageModels(); document.getElementById('prompt').focus();
+    renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); loadImageModels(); loadCapabilities(); document.getElementById('prompt').focus();
     loadHome();
     pollStatus(); setInterval(pollStatus, 2000);
     pollJobs(); setInterval(pollJobs, 1500);
