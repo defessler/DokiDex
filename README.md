@@ -7,7 +7,7 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
   <br><sub>The DokiDex control panel — one GPU group at a time, live RTX 5090 meter, per-service health (healthy / warming / stopped / crashed / not-installed), and one-click coder-model hot-swap.</sub>
 </p>
 
-**▶ Capabilities (full writeup):** [docs/CAPABILITIES.md](docs/CAPABILITIES.md) · **Feature index:** [docs/wiki/9-features.md](docs/wiki/9-features.md) · **How it all works (architecture):** [docs/wiki/10-how-it-works.md](docs/wiki/10-how-it-works.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/wiki/11-media-recipes.md](docs/wiki/11-media-recipes.md)
+**▶ New here? [User guide](docs/tutorial.md) · [Quick start](docs/quickstart.md)** · **Capabilities (full writeup):** [docs/CAPABILITIES.md](docs/CAPABILITIES.md) · **Feature index:** [docs/wiki/9-features.md](docs/wiki/9-features.md) · **How it all works (architecture):** [docs/wiki/10-how-it-works.md](docs/wiki/10-how-it-works.md) · **ELI5 explainer:** [docs/wiki/Home.md](docs/wiki/Home.md) · **API recipes:** [docs/wiki/11-media-recipes.md](docs/wiki/11-media-recipes.md)
 
 ## Run it
 
