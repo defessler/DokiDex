@@ -56,6 +56,11 @@
     .card .p { font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
     .card .s { font-size:11px; font-family:"Cascadia Mono",Consolas,monospace; margin-top:6px; }
     .s.running { color:var(--cyan); } .s.failed { color:var(--danger); } .s.queued { color:var(--dim); } .s.done { color:var(--gold); }
+    /* Text-models section (2.3): status chip colors (present=ok/cyan, partial=warn/gold, missing=dim) + role/candidate pill chips. */
+    .s.present { color:var(--cyan); } .s.partial { color:var(--gold); } .s.missing { color:var(--dim); }
+    .tmchip { display:inline-block; font-size:11px; border:1px solid var(--border); border-radius:999px; padding:2px 9px; margin-left:6px; white-space:nowrap; }
+    .tmchip.role { color:var(--cyan); background:var(--surface2); }
+    .tmchip.candidate { color:var(--dim); }
     .spinner { width:22px; height:22px; border:2px solid var(--border); border-top-color:var(--cyan); border-radius:50%; animation:spin 0.9s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
     .pbar { height:3px; background:var(--bg); } .pbar > div { height:100%; background:var(--cyan); transition:width .3s; }
@@ -541,6 +546,8 @@
     </section>
     <section id="view-models" style="display:none">
       <div id="models"><p class="hint">Loading…</p></div>
+      <h2>Text models</h2>
+      <div id="textModels"><p class="hint">Loading…</p></div>
     </section>
     <section id="view-memory" style="display:none">
       <div id="memoryPanel"><p class="hint">Loading…</p></div>
@@ -590,7 +597,7 @@
       if (v==='home') loadHome();
       if (v==='create') loadPendingGen();
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
-      if (v==='models') loadModels();
+      if (v==='models') { loadModels(); loadLlmModels(); }
       if (v==='memory') loadMemory();
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
@@ -1467,6 +1474,38 @@
     }
     async function installModel(id){ try{ await fetch('/api/models/'+id+'/install',{method:'POST'}); }catch{} loadModels(); }
     async function delModel(id){ if(!confirm('Remove this model file?')) return; try{ await fetch('/api/models/'+id,{method:'DELETE'}); }catch{} loadModels(); }
+    // ---- Text models (2.3): LLM/GGUF catalog via /api/llm-models -- mirrors loadModels/modelRow above, adapted
+    // for the {id,role,label,sizeGb,llamaSwapModel,notes,status(present|partial|missing),files,downloading,
+    // progress,error} shape LlmModelManager.List() serializes (camelCase, verified against the media-models
+    // consumers above which already read camelCase fields off the sibling /api/models endpoint). ----
+    let llmModelsTimer=null;
+    function llmModelRow(m){
+      const roleBadge = `<span class="tmchip role">${esc(m.role)}</span>`;
+      const candBadge = m.role==='candidate' ? ' <span class="tmchip candidate">bake-off — gate before promoting</span>' : '';
+      const statusChip = m.downloading ? `<span class="s running">downloading ${Math.round((m.progress||0)*100)}%</span>`
+        : `<span class="s ${esc(m.status)}">${esc(m.status)}</span>`;
+      const btn = m.downloading ? ''
+        : m.status==='present' ? `<button class="xbtn" onclick="delLlmModel('${m.id}')">remove</button>`
+        : `<button class="xbtn" onclick="installLlmModel('${m.id}')">install</button>`;
+      const errLine = m.error ? `<div class="hint" style="color:var(--danger);margin-top:4px">${esc(m.error)}</div>` : '';
+      return `<div class="scard" title="${esc(m.notes||'')}"><div class="row" style="justify-content:space-between"><span>${esc(m.label)}${roleBadge}${candBadge}</span>${btn}</div>
+        <div class="hint" style="margin-top:5px;font-family:monospace">~${m.sizeGb} GB · ${statusChip}</div>${errLine}</div>`;
+    }
+    async function loadLlmModels(){
+      try {
+        const res = await (await fetch('/api/llm-models')).json();
+        const models = res.models||[];
+        const el = document.getElementById('textModels'); el.innerHTML='';
+        if (res.message) el.appendChild($(`<p class="hint">${esc(res.message)}</p>`));
+        const g=$('<div class="scards"></div>');
+        models.forEach(m=>g.appendChild($(llmModelRow(m))));
+        el.appendChild(g);
+        if (models.some(m=>m.downloading) && state.view==='models' && !llmModelsTimer)
+          llmModelsTimer = setTimeout(()=>{ llmModelsTimer=null; loadLlmModels(); }, 2000);
+      } catch(e){ document.getElementById('textModels').innerHTML='<p class="err">could not load text models</p>'; }
+    }
+    async function installLlmModel(id){ try{ await fetch('/api/llm-models/'+id+'/install',{method:'POST'}); }catch{} loadLlmModels(); }
+    async function delLlmModel(id){ if(!confirm('Remove this text model?')) return; try{ await fetch('/api/llm-models/'+id,{method:'DELETE'}); }catch{} loadLlmModels(); }
     // ---- director (script -> shotlist -> generate each shot) ----
     async function ensureMedia(){
       if(state.mediaActive) return true;
