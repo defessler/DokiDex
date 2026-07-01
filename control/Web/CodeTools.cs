@@ -172,9 +172,11 @@ public static class CodeTools
     public const int GrepMaxFiles = 4000;    // files scanned before stopping (repo-scale safety net)
 
     // Dirs never worth scanning (VCS, build output, deps, big binary trees) and binary file extensions to skip.
-    private static readonly HashSet<string> SkipDirs = new(StringComparer.OrdinalIgnoreCase)
+    // internal (not private): CodeOrientation's depth-2 repo tree (1.2) reuses these SAME sets — the source of
+    // truth for "what's noise in this repo" lives here, once, rather than duplicated.
+    internal static readonly HashSet<string> SkipDirs = new(StringComparer.OrdinalIgnoreCase)
         { ".git", ".vs", ".run", "bin", "obj", "node_modules", "packages", "dist", "build", ".venv", "__pycache__", "media", "models" };
-    private static readonly HashSet<string> BinaryExts = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> BinaryExts = new(StringComparer.OrdinalIgnoreCase)
         { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svgz", ".pdf", ".zip", ".gz", ".7z", ".rar",
           ".exe", ".dll", ".pdb", ".gguf", ".safetensors", ".bin", ".onnx", ".mp4", ".mov", ".webm", ".mp3", ".wav",
           ".flac", ".ttf", ".otf", ".woff", ".woff2", ".so", ".dylib", ".pyc", ".class", ".lock" };

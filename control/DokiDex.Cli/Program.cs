@@ -46,7 +46,14 @@ internal static class Program
         }
         if (!Directory.Exists(root)) root = Directory.GetCurrentDirectory();
 
+        // Repo orientation (1.2): built ONCE here and reused for the whole session — a second, byte-stable
+        // role:"system" message right after the system prompt (workspace instructions + a depth-2 tree + a
+        // git-status snapshot). Kept fixed for the session on purpose: the git-status snapshot going stale over a
+        // long session matters less than preserving the --cache-reuse prefix (see CodeOrientation's own doc
+        // comment for the full CC-divergence rationale).
+        var orientation = CodeOrientation.Build(root);
         var working = new List<object> { new { role = "system", content = CodeAgent.SystemPrompt } };
+        if (orientation.Message.Length > 0) working.Add(new { role = "system", content = orientation.Message });
         var always = new HashSet<string>();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; _turnCts?.Cancel(); };
 
@@ -73,7 +80,7 @@ internal static class Program
             return ok ? 0 : 1;
         }
 
-        Banner(root, model);
+        Banner(root, model, orientation.FileName);
         while (true)
         {
             Paint(ConsoleColor.Cyan, "\n› ");
@@ -83,6 +90,14 @@ internal static class Program
             if (line.Length == 0) continue;
             if (line[0] == '/')
             {
+                // /init runs a NORMAL turn (not a synchronous SlashCommand) with a fixed exploration prompt — it
+                // needs the full Read/Grep/Write loop, so it can't be handled inside SlashCommand's sync switch.
+                var cmd = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } p ? p[0] : line;
+                if (string.Equals(cmd, "/init", StringComparison.OrdinalIgnoreCase))
+                {
+                    await RunOneTurnInteractive(root, working, model, always, InitPrompt, !noStream);
+                    continue;
+                }
                 if (!SlashCommand(line, ref model, working, root)) break;
                 continue;
             }
@@ -90,6 +105,14 @@ internal static class Program
         }
         return 0;
     }
+
+    // /init's fixed prompt (1.2c): explore the repo and (re)write DOKI.md. Write's normal approval gate still
+    // applies — this is just a normal user turn under the hood, nothing special-cased in CodeAgent.
+    private const string InitPrompt =
+        "Read any existing DOKI.md, AGENTS.md, or CLAUDE.md first and improve rather than overwrite. Explore this "
+        + "repository with Read and Grep (key files, layout, build/test commands, conventions). Then Write a "
+        + "concise DOKI.md at the workspace root covering: purpose, layout, how to build/test, conventions. Keep "
+        + "it under 100 lines.";
 
     // Interactive-mode wrapper: runs a small background poller alongside the turn so Esc can interrupt it
     // (best-effort, alongside Ctrl+C — F2: CC interrupts with Esc, keeping work done so far). The poller is only
@@ -274,6 +297,20 @@ internal static class Program
         }
     }
 
+    // How many messages at the START of `working` are role:"system" (the system prompt, plus the 1.2 orientation
+    // message when present) — everything /clear must preserve. `working` holds anonymous `{ role, content, ... }`
+    // objects (never JsonElement pre-serialization), so a tiny reflection check on the "role" property is enough;
+    // no need to serialize just to answer this.
+    private static int LeadingSystemCount(List<object> working)
+    {
+        var i = 0;
+        while (i < working.Count && IsSystemMessage(working[i])) i++;
+        return i;
+    }
+
+    private static bool IsSystemMessage(object message)
+        => message.GetType().GetProperty("role")?.GetValue(message) as string == "system";
+
     private static bool SlashCommand(string line, ref string model, List<object> working, string root)
     {
         var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
@@ -284,16 +321,21 @@ internal static class Program
                 return false;
             case "/help":
                 Paint(ConsoleColor.Gray,
-                    "  Commands: /help  /model <name>  /diff  /undo  /clear  /cwd  /exit\n" +
+                    "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
-                    "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n");
+                    "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
+                    "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
                 else Paint(ConsoleColor.Gray, $"  model = {model}  (coder-fast | coder-big | fast-candidate-gptoss20b)\n");
                 return true;
             case "/clear":
-                if (working.Count > 1) working.RemoveRange(1, working.Count - 1);   // keep the system message
+                // Keep ALL leading system messages (the system prompt AND, since 1.2, the orientation message) —
+                // NOT just working[0]. A fixed RemoveRange(1, ...) would nuke the orientation message the moment
+                // a second leading system message exists.
+                var keep = LeadingSystemCount(working);
+                if (working.Count > keep) working.RemoveRange(keep, working.Count - keep);
                 Paint(ConsoleColor.Gray, "  context cleared.\n");
                 return true;
             case "/cwd":
@@ -311,11 +353,12 @@ internal static class Program
         }
     }
 
-    private static void Banner(string root, string model)
+    private static void Banner(string root, string model, string? instructionsFile)
     {
         Paint(ConsoleColor.Cyan, "\n  doki code");
         Paint(ConsoleColor.DarkGray, $"  · local coding agent · {model}\n");
         Paint(ConsoleColor.DarkGray, $"  workspace: {root}\n");
+        if (instructionsFile is not null) Paint(ConsoleColor.DarkGray, $"  instructions: {instructionsFile}\n");
         Paint(ConsoleColor.DarkGray, "  type a task, or /help · Esc or Ctrl+C interrupts · /exit to quit\n");
     }
 

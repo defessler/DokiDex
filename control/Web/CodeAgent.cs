@@ -468,3 +468,200 @@ internal sealed class StreamDisplayFilter
         for (var i = 0; i < parts.Length - 1; i++) yield return parts[i];
     }
 }
+
+// Repo orientation (1.2): `doki code` otherwise starts Grep-blind — the model has zero project context until it
+// spends tool hops discovering it. This builds a SECOND, byte-stable system message giving it that context up
+// front: workspace instructions (DOKI.md/AGENTS.md/CLAUDE.md), a depth-2 directory tree, and a git-status
+// snapshot. Program.cs calls Build() ONCE at session start and keeps the result FIXED for the whole session.
+//
+// IMPORTANT divergence from Claude Code (deliberate): CC injects its memory files as a USER message, re-sent (or
+// re-derived) each turn. We use a role:"system" message instead: appended right after the system prompt, it stays
+// byte-stable turn over turn, which preserves the llama.cpp --cache-reuse prefix (a user-message re-injection, even
+// with identical bytes, still sits AFTER the growing history and so doesn't get the same prefix-cache benefit as
+// two fixed leading messages). It also means the instructions/tree/git-snapshot survive conversation compaction
+// (1.3) for free — compaction only ever summarizes non-system turns.
+public static class CodeOrientation
+{
+    public const int InstructionsCapChars = 8_000;
+    public const int TreeCapChars = 2_000;
+    public const int GitStatusMaxLines = 30;
+    public const int GitStatusTimeoutMs = 10_000;
+
+    // First-found wins: DOKI.md (our own native format) > AGENTS.md (the emerging cross-tool standard, so a
+    // workspace already documented for other agents "just works" here) > CLAUDE.md (Claude Code compatibility —
+    // a repo set up for CC gets orientation here too, with no changes).
+    public static readonly string[] InstructionFileNames = { "DOKI.md", "AGENTS.md", "CLAUDE.md" };
+
+    public sealed record Loaded(string? FileName, string Message);
+
+    // ---- (a) workspace instructions ----
+
+    // Read the first-found instructions file at the workspace root, capped. (null, null) when none exist or the
+    // only match couldn't be read (permissions, encoding) — startup must never fail because of this file.
+    public static (string? fileName, string? content) LoadInstructions(string root)
+    {
+        foreach (var name in InstructionFileNames)
+        {
+            var full = Path.Combine(root, name);
+            if (!File.Exists(full)) continue;
+            try { return (name, CapText(File.ReadAllText(full), InstructionsCapChars)); }
+            catch { return (name, null); }
+        }
+        return (null, null);
+    }
+
+    // PURE: cap `text` at `capChars` chars, appending a truncation note when cut. Total.
+    public static string CapText(string text, int capChars)
+        => text.Length <= capChars ? text : text[..capChars] + $"\n… (truncated at {capChars} chars)";
+
+    // ---- (b) depth-2 directory tree ----
+
+    // One entry in the depth-2 tree — PURE data, no disk. A file (IsDir=false); an EXPANDABLE depth-1 directory
+    // (IsDir=true, Pruned=false, Children = its own depth-2 entries); or a PRUNED depth-2 directory (IsDir=true,
+    // Pruned=true, no Children — PrunedFiles/PrunedDirs count ITS immediate children instead of listing them, so
+    // depth-3 content is never named, only counted).
+    public sealed record TreeEntry(string Name, bool IsDir, bool Pruned = false,
+        IReadOnlyList<TreeEntry>? Children = null, int PrunedFiles = 0, int PrunedDirs = 0);
+
+    // PURE: render a depth-2 listing to text, capped at ~capChars total. Directories print "name/"; a pruned
+    // directory prints "name/ (N files, M dirs)" instead of expanding further. Total + side-effect-free — the
+    // unit-test seam (CodeOrientationTests); the actual disk walk (BuildTree) is a thin wrapper around this.
+    public static string RenderTree(IReadOnlyList<TreeEntry> entries, int capChars)
+    {
+        var sb = new StringBuilder();
+        var truncated = false;
+
+        void Walk(IReadOnlyList<TreeEntry> ents, string indent)
+        {
+            foreach (var e in ents)
+            {
+                if (truncated) return;
+                var line = e.IsDir
+                    ? (e.Pruned ? $"{indent}{e.Name}/ ({e.PrunedFiles} files, {e.PrunedDirs} dirs)\n" : $"{indent}{e.Name}/\n")
+                    : $"{indent}{e.Name}\n";
+                if (sb.Length + line.Length > capChars) { truncated = true; return; }
+                sb.Append(line);
+                if (e.IsDir && !e.Pruned && e.Children is { Count: > 0 }) Walk(e.Children, indent + "  ");
+            }
+        }
+
+        Walk(entries, "");
+        if (truncated) sb.Append("… (truncated at ~").Append(capChars).Append(" chars)");
+        return sb.ToString().TrimEnd();
+    }
+
+    // The thin disk walk: build the depth-2 TreeEntry listing for `root`, skipping CodeTools.SkipDirs (VCS/build/
+    // dependency/binary-heavy trees) and CodeTools.BinaryExts (image/model/binary noise, same discipline as
+    // grep) at every level. Depth-2 directories are NOT expanded further — only shallow-counted (one more
+    // Directory.GetFiles/GetDirectories, not a recursive walk), so this stays O(visible entries), never O(repo
+    // size). Never throws — an unreadable root degrades to an empty listing.
+    internal static IReadOnlyList<TreeEntry> BuildTree(string root)
+    {
+        try { return ListDepth(root, depthRemaining: 2); }
+        catch { return Array.Empty<TreeEntry>(); }
+    }
+
+    private static IReadOnlyList<TreeEntry> ListDepth(string dir, int depthRemaining)
+    {
+        var entries = new List<TreeEntry>();
+        string[] subdirs, files;
+        try { subdirs = Directory.GetDirectories(dir); } catch { subdirs = Array.Empty<string>(); }
+        try { files = Directory.GetFiles(dir); } catch { files = Array.Empty<string>(); }
+
+        foreach (var d in subdirs)
+        {
+            var name = Path.GetFileName(d);
+            if (CodeTools.SkipDirs.Contains(name)) continue;
+            entries.Add(depthRemaining > 1
+                ? new TreeEntry(name, true, Children: ListDepth(d, depthRemaining - 1))
+                : PrunedEntry(name, d));
+        }
+        foreach (var f in files)
+        {
+            if (CodeTools.BinaryExts.Contains(Path.GetExtension(f))) continue;
+            entries.Add(new TreeEntry(Path.GetFileName(f), false));
+        }
+        return entries
+            .OrderByDescending(e => e.IsDir)
+            .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    // Shallow (non-recursive) child count for a pruned depth-2 directory: how many text files and non-skipped
+    // subdirectories sit directly inside it, WITHOUT descending further.
+    private static TreeEntry PrunedEntry(string name, string dir)
+    {
+        int files = 0, dirs = 0;
+        try { files = Directory.GetFiles(dir).Count(f => !CodeTools.BinaryExts.Contains(Path.GetExtension(f))); } catch { }
+        try { dirs = Directory.GetDirectories(dir).Count(d => !CodeTools.SkipDirs.Contains(Path.GetFileName(d))); } catch { }
+        return new TreeEntry(name, true, Pruned: true, PrunedFiles: files, PrunedDirs: dirs);
+    }
+
+    // ---- (b) bounded git-status snapshot ----
+
+    // PURE: cap raw `git status --porcelain` stdout at `maxLines` lines, appending "…and N more" when cut. Blank
+    // stdout (a clean tree) => "" — the caller then omits the whole [git status] section (nothing to say).
+    public static string FormatGitStatus(string rawStdout, int maxLines)
+    {
+        var lines = (rawStdout ?? "").Replace("\r\n", "\n").Split('\n').Where(l => l.Length > 0).ToArray();
+        if (lines.Length == 0) return "";
+        if (lines.Length <= maxLines) return string.Join('\n', lines);
+        return string.Join('\n', lines.Take(maxLines)) + $"\n…and {lines.Length - maxLines} more";
+    }
+
+    // The thin process call: `git -c core.quotepath=false status --porcelain` in `root`, bounded at `timeoutMs`.
+    // Missing git binary, a non-repo workspace, a non-zero exit, or a timeout all degrade to "" (the caller omits
+    // the section silently) — never throws. Stdout/stderr are drained concurrently (mirrors RunBash's fix) so a
+    // pathological amount of git chatter can't deadlock the wait.
+    internal static string RunGitStatus(string root, int timeoutMs = GitStatusTimeoutMs)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("git", "-c core.quotepath=false status --porcelain")
+            {
+                WorkingDirectory = root,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                UseShellExecute = false, CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return "";
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                return "";
+            }
+            p.WaitForExit();   // let the async readers finish flushing now that the process has exited
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            _ = stderrTask.GetAwaiter().GetResult();
+            return p.ExitCode == 0 ? FormatGitStatus(stdout, GitStatusMaxLines) : "";
+        }
+        catch { return ""; }
+    }
+
+    // ---- message assembly ----
+
+    // PURE: assemble the orientation system message from its three already-rendered, already-capped sections —
+    // each omitted ENTIRELY when blank (no empty "[section]\n" headers). This exact text is what Program.cs wraps
+    // as role:"system" and keeps FIXED for the session — re-deriving it per turn would defeat --cache-reuse.
+    public static string BuildMessage(string? instructions, string? tree, string? gitStatus)
+    {
+        var sections = new List<string>();
+        if (!string.IsNullOrWhiteSpace(instructions)) sections.Add("[workspace]\n" + instructions.TrimEnd());
+        if (!string.IsNullOrWhiteSpace(tree)) sections.Add("[structure]\n" + tree.TrimEnd());
+        if (!string.IsNullOrWhiteSpace(gitStatus)) sections.Add("[git status]\n" + gitStatus.TrimEnd());
+        return string.Join("\n\n", sections);
+    }
+
+    // The impure entry point: Program.cs calls this ONCE at session start. Loads instructions, builds the tree,
+    // snapshots git status, then assembles. Message is "" when the workspace has nothing to offer (no
+    // instructions file, nothing to show, no git) — the caller then adds no second system message at all.
+    public static Loaded Build(string root)
+    {
+        var (fileName, instructions) = LoadInstructions(root);
+        var tree = RenderTree(BuildTree(root), TreeCapChars);
+        var gitStatus = RunGitStatus(root);
+        return new Loaded(fileName, BuildMessage(instructions, tree, gitStatus));
+    }
+}
