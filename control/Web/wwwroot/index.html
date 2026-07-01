@@ -61,6 +61,8 @@
     .tmchip { display:inline-block; font-size:11px; border:1px solid var(--border); border-radius:999px; padding:2px 9px; margin-left:6px; white-space:nowrap; }
     .tmchip.role { color:var(--cyan); background:var(--surface2); }
     .tmchip.candidate { color:var(--dim); }
+    .tmchip.yes { color:var(--cyan); }
+    .tmchip.loaded { color:var(--gold); border-color:var(--gold); font-weight:600; }
     .spinner { width:22px; height:22px; border:2px solid var(--border); border-top-color:var(--cyan); border-radius:50%; animation:spin 0.9s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
     .pbar { height:3px; background:var(--bg); } .pbar > div { height:100%; background:var(--cyan); transition:width .3s; }
@@ -548,6 +550,8 @@
       <div id="models"><p class="hint">Loading…</p></div>
       <h2>Text models</h2>
       <div id="textModels"><p class="hint">Loading…</p></div>
+      <h2>Tiers</h2>
+      <div id="llmTiers"><p class="hint">Loading…</p></div>
     </section>
     <section id="view-memory" style="display:none">
       <div id="memoryPanel"><p class="hint">Loading…</p></div>
@@ -597,7 +601,7 @@
       if (v==='home') loadHome();
       if (v==='create') loadPendingGen();
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
-      if (v==='models') { loadModels(); loadLlmModels(); }
+      if (v==='models') { loadModels(); loadLlmModels(); loadLlmTiers(); }
       if (v==='memory') loadMemory();
       if (v==='voice') loadVoices();
       if (v==='flow') renderFlow();
@@ -835,7 +839,9 @@
         const sel = document.getElementById('chatTier');
         if(sel && Array.isArray(caps.tiers) && caps.tiers.length){
           const cur = sel.value;
-          sel.innerHTML = caps.tiers.map(t=>`<option value="${esc(t.id)}">${esc(t.label)}</option>`).join('');
+          // title = "backed by <model>" (2.4): /api/capabilities' tier objects now carry the llama-swap model
+          // name (LlmTiers.AllRoles joined server-side) so this needs no second fetch to /api/llm/tiers.
+          sel.innerHTML = caps.tiers.map(t=>`<option value="${esc(t.id)}" title="${t.model?esc('backed by '+t.model):''}">${esc(t.label)}</option>`).join('');
           sel.value = caps.tiers.some(t=>t.id===cur) ? cur : caps.tiers[0].id;
         }
       }catch{ /* keep the static fallback pills + tier <option>s */ }
@@ -1506,6 +1512,33 @@
     }
     async function installLlmModel(id){ try{ await fetch('/api/llm-models/'+id+'/install',{method:'POST'}); }catch{} loadLlmModels(); }
     async function delLlmModel(id){ if(!confirm('Remove this text model?')) return; try{ await fetch('/api/llm-models/'+id,{method:'DELETE'}); }catch{} loadLlmModels(); }
+    // ---- Tiers (2.4): tier -> llama-swap model visibility + warm-load via /api/llm/tiers. Mirrors the 2.3
+    // Text models section's visual language (scard/scards, tmchip, s chips) so the two tables read as one system.
+    function tierRow(t, reachable){
+      const cfgChip = `<span class="tmchip ${t.configured?'yes':''}">${t.configured?'configured':'not configured'}</span>`;
+      const diskChip = t.onDisk===null ? '' : `<span class="tmchip ${t.onDisk?'yes':''}">${t.onDisk?'on disk':'missing on disk'}</span>`;
+      const loadedChip = t.loaded ? `<span class="tmchip loaded">LOADED</span>` : '';
+      const canWarm = reachable && !t.loaded;
+      const btn = `<button class="xbtn" ${canWarm?'':'disabled'} onclick="warmModel('${esc(t.model)}')">warm</button>`;
+      return `<div class="scard"><div class="row" style="justify-content:space-between">
+        <span>${esc(t.label)} <span class="hint" style="font-family:monospace">${esc(t.model)}</span></span>${btn}</div>
+        <div class="hint" style="margin-top:5px">${cfgChip}${diskChip}${loadedChip}</div></div>`;
+    }
+    async function loadLlmTiers(){
+      try {
+        const res = await (await fetch('/api/llm/tiers')).json();
+        const tiers = res.tiers||[];
+        const el = document.getElementById('llmTiers'); el.innerHTML='';
+        if (!res.reachable) el.appendChild($('<p class="hint">llama-swap is not reachable — start it to see live tier state.</p>'));
+        const g=$('<div class="scards"></div>');
+        tiers.forEach(t=>g.appendChild($(tierRow(t, !!res.reachable))));
+        el.appendChild(g);
+      } catch(e){ document.getElementById('llmTiers').innerHTML='<p class="err">could not load tiers</p>'; }
+    }
+    async function warmModel(model){
+      try{ await fetch('/api/llm/warm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model})}); }catch{}
+      setTimeout(loadLlmTiers, 2000);
+    }
     // ---- director (script -> shotlist -> generate each shot) ----
     async function ensureMedia(){
       if(state.mediaActive) return true;

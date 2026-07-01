@@ -309,8 +309,12 @@ public static class StudioHost
                 .Where(s => s.ConfiguredModels is { Count: > 0 })
                 .SelectMany(s => s.ConfiguredModels!)
                 .ToList() ?? new System.Collections.Generic.List<string>();
+            // model is included so the SPA can title-tooltip each tier <option> ("backed by <model>") without a
+            // second fetch to /api/llm/tiers (2.4) -- Available() itself only returns (Id, Label), so re-derive
+            // the model from AllRoles by id (small, pure lookup; no new probe).
+            var modelByTier = LlmTiers.AllRoles.ToDictionary(r => r.Id, r => r.Model);
             var tiers = LlmTiers.Available(configuredModels)
-                .Select(t => new { id = t.Id, label = t.Label })
+                .Select(t => new { id = t.Id, label = t.Label, model = modelByTier.GetValueOrDefault(t.Id) })
                 .ToList();
             return Results.Json(new { kinds = readyKinds, tiers });
         });
@@ -328,6 +332,43 @@ public static class StudioHost
         api.MapGet("/llm-models", (LlmModelManager lm) => Results.Json(lm.List()));
         api.MapPost("/llm-models/{id}/install", (string id, LlmModelManager lm) => Results.Json(new { status = lm.Install(id) }));
         api.MapDelete("/llm-models/{id}", (string id, LlmModelManager lm) => lm.Delete(id) ? Results.Ok() : Results.NotFound());
+
+        // ---- Tier visibility + warm-load (2.4): joins LlmTiers' role table with the live probe's configured/
+        // loaded models (reused via GetStatusAsync -- no second llama-swap HTTP call, per F3) and
+        // LlmModelManager's on-disk catalog presence, so the SPA can show tier readiness + a warm button without
+        // polling llama-swap directly. onDisk is null when no catalog entry references that tier's model
+        // (unknown, not "missing") -- true/false only when a catalog entry actually names it.
+        api.MapGet("/llm/tiers", async (DokiService doki, LlmModelManager lm, CancellationToken ct) =>
+        {
+            var doc = await doki.GetStatusAsync(ct).ConfigureAwait(false);
+            var llamaSwap = doc?.Services.FirstOrDefault(s => s.Name == "llama-swap");
+            var configured = new HashSet<string>(llamaSwap?.ConfiguredModels ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            var onDiskByModel = lm.List().Models
+                .Where(m => !string.IsNullOrWhiteSpace(m.LlamaSwapModel))
+                .GroupBy(m => m.LlamaSwapModel!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().Status == "present", StringComparer.OrdinalIgnoreCase);
+            var tiers = LlmTiers.AllRoles.Select(r => new
+            {
+                tier = r.Id,
+                label = r.Label,
+                model = r.Model,
+                configured = configured.Contains(r.Model),
+                onDisk = onDiskByModel.TryGetValue(r.Model, out var present) ? (bool?)present : null,
+                loaded = llamaSwap?.Model is string loadedModel && string.Equals(loadedModel, r.Model, StringComparison.OrdinalIgnoreCase),
+            }).ToList();
+            return Results.Json(new { tiers, reachable = llamaSwap?.Healthy ?? false });
+        });
+        // Fire-and-forget by design: DokiService.WarmLoadModel is void (it POSTs a 1-token warm request to
+        // llama-swap on a background Task and never awaits it here) -- there is nothing to await, so 202
+        // Accepted is the honest response. The existing 2s status poll (and the SPA's own re-fetch of
+        // /api/llm/tiers) surfaces the swap once llama-swap finishes hot-loading it.
+        api.MapPost("/llm/warm", (WarmModelRequest body, LlmModelManager lm, DokiService doki) =>
+        {
+            var catalogModels = lm.List().Models.Select(m => m.LlamaSwapModel);
+            if (!LlmTiers.IsWarmable(body.Model, catalogModels)) return Results.BadRequest(new { error = "unknown model" });
+            doki.WarmLoadModel(body.Model!);
+            return Results.Accepted();
+        });
 
         // ---- script-to-shotlist director (local instruct model on :8080 -> ordered shot prompts) ----
         // Storyboarding is text-only and runs in agent/coexist mode; the user then generates the shots as images

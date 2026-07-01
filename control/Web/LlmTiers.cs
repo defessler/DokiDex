@@ -54,4 +54,28 @@ public static class LlmTiers
         "reasoning"                             => Reasoning,
         _ => null,   // unknown/empty -> no model field -> llama-swap's currently-loaded default
     };
+
+    // Every known role INCLUDING vision -- used by the /api/llm/tiers visibility endpoint (2.4), which needs
+    // every tier row, not just the user-selectable speed-picker subset Available() returns. Appended onto
+    // TextRoles rather than folded in, so Available()'s three-role shape (and its "no vision" guarantee) is
+    // untouched.
+    public static IReadOnlyList<(string Id, string Label, string Model)> AllRoles { get; } =
+        TextRoles.Append(("vision", "vision", Vision)).ToList();
+
+    // Pure: is `model` one of the models a warm-load request may target? The known tier models plus every
+    // catalog entry's llamaSwapModel (so install-managed bake-off candidates, e.g. coder-candidate-a3b, are
+    // warmable too) -- never an arbitrary string. Case-insensitive; no I/O -- catalogModels is passed in so
+    // this stays unit-testable without a fixture file.
+    public static bool IsWarmable(string? model, IEnumerable<string?> catalogModels)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return false;
+        var allowed = new HashSet<string>(AllRoles.Select(r => r.Model), System.StringComparer.OrdinalIgnoreCase);
+        foreach (var m in catalogModels)
+            if (!string.IsNullOrWhiteSpace(m)) allowed.Add(m!);
+        return allowed.Contains(model);
+    }
 }
+
+// POST /api/llm/warm's body -- just the target llama-swap model name, validated against LlmTiers.IsWarmable
+// before DokiService.WarmLoadModel (fire-and-forget) is called.
+public sealed record WarmModelRequest(string? Model);
