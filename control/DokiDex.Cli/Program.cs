@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using DokiDex.Web;
@@ -7,8 +8,10 @@ namespace DokiDex.Cli;
 // doki code — a local terminal coding agent that mirrors the Claude Code CLI, running the user's local coder model
 // (coder-fast/coder-big via llama-swap) through CodeAgent's ReAct loop. The workspace is the current directory, so
 // you `cd` into any project and run it. Read/Grep run freely; Edit/Write/Bash show a diff or the command and wait
-// for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /exit. Content tokens
-// stream live by default (1.1; `--no-stream` forces the old blocking-per-turn path). Esc or Ctrl+C interrupts.
+// for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /compact /context /exit.
+// Content tokens stream live by default (1.1; `--no-stream` forces the old blocking-per-turn path). Esc or Ctrl+C
+// interrupts. A dim context meter prints after each interactive turn (1.3); past ~40k estimated tokens the
+// session auto-compacts before the next turn runs (never in one-shot mode).
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
@@ -90,18 +93,30 @@ internal static class Program
             if (line.Length == 0) continue;
             if (line[0] == '/')
             {
-                // /init runs a NORMAL turn (not a synchronous SlashCommand) with a fixed exploration prompt — it
-                // needs the full Read/Grep/Write loop, so it can't be handled inside SlashCommand's sync switch.
-                var cmd = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } p ? p[0] : line;
+                // /init and /compact both run ASYNC work (a normal turn / one LocalLlm.ChatAsync call) — neither
+                // fits inside SlashCommand's synchronous switch, so both are special-cased here before it runs.
+                var cmdParts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                var cmd = cmdParts.Length > 0 ? cmdParts[0] : line;
                 if (string.Equals(cmd, "/init", StringComparison.OrdinalIgnoreCase))
                 {
+                    await MaybeAutoCompactAsync(root, working, model);
                     await RunOneTurnInteractive(root, working, model, always, InitPrompt, !noStream);
+                    PrintContextMeter(working);
+                    continue;
+                }
+                if (string.Equals(cmd, "/compact", StringComparison.OrdinalIgnoreCase))
+                {
+                    var instructions = cmdParts.Length > 1 ? cmdParts[1].Trim() : "";
+                    var (_, message) = await CodeContext.CompactAsync(root, working, model, instructions, CancellationToken.None);
+                    Paint(ConsoleColor.Gray, "  " + message + "\n");
                     continue;
                 }
                 if (!SlashCommand(line, ref model, working, root)) break;
                 continue;
             }
+            await MaybeAutoCompactAsync(root, working, model);
             await RunOneTurnInteractive(root, working, model, always, line, !noStream);
+            PrintContextMeter(working);
         }
         return 0;
     }
@@ -279,6 +294,22 @@ internal static class Program
         catch (Exception ex) { Paint(ConsoleColor.Red, $"  /diff failed: {ex.Message}\n"); }
     }
 
+    // `/context` — a small token-budget breakdown: the leading system messages (system prompt + 1.2 orientation,
+    // which never get compacted away) vs. the rest of the history, each with its own CodeContext.EstimateTokens,
+    // against the 32k healthy / 131k hard numbers (same constants the meter and auto-compact use).
+    private static void ShowContext(List<object> working)
+    {
+        var leadCount = LeadingSystemCount(working);
+        var leadTokens = CodeContext.EstimateTokens(working.Take(leadCount).ToArray());
+        var histTokens = CodeContext.EstimateTokens(working.Skip(leadCount).ToArray());
+        var total = leadTokens + histTokens;
+        Paint(ConsoleColor.Gray,
+            $"  system: {leadCount} msg(s) (prompt + orientation) · ~{CodeContext.FormatK(leadTokens)} tokens\n" +
+            $"  history: {working.Count - leadCount} msg(s) · ~{CodeContext.FormatK(histTokens)} tokens\n" +
+            $"  total: ~{CodeContext.FormatK(total)} tokens  —  {CodeContext.HealthyBudgetTokens / 1000}k healthy working set / "
+            + $"{CodeContext.HardWindowTokens / 1000}k hard model window\n");
+    }
+
     private static void ShowToolResult(string name, string result)
     {
         var first = result.Replace("\r", "").Split('\n')[0];
@@ -298,18 +329,43 @@ internal static class Program
     }
 
     // How many messages at the START of `working` are role:"system" (the system prompt, plus the 1.2 orientation
-    // message when present) — everything /clear must preserve. `working` holds anonymous `{ role, content, ... }`
-    // objects (never JsonElement pre-serialization), so a tiny reflection check on the "role" property is enough;
-    // no need to serialize just to answer this.
+    // message when present) — everything /clear must preserve, and the split point /context reports on. `working`
+    // holds anonymous `{ role, content, ... }` objects (never JsonElement pre-serialization); the actual role
+    // check is CodeContext.IsSystemMessage (1.3) — the ONE definition, shared with SelectForCompaction.
     private static int LeadingSystemCount(List<object> working)
     {
         var i = 0;
-        while (i < working.Count && IsSystemMessage(working[i])) i++;
+        while (i < working.Count && CodeContext.IsSystemMessage(working[i])) i++;
         return i;
     }
 
-    private static bool IsSystemMessage(object message)
-        => message.GetType().GetProperty("role")?.GetValue(message) as string == "system";
+    // 1.3 auto-compact: checked in the REPL loop BEFORE each turn runs (never in one-shot mode — Main's one-shot
+    // branch never calls this). Past CodeContext.AutoCompactThresholdTokens estimated tokens, summarize the
+    // session down via CodeContext.CompactAsync (no /compact instructions) so the user's next turn never has to
+    // wait on an already-blown context window. Always prints ONE dim line — the success message ("(compacted
+    // ~Nk -> ~Mk tokens)", reworded to "(auto-compacted ...)" here) or, on failure, the raw error — and always
+    // continues with whatever `working` now is (CompactAsync guarantees it is UNCHANGED on failure), so a
+    // summarization hiccup never blocks the user's actual turn.
+    private static async Task MaybeAutoCompactAsync(string root, List<object> working, string model)
+    {
+        if (CodeContext.EstimateTokens(working) <= CodeContext.AutoCompactThresholdTokens) return;
+        var (ok, message) = await CodeContext.CompactAsync(root, working, model, "", CancellationToken.None);
+        var line = ok && message.StartsWith("(compacted", StringComparison.Ordinal) ? "(auto-" + message[1..] : message;
+        Paint(ConsoleColor.DarkGray, "  " + line + "\n");
+    }
+
+    // 1.3 meter: printed after each interactive turn (never in one-shot mode) — "~12.3k / 32k ctx", colored by
+    // CodeContext's healthy-working-set thresholds (DarkGray under 24k, Yellow 24-32k, Red over 32k). 32k is the
+    // HEALTHY budget label shown here; the model's actual hard context window is 131k (CodeContext.HardWindowTokens,
+    // surfaced by /context instead — not part of this one-liner).
+    private static void PrintContextMeter(List<object> working)
+    {
+        var tokens = CodeContext.EstimateTokens(working);
+        var color = tokens > CodeContext.HealthyBudgetTokens ? ConsoleColor.Red
+                   : tokens > CodeContext.AmberThresholdTokens ? ConsoleColor.Yellow
+                   : ConsoleColor.DarkGray;
+        Paint(color, $"  ~{CodeContext.FormatK(tokens)} / {CodeContext.HealthyBudgetTokens / 1000}k ctx\n");
+    }
 
     private static bool SlashCommand(string line, ref string model, List<object> working, string root)
     {
@@ -321,10 +377,15 @@ internal static class Program
                 return false;
             case "/help":
                 Paint(ConsoleColor.Gray,
-                    "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /exit\n" +
+                    "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
+                    "            /context  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
                     "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
-                    "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n");
+                    "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n" +
+                    "  /compact summarizes older history down to free up context (optionally focus it, e.g.\n" +
+                    "  \"/compact the auth refactor\"); the session also auto-compacts past ~40k estimated tokens.\n" +
+                    "  /context shows a small token-budget breakdown (system / history / total vs 32k healthy /\n" +
+                    "  131k hard window); a dim \"~Nk / 32k ctx\" meter prints after every turn too.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -346,6 +407,9 @@ internal static class Program
                 return true;
             case "/diff":
                 ShowGitDiff(root);
+                return true;
+            case "/context":
+                ShowContext(working);
                 return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");

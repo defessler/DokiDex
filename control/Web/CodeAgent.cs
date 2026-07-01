@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -663,5 +664,163 @@ public static class CodeOrientation
         var tree = RenderTree(BuildTree(root), TreeCapChars);
         var gitStatus = RunGitStatus(root);
         return new Loaded(fileName, BuildMessage(instructions, tree, gitStatus));
+    }
+}
+
+// Context accounting (1.3): `working` grows unboundedly and SILENTLY across a session — per-tool result caps alone
+// don't bound it (a single 24-hop turn can carry ~96k tokens of tool results). This gives that growth a METER (
+// EstimateTokens + Program.cs's dim one-liner), makes it RECOVERABLE (SelectForCompaction + CompactAsync's one LLM
+// summarization call, wired to /compact and auto-compact), and makes it INSPECTABLE (/context, via EstimateTokens
+// over slices). Every pure helper here treats a `working` ENTRY as the same anonymous role:{system,user,assistant,
+// tool} object Chat.AppendToolRound/CodeOrientation.Build already produce — read back via a tiny "role"/"content"
+// reflection probe (same pattern Program.cs's own IsSystemMessage used, now centralized here).
+public static class CodeContext
+{
+    // ~32k tokens is where local 30B coder models visibly degrade in practice (F4) — the METER's HEALTHY working-
+    // set budget, not the model's actual limit. The hard context window is 131k (noted by /context, never a UI
+    // threshold on its own).
+    public const int HealthyBudgetTokens = 32_000;
+    public const int AmberThresholdTokens = 24_000;
+    public const int HardWindowTokens = 131_000;
+    public const int AutoCompactThresholdTokens = 40_000;
+    public const int DefaultKeepLastTurns = 4;
+
+    private const double CompactTemperature = 0.2;
+    private const int CompactMaxTokens = 1024;
+    private const int TranscriptClipChars = 500;
+
+    // PURE, approximate: chars/4 over EACH message's OWN serialized JSON, summed — NOT real tokenization (no BPE,
+    // no shared-structure discount), just a fast, total estimate good enough to drive a meter/compaction trigger.
+    // Serializing per-message (rather than the whole array once) keeps this correct regardless of which anonymous
+    // shape a given entry is (plain system/user/assistant text, 1.1's tool_calls assistant turn, a role:"tool"
+    // result) — JsonSerializer.Serialize handles any of them the same way.
+    public static int EstimateTokens(IReadOnlyList<object> working)
+    {
+        var total = 0;
+        foreach (var msg in working) total += JsonSerializer.Serialize(msg).Length / 4;
+        return total;
+    }
+
+    // PURE: a one-decimal k-suffixed token count ("12.3k") for the meter/compact/context output. Invariant-culture
+    // so a non-'.'-decimal locale (e.g. de-DE) can't corrupt the displayed number.
+    public static string FormatK(int tokens)
+        => (tokens / 1000.0).ToString("0.0", CultureInfo.InvariantCulture) + "k";
+
+    // A `working` entry is role:"system" when its (anonymous-object) "role" property equals "system". The ONE
+    // definition shared by SelectForCompaction and Program.cs's /clear + /context (which used to duplicate this
+    // via its own private reflection probe).
+    public static bool IsSystemMessage(object message)
+        => message.GetType().GetProperty("role")?.GetValue(message) as string == "system";
+
+    // PURE: split `working` into (toSummarize, kept) for compaction. kept = ALL leading system messages (the
+    // system prompt + 1.2's orientation message — NEVER summarized away, preserving both the --cache-reuse prefix
+    // and the workspace instructions) PLUS the last `keepLastTurns` non-system messages; toSummarize = every
+    // non-system message strictly before those. Fewer than `keepLastTurns` non-system messages total => nothing
+    // worth compacting yet: toSummarize is empty and kept is the WHOLE of `working`, unchanged.
+    public static (IReadOnlyList<object> toSummarize, IReadOnlyList<object> kept) SelectForCompaction(
+        IReadOnlyList<object> working, int keepLastTurns = DefaultKeepLastTurns)
+    {
+        var leadCount = 0;
+        while (leadCount < working.Count && IsSystemMessage(working[leadCount])) leadCount++;
+
+        var nonSystem = working.Skip(leadCount).ToList();
+        if (nonSystem.Count <= keepLastTurns) return (Array.Empty<object>(), working.ToList());
+
+        var splitAt = nonSystem.Count - keepLastTurns;
+        var toSummarize = nonSystem.Take(splitAt).ToList();
+        var keptNonSystem = nonSystem.Skip(splitAt).ToList();
+
+        var kept = new List<object>(working.Take(leadCount));
+        kept.AddRange(keptNonSystem);
+        return (toSummarize, kept);
+    }
+
+    // PURE: render a transcript segment as readable "role: content" lines for the summarization prompt below —
+    // role:"tool" results render as "tool(<name>): <content>" so the model knows WHICH tool produced each result;
+    // every line is clipped to ~clipChars so one giant Bash/Read dump can't blow the summarizer's OWN prompt. A
+    // tool-call assistant turn (content:null — Chat.AppendToolRound's OpenAI-convention shape) renders the called
+    // tool names instead of a blank line, so "commands run" still reaches the summary.
+    public static string RenderTranscript(IReadOnlyList<object> messages, int clipChars = TranscriptClipChars)
+    {
+        var sb = new StringBuilder();
+        foreach (var msg in messages)
+        {
+            var role = PropStr(msg, "role") ?? "unknown";
+            var content = PropStr(msg, "content");
+            string line;
+            if (content is null)
+            {
+                var names = ToolCallNames(msg);
+                line = names.Count > 0 ? $"{role}: [called {string.Join(", ", names)}]" : $"{role}: ";
+            }
+            else
+            {
+                var clipped = content.Length > clipChars ? content[..clipChars] + "…" : content;
+                var toolName = role == "tool" ? PropStr(msg, "name") : null;
+                line = toolName is not null ? $"tool({toolName}): {clipped}" : $"{role}: {clipped}";
+            }
+            sb.Append(line).Append('\n');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    // Pull the function.name out of each entry of an assistant turn's tool_calls[] (Chat.AppendToolRound's shape) —
+    // via reflection, since `msg`/each call is one of the ubiquitous anonymous objects. Empty when absent/malformed.
+    private static List<string> ToolCallNames(object msg)
+    {
+        var names = new List<string>();
+        if (msg.GetType().GetProperty("tool_calls")?.GetValue(msg) is System.Collections.IEnumerable calls)
+            foreach (var tc in calls)
+            {
+                if (tc is null) continue;
+                var fn = tc.GetType().GetProperty("function")?.GetValue(tc);
+                var name = fn is null ? null : fn.GetType().GetProperty("name")?.GetValue(fn) as string;
+                if (!string.IsNullOrEmpty(name)) names.Add(name);
+            }
+        return names;
+    }
+
+    private static string? PropStr(object msg, string name)
+        => msg.GetType().GetProperty(name)?.GetValue(msg) as string;
+
+    // The one impure step (/compact + auto-compact): summarize `toSummarize` via ONE LocalLlm.ChatAsync call, then
+    // rebuild `working` IN PLACE = leading system messages + one "[session summary]" user turn + the kept last
+    // `keepLastTurns` turns. `instructions` (optional — /compact's CC-style focus passthrough) is appended to the
+    // summarization system prompt when non-blank. `root` is accepted (currently unused) to keep this call site
+    // symmetric with RunTurnAsync/PrepareEdit and leave room for a future workspace-aware summary with no further
+    // signature churn. Nothing to compact (fewer than `keepLastTurns` non-system turns) short-circuits WITHOUT
+    // touching the network. On LLM failure (or an empty summary): `working` is left COMPLETELY UNCHANGED — a
+    // failed summarize must never lose history — and the raw LLM error is returned as Message.
+    public static async Task<(bool Ok, string Message)> CompactAsync(
+        string root, List<object> working, string? model, string instructions, CancellationToken ct)
+    {
+        var before = EstimateTokens(working);
+        var (toSummarize, kept) = SelectForCompaction(working, DefaultKeepLastTurns);
+        if (toSummarize.Count == 0) return (true, "(nothing to compact)");
+
+        var transcript = RenderTranscript(toSummarize);
+        var system = "Summarize this coding-session transcript segment concisely: decisions made, files read/"
+            + "edited (paths), commands run + outcomes, current task state. Preserve exact file paths and any "
+            + "error messages verbatim.";
+        if (!string.IsNullOrWhiteSpace(instructions)) system += $" Focus especially on: {instructions.Trim()}";
+
+        var result = await LocalLlm.ChatAsync(system, transcript, CompactTemperature, CompactMaxTokens, ct, model)
+            .ConfigureAwait(false);
+        if (!result.Ok || string.IsNullOrWhiteSpace(result.Text))
+            return (false, result.Error ?? "compaction failed — the model returned no summary.");
+
+        var leadCount = 0;
+        while (leadCount < kept.Count && IsSystemMessage(kept[leadCount])) leadCount++;
+        var rebuilt = new List<object>(kept.Take(leadCount))
+        {
+            new { role = "user", content = "[session summary]\n" + result.Text.Trim() },
+        };
+        rebuilt.AddRange(kept.Skip(leadCount));
+
+        working.Clear();
+        working.AddRange(rebuilt);
+
+        var after = EstimateTokens(working);
+        return (true, $"(compacted ~{FormatK(before)} → ~{FormatK(after)} tokens)");
     }
 }
