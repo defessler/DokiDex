@@ -706,11 +706,17 @@ public static class CodeContext
     public static string FormatK(int tokens)
         => (tokens / 1000.0).ToString("0.0", CultureInfo.InvariantCulture) + "k";
 
-    // A `working` entry is role:"system" when its (anonymous-object) "role" property equals "system". The ONE
-    // definition shared by SelectForCompaction and Program.cs's /clear + /context (which used to duplicate this
-    // via its own private reflection probe).
+    // A `working` entry is role:"system" when its "role" property equals "system". The ONE definition shared by
+    // SelectForCompaction and Program.cs's /clear + /context (which used to duplicate this via its own private
+    // reflection probe). Handles BOTH shapes a `working` entry can be: an anonymous {role,...} object (a live
+    // session) OR a System.Text.Json.JsonElement (1.4: a message reloaded from a saved session file — LoadedSession
+    // hands the raw parsed JSON back so LocalLlm's re-serialization stays byte-identical) — a resumed session's
+    // /clear, /compact, and /context must see the real roles, not silently treat every reloaded message as non-system.
     public static bool IsSystemMessage(object message)
-        => message.GetType().GetProperty("role")?.GetValue(message) as string == "system";
+        => message is JsonElement je
+            ? je.ValueKind == JsonValueKind.Object && je.TryGetProperty("role", out var r)
+                && r.ValueKind == JsonValueKind.String && r.GetString() == "system"
+            : message.GetType().GetProperty("role")?.GetValue(message) as string == "system";
 
     // PURE: split `working` into (toSummarize, kept) for compaction. kept = ALL leading system messages (the
     // system prompt + 1.2's orientation message — NEVER summarized away, preserving both the --cache-reuse prefix
@@ -765,10 +771,23 @@ public static class CodeContext
     }
 
     // Pull the function.name out of each entry of an assistant turn's tool_calls[] (Chat.AppendToolRound's shape) —
-    // via reflection, since `msg`/each call is one of the ubiquitous anonymous objects. Empty when absent/malformed.
-    private static List<string> ToolCallNames(object msg)
+    // via reflection for a live anonymous object, or straight JsonElement navigation for a reloaded one (1.4).
+    // internal (not private): CodeSessions.ExportMarkdown reuses this SAME dual-shape logic rather than duplicating
+    // it. Empty when absent/malformed.
+    internal static List<string> ToolCallNames(object msg)
     {
         var names = new List<string>();
+        if (msg is JsonElement je)
+        {
+            if (je.ValueKind == JsonValueKind.Object && je.TryGetProperty("tool_calls", out var tcs)
+                && tcs.ValueKind == JsonValueKind.Array)
+                foreach (var tc in tcs.EnumerateArray())
+                    if (tc.ValueKind == JsonValueKind.Object && tc.TryGetProperty("function", out var fn)
+                        && fn.ValueKind == JsonValueKind.Object && fn.TryGetProperty("name", out var n)
+                        && n.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(n.GetString()))
+                        names.Add(n.GetString()!);
+            return names;
+        }
         if (msg.GetType().GetProperty("tool_calls")?.GetValue(msg) is System.Collections.IEnumerable calls)
             foreach (var tc in calls)
             {
@@ -780,8 +799,14 @@ public static class CodeContext
         return names;
     }
 
-    private static string? PropStr(object msg, string name)
-        => msg.GetType().GetProperty(name)?.GetValue(msg) as string;
+    // Pull a trimmed-free string property off a `working` entry — EITHER shape (see IsSystemMessage above).
+    // internal (not private): CodeSessions.ExportMarkdown reuses this for role/content/name/tool_call_id lookups
+    // so there is ONE place that knows how to read a `working` entry regardless of where it came from.
+    internal static string? PropStr(object msg, string name)
+        => msg is JsonElement je
+            ? (je.ValueKind == JsonValueKind.Object && je.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString() : null)
+            : msg.GetType().GetProperty(name)?.GetValue(msg) as string;
 
     // The one impure step (/compact + auto-compact): summarize `toSummarize` via ONE LocalLlm.ChatAsync call, then
     // rebuild `working` IN PLACE = leading system messages + one "[session summary]" user turn + the kept last

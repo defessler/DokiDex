@@ -8,10 +8,12 @@ namespace DokiDex.Cli;
 // doki code — a local terminal coding agent that mirrors the Claude Code CLI, running the user's local coder model
 // (coder-fast/coder-big via llama-swap) through CodeAgent's ReAct loop. The workspace is the current directory, so
 // you `cd` into any project and run it. Read/Grep run freely; Edit/Write/Bash show a diff or the command and wait
-// for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /compact /context /exit.
-// Content tokens stream live by default (1.1; `--no-stream` forces the old blocking-per-turn path). Esc or Ctrl+C
-// interrupts. A dim context meter prints after each interactive turn (1.3); past ~40k estimated tokens the
-// session auto-compacts before the next turn runs (never in one-shot mode).
+// for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /compact /context /resume
+// /sessions /export /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old blocking-per-
+// turn path). Esc or Ctrl+C interrupts. A dim context meter prints after each interactive turn (1.3); past ~40k
+// estimated tokens the session auto-compacts before the next turn runs (never in one-shot mode). Sessions persist
+// automatically (1.4) to %USERPROFILE%\.doki\sessions\<workspace-hash>\<timestamp>.json — OUTSIDE the repo, so
+// there's nothing to gitignore; `--continue` resumes the workspace's most recent one (composes with `-p`).
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
@@ -38,6 +40,7 @@ internal static class Program
         string? oneShot = null;
         var outputFormat = "text";
         var noStream = false;   // --no-stream forces the blocking path (1.1's escape hatch, F3-R2)
+        var continueSession = false;   // --continue (1.4): resume the workspace's most recent saved session
         for (var i = 0; i < args.Length; i++)
         {
             if ((args[i] is "--model" or "-m") && i + 1 < args.Length) model = args[++i];
@@ -45,6 +48,7 @@ internal static class Program
             else if (args[i] == "--cwd" && i + 1 < args.Length) root = args[++i];
             else if (args[i] == "--output-format" && i + 1 < args.Length) outputFormat = args[++i];
             else if (args[i] == "--no-stream") noStream = true;
+            else if (args[i] == "--continue") continueSession = true;
             else if (!args[i].StartsWith('-')) oneShot ??= args[i];
         }
         if (!Directory.Exists(root)) root = Directory.GetCurrentDirectory();
@@ -55,8 +59,36 @@ internal static class Program
         // long session matters less than preserving the --cache-reuse prefix (see CodeOrientation's own doc
         // comment for the full CC-divergence rationale).
         var orientation = CodeOrientation.Build(root);
-        var working = new List<object> { new { role = "system", content = CodeAgent.SystemPrompt } };
-        if (orientation.Message.Length > 0) working.Add(new { role = "system", content = orientation.Message });
+
+        // Sessions (1.4): a fresh run gets a fresh `working` (system prompt + orientation) and a brand-new session
+        // id; `--continue` loads the workspace's most recent saved session instead and ADOPTS its id, so this
+        // process's own saves overwrite that same file (CC-style "keep going"). CRITICAL: a loaded session's
+        // `working` already carries its OWN system + orientation messages from when it was first saved — do NOT
+        // also prepend a fresh pair here, or the transcript would carry two competing leading system turns.
+        List<object> working;
+        string sessionId;
+        string? resumedNote = null;
+        if (continueSession)
+        {
+            var loaded = CodeSessions.LoadLatest(root);
+            if (loaded is not null)
+            {
+                working = loaded.Working;
+                sessionId = loaded.Id;
+                resumedNote = $"(resumed {loaded.Id}, {loaded.Working.Count} messages)";
+            }
+            else
+            {
+                working = FreshWorking(orientation);
+                sessionId = CodeSessions.NewSessionId();
+                resumedNote = "(no previous session for this workspace — starting fresh)";
+            }
+        }
+        else
+        {
+            working = FreshWorking(orientation);
+            sessionId = CodeSessions.NewSessionId();
+        }
         var always = new HashSet<string>();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; _turnCts?.Cancel(); };
 
@@ -72,9 +104,11 @@ internal static class Program
             }
 
             var jsonOutput = string.Equals(outputFormat, "json", StringComparison.OrdinalIgnoreCase);
+            if (resumedNote is not null && !jsonOutput) Paint(ConsoleColor.DarkGray, "  " + resumedNote + "\n");
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var (ok, text) = await RunOneTurn(root, working, model, always, oneShot, quiet: jsonOutput, stream: !noStream);
             sw.Stop();
+            SaveSession(root, sessionId, working, model);
             // json mode: ONE machine-parseable object on stdout, no colored/informational noise. Approval prompts
             // (if the turn hits one) still print to the console as today — a one-shot run that needs approval will
             // just behave as it does now; that's an accepted limitation of this leaf, not fixed here.
@@ -84,6 +118,7 @@ internal static class Program
         }
 
         Banner(root, model, orientation.FileName);
+        if (resumedNote is not null) Paint(ConsoleColor.DarkGray, "  " + resumedNote + "\n");
         while (true)
         {
             Paint(ConsoleColor.Cyan, "\n› ");
@@ -102,6 +137,7 @@ internal static class Program
                     await MaybeAutoCompactAsync(root, working, model);
                     await RunOneTurnInteractive(root, working, model, always, InitPrompt, !noStream);
                     PrintContextMeter(working);
+                    SaveSession(root, sessionId, working, model);
                     continue;
                 }
                 if (string.Equals(cmd, "/compact", StringComparison.OrdinalIgnoreCase))
@@ -109,16 +145,38 @@ internal static class Program
                     var instructions = cmdParts.Length > 1 ? cmdParts[1].Trim() : "";
                     var (_, message) = await CodeContext.CompactAsync(root, working, model, instructions, CancellationToken.None);
                     Paint(ConsoleColor.Gray, "  " + message + "\n");
+                    SaveSession(root, sessionId, working, model);
                     continue;
                 }
-                if (!SlashCommand(line, ref model, working, root)) break;
+                if (!SlashCommand(line, ref model, working, root, ref sessionId)) break;
                 continue;
             }
             await MaybeAutoCompactAsync(root, working, model);
             await RunOneTurnInteractive(root, working, model, always, line, !noStream);
             PrintContextMeter(working);
+            SaveSession(root, sessionId, working, model);
         }
         return 0;
+    }
+
+    // The fresh-session `working` seed: the system prompt plus (when the workspace has anything to offer) the 1.2
+    // orientation message. Shared by the plain-start path and --continue's "no previous session yet" fallback.
+    private static List<object> FreshWorking(CodeOrientation.Loaded orientation)
+    {
+        var working = new List<object> { new { role = "system", content = CodeAgent.SystemPrompt } };
+        if (orientation.Message.Length > 0) working.Add(new { role = "system", content = orientation.Message });
+        return working;
+    }
+
+    // Session persistence (1.4): saves are best-effort and must never interrupt the REPL — a failure prints ONE
+    // dim note for the whole process (not one per turn) and otherwise stays silent.
+    private static bool _sessionSaveFailNoted;
+    private static void SaveSession(string root, string sessionId, List<object> working, string model)
+    {
+        if (CodeSessions.Save(root, sessionId, working, model)) return;
+        if (_sessionSaveFailNoted) return;
+        _sessionSaveFailNoted = true;
+        Paint(ConsoleColor.DarkGray, "  (session save failed — continuing without persistence this run)\n");
     }
 
     // /init's fixed prompt (1.2c): explore the repo and (re)write DOKI.md. Write's normal approval gate still
@@ -367,7 +425,7 @@ internal static class Program
         Paint(color, $"  ~{CodeContext.FormatK(tokens)} / {CodeContext.HealthyBudgetTokens / 1000}k ctx\n");
     }
 
-    private static bool SlashCommand(string line, ref string model, List<object> working, string root)
+    private static bool SlashCommand(string line, ref string model, List<object> working, string root, ref string sessionId)
     {
         var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         switch (parts[0].ToLowerInvariant())
@@ -378,14 +436,17 @@ internal static class Program
             case "/help":
                 Paint(ConsoleColor.Gray,
                     "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
-                    "            /context  /exit\n" +
+                    "            /context  /resume [index]  /sessions  /export [file]  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
                     "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
                     "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n" +
                     "  /compact summarizes older history down to free up context (optionally focus it, e.g.\n" +
                     "  \"/compact the auth refactor\"); the session also auto-compacts past ~40k estimated tokens.\n" +
                     "  /context shows a small token-budget breakdown (system / history / total vs 32k healthy /\n" +
-                    "  131k hard window); a dim \"~Nk / 32k ctx\" meter prints after every turn too.\n");
+                    "  131k hard window); a dim \"~Nk / 32k ctx\" meter prints after every turn too.\n" +
+                    "  Sessions persist automatically (outside the repo) after every turn: `doki code --continue`\n" +
+                    "  resumes the workspace's most recent one; /resume (alias /sessions) lists them newest-first\n" +
+                    "  and /resume <index> loads one; /export [file] writes the transcript as markdown.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -411,10 +472,71 @@ internal static class Program
             case "/context":
                 ShowContext(working);
                 return true;
+            case "/resume":
+            case "/sessions":
+                HandleResume(parts, working, root, ref sessionId);
+                return true;
+            case "/export":
+                HandleExport(parts, working, root);
+                return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");
                 return true;
         }
+    }
+
+    // `/resume` (alias `/sessions`): bare => list this workspace's saved sessions newest-first (index, timestamp,
+    // message count, ~60-char first-user-turn snippet); `/resume <index>` loads that one, REPLACING `working` and
+    // adopting its id so this process's future saves overwrite that file instead of the one it started with.
+    private static void HandleResume(string[] parts, List<object> working, string root, ref string sessionId)
+    {
+        var sessions = CodeSessions.List(root);
+        if (sessions.Count == 0) { Paint(ConsoleColor.Gray, "  no saved sessions for this workspace.\n"); return; }
+
+        if (parts.Length > 1 && int.TryParse(parts[1].Trim(), out var idx))
+        {
+            if (idx < 1 || idx > sessions.Count)
+            {
+                Paint(ConsoleColor.Gray, $"  no session #{idx} — have 1-{sessions.Count} (see /resume with no argument).\n");
+                return;
+            }
+            var loaded = CodeSessions.Load(sessions[idx - 1].Path);
+            if (loaded is null) { Paint(ConsoleColor.Gray, "  that session file could not be read.\n"); return; }
+            working.Clear();
+            working.AddRange(loaded.Working);
+            sessionId = loaded.Id;
+            Paint(ConsoleColor.Gray, $"  resumed {loaded.Id} ({loaded.Working.Count} messages).\n");
+            return;
+        }
+
+        Paint(ConsoleColor.Gray, "  sessions for this workspace (newest first):\n");
+        for (var i = 0; i < sessions.Count; i++)
+        {
+            var s = sessions[i];
+            var snippet = s.FirstUserSnippet.Length > 0 ? s.FirstUserSnippet : "(no user turn yet)";
+            Paint(ConsoleColor.Gray, $"  [{i + 1}] {s.Id}  ·  {s.MessageCount} msg(s)  ·  {snippet}\n");
+        }
+        Paint(ConsoleColor.DarkGray, "  /resume <index> to load one.\n");
+    }
+
+    // `/export [file]`: render the CURRENT `working` as markdown (CodeSessions.ExportMarkdown) to a workspace-
+    // relative path (default "doki-session-<timestamp>.md" at the workspace root), via ResolveWorkspacePath for
+    // the same escape-the-workspace safety every other file-touching tool uses. Overwrite-safe: notes when replacing.
+    private static void HandleExport(string[] parts, List<object> working, string root)
+    {
+        var relArg = parts.Length > 1 ? parts[1].Trim() : "";
+        var rel = relArg.Length > 0 ? relArg : $"doki-session-{DateTime.Now.ToString(CodeSessions.TimestampFormat)}.md";
+        var full = CodeTools.ResolveWorkspacePath(root, rel);
+        if (full is null) { Paint(ConsoleColor.Red, $"  \"{rel}\" is outside the workspace.\n"); return; }
+        try
+        {
+            var existed = File.Exists(full);
+            var dir = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(full, CodeSessions.ExportMarkdown(working));
+            Paint(ConsoleColor.Gray, $"  {(existed ? "replaced" : "wrote")} {rel}\n");
+        }
+        catch (Exception ex) { Paint(ConsoleColor.Red, $"  /export failed: {ex.Message}\n"); }
     }
 
     private static void Banner(string root, string model, string? instructionsFile)

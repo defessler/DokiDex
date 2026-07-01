@@ -180,6 +180,59 @@ public class CodeContextTests
         Assert.Contains("assistant: [called Edit]", text);
     }
 
+    // ---- JsonElement dual-shape support (1.4: a resumed session's `working` entries are JsonElement, not the
+    // live anonymous objects) — IsSystemMessage/PropStr/ToolCallNames/RenderTranscript must all read them the same. ----
+
+    private static object AsElement(object anon) => System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(anon)).RootElement;
+
+    [Fact]
+    public void IsSystemMessage_recognizes_a_JsonElement_system_message()
+    {
+        Assert.True(CodeContext.IsSystemMessage(AsElement(Sys("prompt"))));
+        Assert.False(CodeContext.IsSystemMessage(AsElement(Usr("hi"))));
+    }
+
+    [Fact]
+    public void RenderTranscript_reads_JsonElement_entries_the_same_as_live_ones()
+    {
+        var live = CodeContext.RenderTranscript(new object[] { Usr("do the thing"), Asst("done") });
+        var reloaded = CodeContext.RenderTranscript(new object[] { AsElement(Usr("do the thing")), AsElement(Asst("done")) });
+        Assert.Equal(live, reloaded);
+    }
+
+    [Fact]
+    public void RenderTranscript_names_the_tool_for_a_JsonElement_tool_result()
+    {
+        var text = CodeContext.RenderTranscript(new object[] { AsElement(ToolMsg("Read", "file contents")) });
+        Assert.Contains("tool(Read): file contents", text);
+    }
+
+    [Fact]
+    public void RenderTranscript_summarizes_a_JsonElement_toolcall_turn_with_null_content()
+    {
+        var toolCallMsg = new
+        {
+            role = "assistant",
+            content = (string?)null,
+            tool_calls = new object[] { new { id = "call_0", type = "function", function = new { name = "Edit", arguments = "{}" } } },
+        };
+        var text = CodeContext.RenderTranscript(new object[] { AsElement(toolCallMsg) });
+        Assert.Contains("assistant: [called Edit]", text);
+    }
+
+    [Fact]
+    public void SelectForCompaction_treats_leading_JsonElement_system_messages_as_system()
+    {
+        var working = new List<object>
+        {
+            AsElement(Sys("prompt")), AsElement(Sys("orientation")),
+            Usr("1"), Asst("2"), Usr("3"), Asst("4"), Usr("5"), Asst("6"),
+        };
+        var (toSummarize, kept) = CodeContext.SelectForCompaction(working, keepLastTurns: 4);
+        Assert.Equal(2, toSummarize.Count);
+        Assert.Equal(6, kept.Count);
+    }
+
     // ---- CompactAsync (network-free short-circuit only — see class doc) ----
 
     [Fact]
