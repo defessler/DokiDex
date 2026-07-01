@@ -175,4 +175,26 @@ public class CodeEditTests
     [Fact]
     public void StripSearchReplaceBlocks_returns_plain_text_unchanged()
         => Assert.Equal("just prose", CodeEdit.StripSearchReplaceBlocks("just prose"));
+
+    // ---- edit-failure recovery hint ----
+
+    [Fact]
+    public void ApplyEdit_not_found_error_quotes_the_actual_nearby_file_text()
+    {
+        // The SEARCH's first line exists in the file but the full block doesn't match — the error must quote the
+        // real current lines there (with line numbers) so the model can correct its block.
+        var content = "class C {\n    int x = 1;\n    int y = 2;\n}\n";
+        var r = CodeEdit.ApplyEdit(content, "int x = 1;\n    int z = 99;", "int x = 5;");
+        Assert.False(r.Ok);
+        Assert.Contains("int x = 1;", r.Error);   // quoted the real current text
+        Assert.Contains("2:", r.Error);            // with a line number
+    }
+
+    [Fact]
+    public void ApplyEdit_not_found_falls_back_to_the_generic_hint_when_no_line_matches()
+    {
+        var r = CodeEdit.ApplyEdit("a\nb\nc\n", "totally\nabsent\nlines", "x");
+        Assert.False(r.Ok);
+        Assert.Contains("Re-read the file", r.Error);
+    }
 }

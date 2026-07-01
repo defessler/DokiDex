@@ -51,9 +51,30 @@ public static class CodeEdit
             return new(false, content,
                 "The SEARCH text matched multiple places (ignoring indentation) — add more surrounding lines so it is unique.", "whitespace");
 
-        return new(false, content,
-            "SEARCH text not found (even ignoring indentation). Re-read the file with Read and copy the exact lines to change.",
-            "none");
+        var nearby = NearbyContext(contentLines, searchLines);
+        var hint = nearby.Length > 0
+            ? " The file near your first SEARCH line currently reads:\n" + nearby + "\nCopy the exact lines from there."
+            : " Re-read the file with Read and copy the exact lines to change.";
+        return new(false, content, "SEARCH text not found (even ignoring indentation)." + hint, "none");
+    }
+
+    // Find the first non-blank SEARCH line, locate the first content line whose TRIMMED text equals it, and return a
+    // few numbered lines of context around it (or "" if not found). Lets a failed edit show the model the ACTUAL
+    // current text where its SEARCH nearly matched, so it can fix the block instead of guessing blindly.
+    private static string NearbyContext(List<string> contentLines, List<string> searchLines)
+    {
+        var anchor = searchLines.FirstOrDefault(l => l.Trim().Length > 0)?.Trim();
+        if (string.IsNullOrEmpty(anchor)) return "";
+        for (var i = 0; i < contentLines.Count; i++)
+        {
+            if (contentLines[i].Trim() != anchor) continue;
+            var from = Math.Max(0, i - 2);
+            var to = Math.Min(contentLines.Count, i + 3);
+            var sb = new StringBuilder();
+            for (var j = from; j < to; j++) sb.Append(j + 1).Append(": ").Append(contentLines[j]).Append('\n');
+            return sb.ToString().TrimEnd();
+        }
+        return "";
     }
 
     // PURE: a compact, Claude-Code-style diff of an edit for the approval PREVIEW and the CLI display. Finds the
