@@ -419,7 +419,7 @@
       <div id="chatImageChip"><img id="chatImageThumb" alt=""><span class="hint" id="chatImageName"></span><button class="x" type="button" title="Remove image" onclick="clearChatImage()">×</button></div>
       <div id="chatImagePicker"><p class="hint" id="chatImagePickerHint" style="margin:0 0 6px">Pick a Library image…</p><div class="pgrid" id="chatImageGrid"></div></div>
       <div class="mods" style="align-items:center;margin-top:6px">
-        <label title="fast = the interactive coder model; quality = the heavy model (slower, stronger), swapped in on demand">Speed <select id="chatTier" class="kin" style="width:auto"><option value="fast">fast</option><option value="quality">quality · slower</option></select></label>
+        <label title="speed tier — populated from /api/capabilities">Speed <select id="chatTier" class="kin" style="width:auto"><option value="">loading…</option></select></label>
         <button class="ghost" id="chatImageBtn" type="button" onclick="toggleChatImagePicker()" title="Attach one Library image so the assistant can see it (uses the vision model)">+ image</button>
         <button class="ghost" id="chatTools" type="button" aria-pressed="false" onclick="toggleChatTools()" title="Let the assistant use tools (e.g. search your Library). Runs non-streaming. Text-only — can't be combined with an attached image.">🔧 tools</button>
         <button class="primary" onclick="sendChat()">Send</button>
@@ -2536,7 +2536,15 @@
         const doc = await r.json(); const gpu=doc.gpu||{}; const active=gpu.activeGroup||'none';
         state.mediaActive = active==='media'; renderGuard();
         state.llmActive = active==='llm'; renderChatGuard();
-        pill.innerHTML = `GPU <b>${active.toUpperCase()}</b> · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
+        const svcs = doc.services || [];
+        const isLlmGroup = active==='llm' || active==='agent' || active==='coexist';
+        const activeSvc = isLlmGroup
+          ? svcs.find(s => s.group!=='media' && s.running && s.healthy && s.model)
+          : active==='media'
+            ? svcs.find(s => s.group==='media' && s.running && s.healthy && s.model)
+            : null;
+        const modelLabel = activeSvc ? ` · ${esc(activeSvc.model)}` : '';
+        pill.innerHTML = `GPU <b>${active.toUpperCase()}</b>${modelLabel} · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
         // status view
         const modes=document.getElementById('modes'); modes.innerHTML='';
         [['agent','chat + code'],['coexist','+ autocomplete'],['media','image + video']].forEach(([m,sub])=>{
