@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using DokiDex.Web;
 using Xunit;
 
@@ -152,5 +155,49 @@ public class CodeAgentTests
     {
         CodeAgent.ClearUndo();
         Assert.Equal("Nothing to undo.", CodeAgent.Undo());
+    }
+
+    // ---- Bash: concurrent pipe drain + cancellation (0.1) ----
+    // RunBash is `internal` (InternalsVisibleTo) purely so these can drive the real process seam: proving the
+    // fix empirically beats reasoning about it, and there's no other seam that exercises the pipe-drain path.
+
+    [Fact]
+    public async Task RunBash_drains_a_large_stderr_stream_without_deadlocking()
+    {
+        // Old code (sequential ReadToEnd on stdout THEN stderr) deadlocks here: the child can't exit until its
+        // ~80KB stderr write completes, which can't complete until something drains stderr, which never happens
+        // because the parent is stuck blocking on stdout.ReadToEnd() waiting for EOF (i.e. process exit).
+        var json = JsonSerializer.Serialize(new
+        {
+            command = "$s = ('x' * 80000); [Console]::Error.WriteLine($s); Write-Output 'done'",
+        });
+        string? result = null;
+        var task = Task.Run(() => result = CodeAgent.RunBash(
+            Directory.GetCurrentDirectory(), json,
+            _ => CodeAgent.ApprovalDecision.Once, new System.Collections.Generic.HashSet<string>(), CancellationToken.None));
+
+        var finished = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(30))) == task;
+        Assert.True(finished, "RunBash deadlocked draining a large stderr stream.");
+        Assert.NotNull(result);
+        Assert.StartsWith("[exit 0]", result);
+        Assert.Contains("done", result);
+    }
+
+    [Fact]
+    public async Task RunBash_honors_cancellation_and_returns_promptly()
+    {
+        var json = JsonSerializer.Serialize(new { command = "Start-Sleep -Seconds 600" });
+        using var cts = new CancellationTokenSource();
+        string? result = null;
+        var task = Task.Run(() => result = CodeAgent.RunBash(
+            Directory.GetCurrentDirectory(), json,
+            _ => CodeAgent.ApprovalDecision.Once, new System.Collections.Generic.HashSet<string>(), cts.Token));
+
+        await Task.Delay(1000);   // give the child a moment to actually start sleeping
+        cts.Cancel();
+
+        var finished = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(30))) == task;
+        Assert.True(finished, "RunBash did not respond to cancellation promptly.");
+        Assert.Equal("(interrupted)", result);
     }
 }

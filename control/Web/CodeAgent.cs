@@ -321,7 +321,13 @@ public static class CodeAgent
         return $"Wrote {plan.RelPath}.";
     }
 
-    private static string RunBash(string root, string? json,
+    // Hard wall-clock cap for a Bash tool call. TODO: allow an env override once there's a need
+    // (cf. Claude Code's BASH_DEFAULT_TIMEOUT_MS) — not plumbed yet.
+    private const int BashTimeoutMs = 120_000;
+
+    // internal (not private): lets CodeAgentTests exercise the process-drain/cancellation behavior directly
+    // (InternalsVisibleTo — same seam pattern as LocalLlm.Body / MainViewModel.Apply).
+    internal static string RunBash(string root, string? json,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed, CancellationToken ct)
     {
         var cmd = ParseBashArgs(json);
@@ -339,9 +345,24 @@ public static class CodeAgent
             if (p is null) return "Bash: could not start the shell (pwsh not found?).";
             p.StandardInput.Write(cmd);
             p.StandardInput.Close();
-            var stdout = p.StandardOutput.ReadToEnd();
-            var stderr = p.StandardError.ReadToEnd();
-            if (!p.WaitForExit(120_000)) { try { p.Kill(true); } catch { } return "Bash: command timed out after 120s."; }
+
+            // Drain both pipes CONCURRENTLY (mirrors DokiService.CaptureFullAsync) — reading stdout to EOF
+            // before touching stderr deadlocks the moment a chatty child fills the OS stderr pipe buffer while
+            // stdout is still open, well before the timeout below is ever reached.
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            linked.CancelAfter(BashTimeoutMs);
+            try { p.WaitForExitAsync(linked.Token).GetAwaiter().GetResult(); }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                return ct.IsCancellationRequested ? "(interrupted)" : $"Bash: command timed out after {BashTimeoutMs / 1000}s.";
+            }
+
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
             var outText = (stdout + (stderr.Length > 0 ? "\n[stderr]\n" + stderr : "")).TrimEnd();
             if (outText.Length > 12000) outText = outText[..12000] + "\n… (output truncated)";
             return $"[exit {p.ExitCode}]\n{outText}".TrimEnd();
