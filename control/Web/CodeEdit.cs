@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace DokiDex.Web;
 
@@ -130,6 +131,35 @@ public static class CodeEdit
             if (path.Length > 0) blocks.Add(new SearchReplaceBlock(path, search, replace));
         }
         return blocks;
+    }
+
+    // PURE: remove SEARCH/REPLACE blocks (and the path line above each) from a model's content, leaving just the
+    // prose — for DISPLAY, so the terminal shows the model's explanation without the raw edit markers (the edit is
+    // rendered as a colored diff separately by the approval gate). Total + side-effect-free.
+    public static string StripSearchReplaceBlocks(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return "";
+        var lines = SplitLines(content);
+        var keep = new bool[lines.Count];
+        for (var m = 0; m < lines.Count; m++) keep[m] = true;
+        var i = 0;
+        while (i < lines.Count)
+        {
+            if (!IsSearchStart(lines[i])) { i++; continue; }
+            for (var k = i - 1; k >= 0; k--)   // drop the path/fence line above the block
+            {
+                if (lines[k].Trim().Length == 0) continue;
+                keep[k] = false; break;
+            }
+            var end = i;
+            while (end < lines.Count && !IsReplaceEnd(lines[end])) end++;
+            if (end >= lines.Count) end = lines.Count - 1;
+            for (var m = i; m <= end; m++) keep[m] = false;
+            i = end + 1;
+        }
+        var sb = new StringBuilder();
+        for (var m = 0; m < lines.Count; m++) if (keep[m]) sb.Append(lines[m]).Append('\n');
+        return sb.ToString().Trim();
     }
 
     private static bool IsSearchStart(string line) => line.TrimStart().StartsWith("<<<<<<<", StringComparison.Ordinal);

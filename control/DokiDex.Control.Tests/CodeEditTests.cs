@@ -159,4 +159,20 @@ public class CodeEditTests
     [Fact]
     public void ParseSearchReplaceBlocks_skips_a_malformed_block_without_a_divider()
         => Assert.Empty(CodeEdit.ParseSearchReplaceBlocks("f.cs\n<<<<<<< SEARCH\nx\ny\nz\n"));
+
+    [Fact]
+    public void StripSearchReplaceBlocks_leaves_only_the_prose()
+    {
+        var content = "I'll bump the version.\nsrc/app.cs\n<<<<<<< SEARCH\nv = 1\n=======\nv = 2\n>>>>>>> REPLACE\nDone.";
+        var prose = CodeEdit.StripSearchReplaceBlocks(content);
+        Assert.Contains("I'll bump the version.", prose);
+        Assert.Contains("Done.", prose);
+        Assert.DoesNotContain("SEARCH", prose);
+        Assert.DoesNotContain("v = 1", prose);
+        Assert.DoesNotContain("src/app.cs", prose);
+    }
+
+    [Fact]
+    public void StripSearchReplaceBlocks_returns_plain_text_unchanged()
+        => Assert.Equal("just prose", CodeEdit.StripSearchReplaceBlocks("just prose"));
 }

@@ -61,7 +61,7 @@ internal static class Program
         _turnCts = new CancellationTokenSource();
         try
         {
-            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, ShowTool, ShowToolResult, _turnCts.Token);
+            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, ShowTool, ShowToolResult, ShowAssistantText, _turnCts.Token);
             Console.WriteLine();
             Paint(ConsoleColor.Gray, text + "\n");
         }
@@ -92,6 +92,8 @@ internal static class Program
     }
 
     private static void ShowTool(string line) => Paint(ConsoleColor.Cyan, "\n" + line + "\n");
+
+    private static void ShowAssistantText(string text) => Paint(ConsoleColor.Gray, "\n" + text + "\n");
 
     private static void ShowToolResult(string name, string result)
     {

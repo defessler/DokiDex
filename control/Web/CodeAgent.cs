@@ -188,7 +188,7 @@ public static class CodeAgent
     public static async Task<string> RunTurnAsync(
         string root, List<object> working, string? model,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed,
-        Action<string> onTool, Action<string, string> onToolResult, CancellationToken ct)
+        Action<string> onTool, Action<string, string> onToolResult, Action<string> onAssistantText, CancellationToken ct)
     {
         var finalText = "";
         for (var hop = 0; ; hop++)
@@ -200,6 +200,15 @@ public static class CodeAgent
 
             var editBlocks = CodeEdit.ParseSearchReplaceBlocks(finalText);
             var hasTools = turn.ToolCalls is { Count: > 0 };
+
+            // Show the model's PROSE between steps (mirrors Claude Code) — edit blocks render as diffs at the
+            // approval gate, so strip them from the displayed text. Only for CONTINUING turns (the final answer is
+            // printed by the caller); skip empty prose (a bare tool call with no explanation).
+            if (editBlocks.Count > 0 || hasTools)
+            {
+                var prose = editBlocks.Count > 0 ? CodeEdit.StripSearchReplaceBlocks(finalText) : finalText;
+                if (prose.Length > 0) onAssistantText(prose);
+            }
 
             // Final answer: no edit blocks and no tool calls — the content IS the answer.
             if (editBlocks.Count == 0 && !hasTools)
