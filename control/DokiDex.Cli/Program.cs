@@ -7,10 +7,15 @@ namespace DokiDex.Cli;
 // doki code — a local terminal coding agent that mirrors the Claude Code CLI, running the user's local coder model
 // (coder-fast/coder-big via llama-swap) through CodeAgent's ReAct loop. The workspace is the current directory, so
 // you `cd` into any project and run it. Read/Grep run freely; Edit/Write/Bash show a diff or the command and wait
-// for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /exit. Ctrl+C interrupts.
+// for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /exit. Content tokens
+// stream live by default (1.1; `--no-stream` forces the old blocking-per-turn path). Esc or Ctrl+C interrupts.
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
+
+    // Set for the duration of the Approve() y/a/n prompt's Console.ReadKey — PollEscape checks this so the Esc-
+    // interrupt poller doesn't race the approval gate for the same keystroke (1.1).
+    private static volatile bool _approvalActive;
 
     // CodeAgent.RunTurnAsync never throws on a dead/unreachable model — its !turn.Ok path (CodeAgent.cs) returns the
     // error TEXT as the turn's content instead. These are the exact prefixes LocalLlm.ChatToolsAsync produces for
@@ -29,12 +34,14 @@ internal static class Program
         var model = "coder-fast";
         string? oneShot = null;
         var outputFormat = "text";
+        var noStream = false;   // --no-stream forces the blocking path (1.1's escape hatch, F3-R2)
         for (var i = 0; i < args.Length; i++)
         {
             if ((args[i] is "--model" or "-m") && i + 1 < args.Length) model = args[++i];
             else if ((args[i] is "--print" or "-p") && i + 1 < args.Length) oneShot = args[++i];
             else if (args[i] == "--cwd" && i + 1 < args.Length) root = args[++i];
             else if (args[i] == "--output-format" && i + 1 < args.Length) outputFormat = args[++i];
+            else if (args[i] == "--no-stream") noStream = true;
             else if (!args[i].StartsWith('-')) oneShot ??= args[i];
         }
         if (!Directory.Exists(root)) root = Directory.GetCurrentDirectory();
@@ -56,7 +63,7 @@ internal static class Program
 
             var jsonOutput = string.Equals(outputFormat, "json", StringComparison.OrdinalIgnoreCase);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var (ok, text) = await RunOneTurn(root, working, model, always, oneShot, quiet: jsonOutput);
+            var (ok, text) = await RunOneTurn(root, working, model, always, oneShot, quiet: jsonOutput, stream: !noStream);
             sw.Stop();
             // json mode: ONE machine-parseable object on stdout, no colored/informational noise. Approval prompts
             // (if the turn hits one) still print to the console as today — a one-shot run that needs approval will
@@ -79,32 +86,100 @@ internal static class Program
                 if (!SlashCommand(line, ref model, working, root)) break;
                 continue;
             }
-            await RunOneTurn(root, working, model, always, line);
+            await RunOneTurnInteractive(root, working, model, always, line, !noStream);
         }
         return 0;
+    }
+
+    // Interactive-mode wrapper: runs a small background poller alongside the turn so Esc can interrupt it
+    // (best-effort, alongside Ctrl+C — F2: CC interrupts with Esc, keeping work done so far). The poller is only
+    // alive for the duration of this await, which is exactly when the REPL's own Console.ReadLine is NOT reading
+    // — so it can't steal keys meant for the next prompt. It CAN, in principle, race the approval gate's
+    // Console.ReadKey (RunEdit/RunBash prompts happen synchronously inside this same turn); _approvalActive
+    // gates that window so the poller skips checking while a y/a/n prompt is up. A tiny race remains right at the
+    // instant the flag flips (best-effort, as specified — not worth a bigger console-arbitration mechanism here).
+    private static async Task<(bool Ok, string Text)> RunOneTurnInteractive(
+        string root, List<object> working, string model, HashSet<string> always, string userText, bool stream)
+    {
+        using var pollCts = new CancellationTokenSource();
+        var poller = Task.Run(() => PollEscape(pollCts.Token));
+        try { return await RunOneTurn(root, working, model, always, userText, stream: stream); }
+        finally
+        {
+            pollCts.Cancel();
+            try { await poller; } catch { /* best-effort */ }
+        }
+    }
+
+    // Polls for Esc every ~100ms while a turn is in flight; Ctrl+C (Console.CancelKeyPress) still works too.
+    // Best-effort: any console that doesn't support KeyAvailable (redirected input, some terminals) just stops
+    // polling rather than throwing.
+    private static void PollEscape(CancellationToken pollCt)
+    {
+        while (!pollCt.IsCancellationRequested)
+        {
+            try
+            {
+                if (!_approvalActive && Console.KeyAvailable && Console.ReadKey(intercept: true).Key == ConsoleKey.Escape)
+                {
+                    _turnCts?.Cancel();
+                    return;
+                }
+            }
+            catch { return; }
+            Thread.Sleep(100);
+        }
     }
 
     // Runs one user turn. Returns (ok, text): ok is false when the model was unreachable (RunTurnAsync's !Ok path,
     // detected via the ErrLlm* prefixes above) or an exception was caught; true otherwise. Interactive mode ignores
     // the return value — the REPL always continues. One-shot mode uses it for the process exit code (Main) and,
     // in `--output-format json`, for the printed result. `quiet` suppresses the normal colored tool/prose echo (for
-    // json mode) without changing the approval gate, which still writes to the console either way.
+    // json mode) without changing the approval gate, which still writes to the console either way. `stream`
+    // (1.1, default on) paints content tokens live through a fresh per-turn StreamDisplayFilter (suppresses
+    // SEARCH/REPLACE block bodies — they render as a diff at the approval gate); it is forced off by `quiet`
+    // (json mode wants machine output only, no token noise on stdout) and by `--no-stream`.
     private static async Task<(bool Ok, string Text)> RunOneTurn(
-        string root, List<object> working, string model, HashSet<string> always, string userText, bool quiet = false)
+        string root, List<object> working, string model, HashSet<string> always, string userText,
+        bool quiet = false, bool stream = true)
     {
         working.Add(new { role = "user", content = userText });
         _turnCts = new CancellationTokenSource();
         Action<string> showTool = quiet ? _ => { } : ShowTool;
         Action<string, string> showToolResult = quiet ? (_, _) => { } : ShowToolResult;
         Action<string> showAssistantText = quiet ? _ => { } : ShowAssistantText;
+
+        var streaming = stream && !quiet;
+        var filter = streaming ? new StreamDisplayFilter() : null;
+        var streamedAny = false;   // true the moment any real content chunk arrives — NOT just "streaming was attempted"
+        Action<string>? onToken = filter is null ? null : t =>
+        {
+            if (!streamedAny) { streamedAny = true; Console.WriteLine(); }   // one-time lead-in, mirrors the old blank line
+            var shown = filter.Push(t);
+            if (shown.Length > 0) ShowToken(shown);
+        };
+
         try
         {
-            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, showTool, showToolResult, showAssistantText, _turnCts.Token);
+            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token);
             var ok = !(text.StartsWith(ErrLlmReturned, StringComparison.Ordinal) || text.StartsWith(ErrLlmUnreachable, StringComparison.Ordinal));
             if (!quiet)
             {
-                Console.WriteLine();
-                Paint(ConsoleColor.Gray, text + "\n");
+                if (streamedAny)
+                {
+                    // The final answer already painted live, token by token — do NOT re-print it. Just flush any
+                    // still-buffered trailing partial line and close out the streamed block.
+                    var trailing = filter!.Flush();
+                    if (trailing.Length > 0) ShowToken(trailing);
+                    Console.WriteLine();
+                }
+                else
+                {
+                    // Nothing actually streamed (model unreachable before any token arrived, every hop fell back
+                    // to the blocking path, or streaming was off) — same behavior as before 1.1.
+                    Console.WriteLine();
+                    Paint(ConsoleColor.Gray, text + "\n");
+                }
             }
             return (ok, text);
         }
@@ -134,7 +209,9 @@ internal static class Program
             PrintDiff(a.Preview);
         Paint(ConsoleColor.Cyan, $"  Allow {a.Tool}? [y]es / [a]lways / [n]o: ");
         ConsoleKeyInfo key;
+        _approvalActive = true;   // tell the Esc-interrupt poller to stand down for this read (1.1)
         try { key = Console.ReadKey(); } catch { Console.WriteLine(); return CodeAgent.ApprovalDecision.Deny; }
+        finally { _approvalActive = false; }
         Console.WriteLine();
         return char.ToLowerInvariant(key.KeyChar) switch
         {
@@ -147,6 +224,9 @@ internal static class Program
     private static void ShowTool(string line) => Paint(ConsoleColor.Cyan, "\n" + line + "\n");
 
     private static void ShowAssistantText(string text) => Paint(ConsoleColor.Gray, "\n" + text + "\n");
+
+    // Streamed content tokens (already filtered — SEARCH/REPLACE block bodies suppressed by StreamDisplayFilter).
+    private static void ShowToken(string text) => Paint(ConsoleColor.Gray, text);
 
     // `/diff` — show the workspace's working-tree changes (what the agent has edited this session, since edits land
     // as plain working-tree changes) with +/- coloring, so you can review before committing. Read-only.
@@ -236,7 +316,7 @@ internal static class Program
         Paint(ConsoleColor.Cyan, "\n  doki code");
         Paint(ConsoleColor.DarkGray, $"  · local coding agent · {model}\n");
         Paint(ConsoleColor.DarkGray, $"  workspace: {root}\n");
-        Paint(ConsoleColor.DarkGray, "  type a task, or /help · Ctrl+C interrupts · /exit to quit\n");
+        Paint(ConsoleColor.DarkGray, "  type a task, or /help · Esc or Ctrl+C interrupts · /exit to quit\n");
     }
 
     private static void Paint(ConsoleColor c, string s)

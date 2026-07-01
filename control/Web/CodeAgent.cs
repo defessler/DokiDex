@@ -186,17 +186,26 @@ public static class CodeAgent
     // `approve` + `alwaysAllowed`), append the transcript via Chat.AppendToolRound, and loop until the model answers
     // or MaxHops is hit. `working` carries the full message list (system + history + the just-appended user turn);
     // the final assistant turn is appended on return. Callbacks: onTool(displayLine) before each tool runs;
-    // onToolResult(name, resultText) after. Returns the final assistant text.
+    // onToolResult(name, resultText) after. `onToken` (1.1, optional): when non-null, each hop STREAMS its content
+    // live through LocalLlm.ChatToolsStreamAsync instead of the blocking ChatToolsAsync — the caller passes an
+    // ALREADY-WRAPPED callback (e.g. Program.cs's StreamDisplayFilter.Push, so SEARCH/REPLACE block bodies stay
+    // suppressed there); this loop just forwards it. Everything downstream (edit-block parsing, ShouldContinue,
+    // AppendToolRound) is unchanged — it operates on the returned ToolChatResult regardless of which path produced
+    // it. Returns the final assistant text.
     public static async Task<string> RunTurnAsync(
         string root, List<object> working, string? model,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed,
-        Action<string> onTool, Action<string, string> onToolResult, Action<string> onAssistantText, CancellationToken ct)
+        Action<string> onTool, Action<string, string> onToolResult, Action<string> onAssistantText,
+        Action<string>? onToken, CancellationToken ct = default)
     {
         var finalText = "";
         for (var hop = 0; ; hop++)
         {
-            var turn = await LocalLlm.ChatToolsAsync(working, ToolsJson, ToolTemperature, MaxTokens, ct, model)
-                .ConfigureAwait(false);
+            var turn = onToken is not null
+                ? await LocalLlm.ChatToolsStreamAsync(working, ToolsJson, ToolTemperature, MaxTokens, onToken, ct, model)
+                    .ConfigureAwait(false)
+                : await LocalLlm.ChatToolsAsync(working, ToolsJson, ToolTemperature, MaxTokens, ct, model)
+                    .ConfigureAwait(false);
             if (!turn.Ok) return turn.Error ?? "(the local model is not reachable — is agent mode up?)";
             finalText = (turn.Content ?? "").Trim();
 
@@ -205,8 +214,10 @@ public static class CodeAgent
 
             // Show the model's PROSE between steps (mirrors Claude Code) — edit blocks render as diffs at the
             // approval gate, so strip them from the displayed text. Only for CONTINUING turns (the final answer is
-            // printed by the caller); skip empty prose (a bare tool call with no explanation).
-            if (editBlocks.Count > 0 || hasTools)
+            // printed by the caller); skip empty prose (a bare tool call with no explanation). Skipped entirely
+            // when streaming (onToken != null): that same prose was already painted live, chunk by chunk, so
+            // re-printing it here would show it twice.
+            if ((editBlocks.Count > 0 || hasTools) && onToken is null)
             {
                 var prose = editBlocks.Count > 0 ? CodeEdit.StripSearchReplaceBlocks(finalText) : finalText;
                 if (prose.Length > 0) onAssistantText(prose);
@@ -392,5 +403,68 @@ public static class CodeAgent
             return e.Existed ? $"Reverted {e.RelPath}." : $"Removed {e.RelPath} (undid the Write).";
         }
         catch (Exception ex) { return $"Undo failed for \"{e.RelPath}\": {ex.Message}"; }
+    }
+}
+
+// PURE streaming DISPLAY filter (1.1): as a turn's content streams live, SEARCH/REPLACE block bodies must be
+// suppressed — they render as a colored diff at the approval gate instead (CodeAgent.PrepareEdit/RenderDiff), so
+// showing the raw "<<<<<<< SEARCH ... >>>>>>> REPLACE" markers too would be noisy AND duplicate the diff. Uses the
+// SAME marker rules as CodeEdit (a line starting "<<<<<<<" opens the suppressed range, a line starting ">>>>>>>"
+// closes it, both inclusive) but is line-BUFFERED so a marker split across two streamed chunks — entirely
+// possible with token-by-token streaming — is still recognized as one line before any suppression decision is
+// made. Program.cs (the console front-end) owns one instance per turn: `onToken` is `t => Paint(filter.Push(t))`
+// with `filter.Flush()` called once at turn end for any still-buffered trailing partial line. No console/network
+// — total + side-effect-free (StreamDisplayFilterTests).
+internal sealed class StreamDisplayFilter
+{
+    private readonly StringBuilder _pending = new();   // a not-yet-newline-terminated partial line
+    private bool _inBlock;
+
+    // Feed the next streamed chunk; returns the portion (whole, newline-terminated lines only) safe to display
+    // now. A trailing partial line (no terminator yet) is buffered — Push returns it once its newline arrives, or
+    // Flush() returns it at turn end.
+    public string Push(string chunk)
+    {
+        if (string.IsNullOrEmpty(chunk)) return "";
+        _pending.Append(chunk.Replace("\r\n", "\n"));
+        var text = _pending.ToString();
+        var lastNl = text.LastIndexOf('\n');
+        if (lastNl < 0) return "";   // still no complete line — keep buffering
+
+        var completeText = text[..(lastNl + 1)];
+        _pending.Clear();
+        _pending.Append(text[(lastNl + 1)..]);   // leftover partial line carried forward to the next Push/Flush
+
+        var sb = new StringBuilder();
+        foreach (var line in CompleteLines(completeText))
+        {
+            var trimmed = line.TrimStart();
+            if (!_inBlock && trimmed.StartsWith("<<<<<<<", StringComparison.Ordinal)) { _inBlock = true; continue; }
+            if (_inBlock)
+            {
+                if (trimmed.StartsWith(">>>>>>>", StringComparison.Ordinal)) _inBlock = false;
+                continue;   // suppress the marker line itself too, and every line inside the block
+            }
+            sb.Append(line).Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    // End-of-turn: emit any buffered trailing partial line, UNLESS it is inside a still-open (unterminated) block
+    // — a partial edit body must never leak to the display as stray text just because the stream ended early.
+    public string Flush()
+    {
+        if (_pending.Length == 0) return "";
+        var trailing = _pending.ToString();
+        _pending.Clear();
+        return _inBlock ? "" : trailing;
+    }
+
+    // `text` always ends with '\n' by construction (the caller only passes the newline-terminated prefix), so
+    // Split('\n') yields exactly one extra empty trailing entry to drop.
+    private static IEnumerable<string> CompleteLines(string text)
+    {
+        var parts = text.Split('\n');
+        for (var i = 0; i < parts.Length - 1; i++) yield return parts[i];
     }
 }

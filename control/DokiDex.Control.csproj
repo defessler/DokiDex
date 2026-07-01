@@ -38,6 +38,9 @@
   <ItemGroup>
     <!-- let the test project exercise the updater's internal swap/rollback path -->
     <InternalsVisibleTo Include="DokiDex.Control.Tests" />
+    <!-- doki code (DokiDex.Cli/Program.cs, AssemblyName "doki-code") constructs CodeAgent's internal
+         StreamDisplayFilter directly (1.1) — InternalsVisibleTo keys off the ASSEMBLY name, not the project name -->
+    <InternalsVisibleTo Include="doki-code" />
   </ItemGroup>
 
   <ItemGroup>
