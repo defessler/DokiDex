@@ -100,6 +100,17 @@ models:
   # evals\run-suite.ps1 BEFORE making it a tier model (>=91% golden AND zero tool-call flakes). Run text-only
   # with /no_think — the Qwen3.6 models are multimodal + thinking-by-default; mmproj omitted on purpose.
   #
+  # "coder-candidate-devstral":   # Devstral-Small-2-24B-2512 (Apache 2.0) — TOP Mistral pick (docs/mistral-2026-06.md).
+  #                               # PURPOSE-BUILT for the `doki code` agentic Read/Grep/Edit/Write/Bash loop (co-built
+  #                               # w/ OpenHands); SWE-bench 68% [vendor] vs Qwen3-Coder ~50%, smaller VRAM, 256K ctx.
+  #                               # GGUF: bartowski / unsloth Devstral-Small-2-24B-Instruct-2512. Q4_K_XL ~14GB (256K-ctx
+  #                               # room) or Q8_0 ~25GB (max quality, ~7GB headroom). Run: `doki code --model
+  #                               # coder-candidate-devstral`; gate via test-toolcall + run-suite + a real doki code task.
+  #   cmd: |
+  #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
+  #     -m __DOKI_ROOT__\models\Devstral-Small-2-24B-Instruct-2512-UD-Q4_K_XL.gguf
+  #     --port ${PORT} -ngl 99 -c 131072 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cache-reuse 256 --jinja
+  #
   # "coder-candidate":            # Qwen3.6-27B dense (lead — dense tool-calls historically steadier)
   #   cmd: |
   #     __DOKI_ROOT__\serving\llama.cpp\llama-server.exe

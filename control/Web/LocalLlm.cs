@@ -74,10 +74,23 @@ public static class LocalLlm
                     ? (idEl.GetString() ?? "") : "";
                 if (string.IsNullOrWhiteSpace(id)) id = $"call_{slot}";
 
-                // OpenAI carries arguments as a JSON STRING; a non-string value (e.g. an object some open models
-                // emit) is NOT a valid arguments payload here, so fall back to "{}" rather than mis-reading it.
-                var args = fn.TryGetProperty("arguments", out var argEl) && argEl.ValueKind == JsonValueKind.String
-                    ? argEl.GetString() ?? "{}" : "{}";
+                // OpenAI carries arguments as a JSON STRING. A non-string value is a known open/local-model quirk
+                // (Qwen3-Coder and friends often emit an object, not the escaped string):
+                //   • a JSON OBJECT (e.g. {"query":"x"}) carries the REAL args — serialize it back to a JSON string
+                //     so the downstream arg-parsers (ParseQuery / MapGenArgs / …) recover the model's intent.
+                //     The old "{}" fallback silently DROPPED the call's arguments (search_library would list the
+                //     most recent items instead of searching the terms the model asked for) — a real reliability bug.
+                //   • any other non-string (array / number / bool / null) is not a usable args object => "{}".
+                string args;
+                if (fn.TryGetProperty("arguments", out var argEl))
+                    args = argEl.ValueKind switch
+                    {
+                        JsonValueKind.String => argEl.GetString() ?? "{}",
+                        JsonValueKind.Object => argEl.GetRawText(),
+                        _ => "{}",
+                    };
+                else
+                    args = "{}";
                 if (string.IsNullOrWhiteSpace(args)) args = "{}";
 
                 list.Add(new ToolCall(id, name!, args));
@@ -96,7 +109,10 @@ public static class LocalLlm
         IReadOnlyList<object> messages, object toolsJson, double temperature, int maxTokens,
         CancellationToken ct, string? model = null)
     {
-        var body = Body(messages.ToArray(), temperature, maxTokens, model);
+        // Tool calls run TIGHTER sampling than free-form chat: low temp (passed in by Chat.ToolTemperature) plus
+        // min_p 0.1 + top_p 0.9 — the research §5.4 tool-calling profile. Min-p adapts to model confidence and cuts
+        // tool-format drift more reliably than top-p alone; the conversational paths keep their temp-0.8 default.
+        var body = Body(messages.ToArray(), temperature, maxTokens, model, minP: 0.1, topP: 0.9);
         body["tools"] = toolsJson;
         body["tool_choice"] = "auto";
         try
@@ -249,8 +265,13 @@ public static class LocalLlm
             }},
         }, temperature, maxTokens, model), ct);
 
-    // Build the request body, including the OpenAI "model" field only when a tier model is named.
-    private static Dictionary<string, object?> Body(object[] messages, double temperature, int maxTokens, string? model)
+    // Build the request body, including the OpenAI "model" field only when a tier model is named. minP/topP are
+    // OPTIONAL extra sampling params: null (the default for every chat/vision/director/rewriter caller) omits them
+    // entirely, so those requests stay byte-for-byte as before; the tool-calling path (ChatToolsAsync) passes them
+    // to TIGHTEN sampling for reliable tool selection (research §5.4: tool calls want low temp + min_p, not the
+    // conversational temp 0.8). Internal so the "tools tighten, chat untouched" invariant is unit-testable.
+    internal static Dictionary<string, object?> Body(object[] messages, double temperature, int maxTokens, string? model,
+        double? minP = null, double? topP = null)
     {
         var b = new Dictionary<string, object?>
         {
@@ -259,6 +280,8 @@ public static class LocalLlm
             ["max_tokens"] = maxTokens,
         };
         if (!string.IsNullOrWhiteSpace(model)) b["model"] = model;
+        if (minP is { } mp) b["min_p"] = mp;
+        if (topP is { } tp) b["top_p"] = tp;
         return b;
     }
 

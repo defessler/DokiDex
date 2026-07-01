@@ -113,14 +113,27 @@ public class ParseToolCallsTests
     }
 
     [Fact]
-    public void An_arguments_value_that_is_a_json_object_falls_back_safely()
+    public void An_object_typed_arguments_value_is_preserved_as_a_json_string()
     {
-        // Some open models emit arguments as a JSON OBJECT instead of the OpenAI JSON-STRING. We must not throw or
-        // mis-read it: the call still parses (name preserved) and arguments fall back to "{}" (a harmless broad call).
+        // Some open/local models emit `arguments` as a JSON OBJECT instead of the OpenAI JSON-STRING. The old
+        // behavior DROPPED it to "{}" — silently losing the model's intent (search_library would list recent
+        // items instead of searching "dragon"). We now SERIALIZE the object back to a JSON string so the
+        // downstream arg-parsers (ParseQuery / MapGenArgs / …) recover the real arguments. Tool-call reliability fix.
         var json = """{"choices":[{"message":{"tool_calls":[{"id":"call_x","function":{"name":"search_library","arguments":{"query":"dragon"}}}]}}]}""";
         var calls = LocalLlm.ParseToolCalls(json);
         Assert.Single(calls);
         Assert.Equal("search_library", calls[0].Name);
-        Assert.Equal("{}", calls[0].ArgumentsJson);   // non-string arguments => safe default, never null/throw
+        Assert.Equal("{\"query\":\"dragon\"}", calls[0].ArgumentsJson);   // object preserved verbatim, not dropped to "{}"
+    }
+
+    [Fact]
+    public void A_non_object_non_string_arguments_value_still_falls_back_to_an_empty_object()
+    {
+        // Only OBJECT-typed arguments carry a usable payload. A JSON array/number/bool isn't a valid arguments
+        // object for any tool, so it still degrades to "{}" (the downstream parsers expect an object) — never throws.
+        var json = """{"choices":[{"message":{"tool_calls":[{"id":"call_y","function":{"name":"search_library","arguments":[1,2,3]}}]}}]}""";
+        var calls = LocalLlm.ParseToolCalls(json);
+        Assert.Single(calls);
+        Assert.Equal("{}", calls[0].ArgumentsJson);
     }
 }

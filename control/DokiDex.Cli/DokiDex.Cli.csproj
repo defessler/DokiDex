@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- doki code — the local terminal coding agent. A thin console front-end over DokiDex.Web.CodeAgent
+       (reuses the hardened tool-call client + the tested coding tools). Targets net9.0-windows so it can
+       reference the control assembly cleanly; it uses no WPF itself. Builds to doki-code.exe. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>doki-code</AssemblyName>
+    <RootNamespace>DokiDex.Cli</RootNamespace>
+    <UseWPF>false</UseWPF>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DokiDex.Control.csproj" />
+  </ItemGroup>
+
+</Project>

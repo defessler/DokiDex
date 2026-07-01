@@ -78,9 +78,11 @@ public static class Chat
     // ends gracefully and returns whatever text accumulated (or the canonical "stopped" message).
     private static readonly TimeSpan AgentTurnTimeout = TimeSpan.FromMinutes(4);
 
-    // Tool-calling runs a LOWER temperature than free-form chat: open models pick tools more reliably when less
-    // random (serving/test-toolcall.ps1 uses 0.2). Distinct from SendAsync/StreamAsync's 0.8 conversational temp.
-    private const double ToolTemperature = 0.3;
+    // Tool-calling runs MUCH lower temperature than free-form chat: open models pick tools far more reliably when
+    // near-deterministic (research §5.4: tool-calling wants temp 0.0-0.1 + min_p 0.1; serving/test-toolcall.ps1
+    // gated coder-fast at 0.2). LocalLlm.ChatToolsAsync pairs this with min_p 0.1 + top_p 0.9. Distinct from
+    // SendAsync/StreamAsync's 0.8 conversational temp.
+    private const double ToolTemperature = 0.1;
 
     // One streamed event from StreamAsync. The FIRST event is always a Meta carrying the conversation id (so the
     // SPA can capture it before any token arrives) AND the conversation's effective KbId (so the SPA can refresh

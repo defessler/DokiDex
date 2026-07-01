@@ -57,6 +57,14 @@
     <ApplicationDefinition Remove="DokiDex.Control.Tests\**" />
   </ItemGroup>
 
+  <!-- the doki code CLI project lives under this folder too; don't glob its sources into the WPF app -->
+  <ItemGroup>
+    <Compile Remove="DokiDex.Cli\**" />
+    <Page Remove="DokiDex.Cli\**" />
+    <None Remove="DokiDex.Cli\**" />
+    <ApplicationDefinition Remove="DokiDex.Cli\**" />
+  </ItemGroup>
+
   <!-- the web host project also lives under this folder; keep its sources/content out of the WPF app -->
   <ItemGroup>
     <Compile Remove="DokiDex.Web\**" />

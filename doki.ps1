@@ -11,7 +11,7 @@
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen", "index")][string]$Command = "status",
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen", "index", "code")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg,
     [switch]$Clear,  # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
     [switch]$Gated,  # `doki verify -Gated` — also report the gated sidecars' on-disk presence + their on-GPU TODO (default verify runs unchanged)
@@ -437,5 +437,25 @@ switch ($Command) {
             if ($LASTEXITCODE -ne 0) { $failed = 1 }
         } else { Write-Host "panel test project not present" }
         exit $failed
+    }
+    "code" {
+        # doki code — the local terminal coding agent (mirrors the Claude Code CLI), run in the CURRENT directory
+        # as the workspace. Needs the coder model serving on :8080 (agent or coexist mode): .\doki.ps1 up agent.
+        # `doki code` opens the interactive REPL; `doki code "<task>"` runs one turn and exits.
+        $proj = Join-Path $root "control\DokiDex.Cli\DokiDex.Cli.csproj"
+        $exe = Join-Path $root "control\DokiDex.Cli\bin\Release\net9.0-windows\doki-code.exe"
+        if (-not (Test-Path $exe) -and (Test-Path $proj)) {
+            if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+                Write-Host "building doki code (first run) ..."
+                & dotnet build $proj -c Release
+                if ($LASTEXITCODE -ne 0) { Write-Host "doki code build failed — run: dotnet build `"$proj`""; break }
+            } else { Write-Host "dotnet not found — run setup.ps1 (installs the .NET 9 SDK)"; break }
+        }
+        if (-not (Test-Path $exe)) { Write-Host "doki code not found at $exe"; break }
+        if (-not (Probe "http://127.0.0.1:8080/v1/models")) {
+            Write-Host "note: the coder model isn't serving on :8080 yet — start it with  .\doki.ps1 up agent" -ForegroundColor Yellow
+        }
+        $here = (Get-Location).ProviderPath
+        if ($Arg) { & $exe --cwd $here -p $Arg } else { & $exe --cwd $here }
     }
 }
