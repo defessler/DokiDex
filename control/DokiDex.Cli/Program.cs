@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using DokiDex.Web;
 
 namespace DokiDex.Cli;
@@ -11,17 +12,29 @@ internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
 
+    // CodeAgent.RunTurnAsync never throws on a dead/unreachable model — its !turn.Ok path (CodeAgent.cs) returns the
+    // error TEXT as the turn's content instead. These are the exact prefixes LocalLlm.ChatToolsAsync produces for
+    // that path (LocalLlm.cs), used below to detect a failed turn without brittle full-string matching.
+    private const string ErrLlmReturned = "LLM returned";
+    private const string ErrLlmUnreachable = "LLM not reachable";
+
+    // Piped stdin (`git diff | doki code -p "review this"`) is bounded so a runaway producer can't blow up the
+    // prompt / process memory.
+    private const int StdinCap = 2_000_000;
+
     private static async Task<int> Main(string[] args)
     {
         try { Console.OutputEncoding = Encoding.UTF8; } catch { /* some terminals reject this — ignore */ }
         var root = Directory.GetCurrentDirectory();
         var model = "coder-fast";
         string? oneShot = null;
+        var outputFormat = "text";
         for (var i = 0; i < args.Length; i++)
         {
             if ((args[i] is "--model" or "-m") && i + 1 < args.Length) model = args[++i];
             else if ((args[i] is "--print" or "-p") && i + 1 < args.Length) oneShot = args[++i];
             else if (args[i] == "--cwd" && i + 1 < args.Length) root = args[++i];
+            else if (args[i] == "--output-format" && i + 1 < args.Length) outputFormat = args[++i];
             else if (!args[i].StartsWith('-')) oneShot ??= args[i];
         }
         if (!Directory.Exists(root)) root = Directory.GetCurrentDirectory();
@@ -33,8 +46,24 @@ internal static class Program
         // One-shot mode (doki code -p "task") — run a single turn and exit, for scripting.
         if (oneShot is not null)
         {
-            await RunOneTurn(root, working, model, always, oneShot);
-            return 0;
+            // Piped stdin — never read in interactive mode (that stdin is the prompt loop).
+            if (Console.IsInputRedirected)
+            {
+                var stdin = await Console.In.ReadToEndAsync();
+                if (stdin.Length > StdinCap) stdin = stdin[..StdinCap];
+                if (stdin.Length > 0) oneShot += "\n\n[stdin]\n" + stdin;
+            }
+
+            var jsonOutput = string.Equals(outputFormat, "json", StringComparison.OrdinalIgnoreCase);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var (ok, text) = await RunOneTurn(root, working, model, always, oneShot, quiet: jsonOutput);
+            sw.Stop();
+            // json mode: ONE machine-parseable object on stdout, no colored/informational noise. Approval prompts
+            // (if the turn hits one) still print to the console as today — a one-shot run that needs approval will
+            // just behave as it does now; that's an accepted limitation of this leaf, not fixed here.
+            if (jsonOutput)
+                Console.WriteLine(JsonSerializer.Serialize(new { result = text, ok, duration_ms = sw.ElapsedMilliseconds }));
+            return ok ? 0 : 1;
         }
 
         Banner(root, model);
@@ -55,18 +84,42 @@ internal static class Program
         return 0;
     }
 
-    private static async Task RunOneTurn(string root, List<object> working, string model, HashSet<string> always, string userText)
+    // Runs one user turn. Returns (ok, text): ok is false when the model was unreachable (RunTurnAsync's !Ok path,
+    // detected via the ErrLlm* prefixes above) or an exception was caught; true otherwise. Interactive mode ignores
+    // the return value — the REPL always continues. One-shot mode uses it for the process exit code (Main) and,
+    // in `--output-format json`, for the printed result. `quiet` suppresses the normal colored tool/prose echo (for
+    // json mode) without changing the approval gate, which still writes to the console either way.
+    private static async Task<(bool Ok, string Text)> RunOneTurn(
+        string root, List<object> working, string model, HashSet<string> always, string userText, bool quiet = false)
     {
         working.Add(new { role = "user", content = userText });
         _turnCts = new CancellationTokenSource();
+        Action<string> showTool = quiet ? _ => { } : ShowTool;
+        Action<string, string> showToolResult = quiet ? (_, _) => { } : ShowToolResult;
+        Action<string> showAssistantText = quiet ? _ => { } : ShowAssistantText;
         try
         {
-            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, ShowTool, ShowToolResult, ShowAssistantText, _turnCts.Token);
-            Console.WriteLine();
-            Paint(ConsoleColor.Gray, text + "\n");
+            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, showTool, showToolResult, showAssistantText, _turnCts.Token);
+            var ok = !(text.StartsWith(ErrLlmReturned, StringComparison.Ordinal) || text.StartsWith(ErrLlmUnreachable, StringComparison.Ordinal));
+            if (!quiet)
+            {
+                Console.WriteLine();
+                Paint(ConsoleColor.Gray, text + "\n");
+            }
+            return (ok, text);
         }
-        catch (OperationCanceledException) { Paint(ConsoleColor.DarkGray, "\n(interrupted)\n"); }
-        catch (Exception ex) { Paint(ConsoleColor.Red, $"\nerror: {ex.Message}\n"); }
+        catch (OperationCanceledException)
+        {
+            const string text = "(interrupted)";
+            if (!quiet) Paint(ConsoleColor.DarkGray, "\n" + text + "\n");
+            return (false, text);
+        }
+        catch (Exception ex)
+        {
+            var text = $"error: {ex.Message}";
+            if (!quiet) Paint(ConsoleColor.Red, "\n" + text + "\n");
+            return (false, text);
+        }
         finally { _turnCts?.Dispose(); _turnCts = null; }
     }
 
