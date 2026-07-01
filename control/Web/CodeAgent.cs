@@ -145,7 +145,8 @@ public static class CodeAgent
     // ---- mutating executors (disk/process; gated by the approval callback) ----
 
     // A planned edit: the validated path + the new content + the rendered diff for approval, or an error to feed back.
-    public sealed record EditPlan(bool Ok, string RelPath, string FullPath, string NewContent, string Diff, string? Error);
+    public sealed record EditPlan(bool Ok, string RelPath, string FullPath, string NewContent, string Diff, string? Error,
+        string OldContent = "", bool Existed = false);
 
     // Read the file, apply the SEARCH/REPLACE via CodeEdit, and render the diff — WITHOUT writing (approval comes next).
     public static EditPlan PrepareEdit(string root, string? json)
@@ -160,7 +161,7 @@ public static class CodeAgent
         catch (Exception ex) { return new(false, path, full, "", "", $"Edit failed to read \"{path}\": {ex.Message}"); }
         var outcome = CodeEdit.ApplyEdit(old, search, replace);
         if (!outcome.Ok) return new(false, path, full, "", "", outcome.Error);
-        return new(true, path, full, outcome.NewContent, CodeEdit.RenderDiff(path, old, outcome.NewContent), null);
+        return new(true, path, full, outcome.NewContent, CodeEdit.RenderDiff(path, old, outcome.NewContent), null, old, true);
     }
 
     // Plan a Write (new or overwrite): validate the path and render a diff vs any existing content.
@@ -170,10 +171,11 @@ public static class CodeAgent
         if (string.IsNullOrWhiteSpace(path)) return new(false, "", "", "", "", "Write needs a `path`.");
         var full = CodeTools.ResolveWorkspacePath(root, path);
         if (full is null) return new(false, path, "", "", "", $"\"{path}\" is outside the workspace.");
+        var existed = File.Exists(full);
         var old = "";
-        try { if (File.Exists(full)) old = File.ReadAllText(full); } catch { /* treat as new */ }
-        var diff = old.Length == 0 ? $"{path} (new file, {SplitCount(content)} lines)" : CodeEdit.RenderDiff(path, old, content);
-        return new(true, path, full, content, diff, null);
+        try { if (existed) old = File.ReadAllText(full); } catch { existed = false; }
+        var diff = !existed ? $"{path} (new file, {SplitCount(content)} lines)" : CodeEdit.RenderDiff(path, old, content);
+        return new(true, path, full, content, diff, null, old, existed);
     }
 
     private static int SplitCount(string s) => string.IsNullOrEmpty(s) ? 0 : s.Replace("\r\n", "\n").Split('\n').Length;
@@ -296,9 +298,9 @@ public static class CodeAgent
         var plan = PrepareEdit(root, json);
         if (!plan.Ok) return plan.Error!;
         if (!Gate("Edit", plan.RelPath, plan.Diff, approve, alwaysAllowed)) return "User denied the edit.";
-        GitCheckpoint(root, plan.RelPath);
         try { File.WriteAllText(plan.FullPath, plan.NewContent); }
         catch (Exception ex) { return $"Edit failed to write \"{plan.RelPath}\": {ex.Message}"; }
+        _undo.Push(new UndoEntry(plan.FullPath, plan.RelPath, plan.OldContent, plan.Existed));
         return $"Edited {plan.RelPath}.";
     }
 
@@ -308,7 +310,6 @@ public static class CodeAgent
         var plan = PrepareWrite(root, json);
         if (!plan.Ok) return plan.Error!;
         if (!Gate("Write", plan.RelPath, plan.Diff, approve, alwaysAllowed)) return "User denied the write.";
-        GitCheckpoint(root, plan.RelPath);
         try
         {
             var dir = Path.GetDirectoryName(plan.FullPath);
@@ -316,6 +317,7 @@ public static class CodeAgent
             File.WriteAllText(plan.FullPath, plan.NewContent);
         }
         catch (Exception ex) { return $"Write failed for \"{plan.RelPath}\": {ex.Message}"; }
+        _undo.Push(new UndoEntry(plan.FullPath, plan.RelPath, plan.OldContent, plan.Existed));
         return $"Wrote {plan.RelPath}.";
     }
 
@@ -347,30 +349,27 @@ public static class CodeAgent
         catch (Exception ex) { return $"Bash failed: {ex.Message}"; }
     }
 
-    // Best-effort git checkpoint so each approved edit is revertible (git stash-like safety without touching history:
-    // a plain commit of the pre-edit state on whatever branch you're on). Silent no-op outside a git repo.
-    private static void GitCheckpoint(string root, string relPath)
-    {
-        try
-        {
-            if (!Directory.Exists(Path.Combine(root, ".git"))) return;
-            Git(root, "add -A");
-            Git(root, $"commit -q -m \"doki code checkpoint before editing {relPath}\" --no-verify");
-        }
-        catch { /* checkpoint is best-effort; never block the edit */ }
-    }
+    // ---- in-session undo (replaces the old per-edit git commit, which polluted the user's branch history from the
+    // 2nd edit on). Each applied Edit/Write records the file's pre-edit content; `/undo` restores the most recent one
+    // (or deletes a file that Write created). Session-scoped (lost on exit) — the user's own git is the durable
+    // backstop, and edits are plain working-tree changes (reviewable with `git diff`), matching Claude Code.
+    // NB: static state is fine for the single-user CLI (one process); revisit if the web reuses CodeAgent.
+    public sealed record UndoEntry(string FullPath, string RelPath, string OldContent, bool Existed);
+    private static readonly Stack<UndoEntry> _undo = new();
 
-    private static void Git(string root, string args)
+    internal static void ClearUndo() => _undo.Clear();   // test hook
+
+    // Revert the most recent applied edit/write: restore the pre-edit content, or delete a file Write created.
+    public static string Undo()
     {
+        if (_undo.Count == 0) return "Nothing to undo.";
+        var e = _undo.Pop();
         try
         {
-            using var p = Process.Start(new ProcessStartInfo("git", args)
-            {
-                WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true,
-            });
-            p?.WaitForExit(15_000);
+            if (e.Existed) File.WriteAllText(e.FullPath, e.OldContent);
+            else if (File.Exists(e.FullPath)) File.Delete(e.FullPath);
+            return e.Existed ? $"Reverted {e.RelPath}." : $"Removed {e.RelPath} (undid the Write).";
         }
-        catch { }
+        catch (Exception ex) { return $"Undo failed for \"{e.RelPath}\": {ex.Message}"; }
     }
 }

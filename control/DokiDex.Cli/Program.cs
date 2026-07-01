@@ -123,8 +123,9 @@ internal static class Program
                 return false;
             case "/help":
                 Paint(ConsoleColor.Gray,
-                    "  Commands: /help  /model <name>  /clear  /cwd  /exit\n" +
-                    "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n");
+                    "  Commands: /help  /model <name>  /undo  /clear  /cwd  /exit\n" +
+                    "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
+                    "  /undo reverts the last file change from this session (edits are plain working-tree changes).\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -136,6 +137,9 @@ internal static class Program
                 return true;
             case "/cwd":
                 Paint(ConsoleColor.Gray, $"  workspace: {root}\n");
+                return true;
+            case "/undo":
+                Paint(ConsoleColor.Gray, "  " + CodeAgent.Undo() + "\n");
                 return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");

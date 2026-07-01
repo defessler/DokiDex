@@ -124,4 +124,33 @@ public class CodeAgentTests
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
+
+    // ---- in-session undo (replaces the polluting per-edit git commit) ----
+
+    [Fact]
+    public void Undo_restores_an_edited_file_to_its_pre_edit_content()
+    {
+        CodeAgent.ClearUndo();
+        var dir = Path.Combine(Path.GetTempPath(), "doki-undo-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "x.txt");
+            File.WriteAllText(file, "a\nb\nc\n");
+            var blocks = CodeEdit.ParseSearchReplaceBlocks("x.txt\n<<<<<<< SEARCH\nb\n=======\nB\n>>>>>>> REPLACE\n");
+            CodeAgent.ApplyTextEdits(dir, blocks, _ => CodeAgent.ApprovalDecision.Once,
+                new System.Collections.Generic.HashSet<string>(), _ => { }, (_, __) => { });
+            Assert.Equal("a\nB\nc\n", File.ReadAllText(file));      // edit applied
+            Assert.Contains("Reverted", CodeAgent.Undo());
+            Assert.Equal("a\nb\nc\n", File.ReadAllText(file));      // restored to pre-edit
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void Undo_with_an_empty_journal_reports_nothing_to_undo()
+    {
+        CodeAgent.ClearUndo();
+        Assert.Equal("Nothing to undo.", CodeAgent.Undo());
+    }
 }
