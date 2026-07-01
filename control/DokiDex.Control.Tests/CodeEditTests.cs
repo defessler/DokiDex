@@ -197,4 +197,31 @@ public class CodeEditTests
         Assert.False(r.Ok);
         Assert.Contains("Re-read the file", r.Error);
     }
+
+    // ---- applier edge cases (the crux rewrites real files) ----
+
+    [Fact]
+    public void ApplyEdit_empty_replace_deletes_the_matched_lines()
+    {
+        var r = CodeEdit.ApplyEdit("a\nb\nc\n", "b", "");
+        Assert.True(r.Ok);
+        Assert.Equal("a\nc\n", r.NewContent);
+    }
+
+    [Fact]
+    public void ApplyEdit_replace_can_expand_to_more_lines()
+    {
+        var r = CodeEdit.ApplyEdit("a\nb\nc\n", "b", "b1\nb2\nb3");
+        Assert.True(r.Ok);
+        Assert.Equal("a\nb1\nb2\nb3\nc\n", r.NewContent);
+    }
+
+    [Fact]
+    public void ParseSearchReplaceBlocks_supports_an_empty_replace_for_deletion()
+    {
+        var blocks = CodeEdit.ParseSearchReplaceBlocks("f.cs\n<<<<<<< SEARCH\nold line\n=======\n>>>>>>> REPLACE\n");
+        Assert.Single(blocks);
+        Assert.Equal("old line", blocks[0].Search);
+        Assert.Equal("", blocks[0].Replace);
+    }
 }
