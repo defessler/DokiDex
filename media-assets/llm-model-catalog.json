@@ -1,0 +1,151 @@
+{
+  "_comment": "LLM/coder model catalog for DokiDex's local llama.cpp/llama-swap stack (serving/llama-swap.yaml, serving/start-fim.ps1, setup.ps1). files[] entries are HF LFS raw pointers (oid sha256 + size) fetched from https://huggingface.co/<repo>/raw/main/<file>. G1 RULE: no install/download runs and no url+sha256 merges until a human has independently re-verified every entry below against the live HF pointer — sha256 'UNVERIFIED' means this agent could not confirm and MUST NOT be installed from as-is.",
+  "models": [
+    {
+      "id": "coder-fast",
+      "role": "coder-fast",
+      "label": "Qwen3-Coder-30B-A3B-Instruct (UD-Q4_K_XL)",
+      "files": [
+        {
+          "file": "models/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf",
+          "url": "https://huggingface.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF/resolve/main/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf",
+          "sha256": "2841aa314d916434860cfb8990347528dcdfe5c350dbcb9d1461dbee88ff2533",
+          "size": 17665334432
+        }
+      ],
+      "sizeGb": 17.67,
+      "llamaSwapModel": "coder-fast",
+      "notes": "Daily-driver coder tier, full GPU offload, 131072 ctx w/ q8_0 KV + cache-reuse (llama-swap 'coder-fast'; also backs 'coder-fast-lite' at reduced ctx)."
+    },
+    {
+      "id": "coder-big",
+      "role": "coder-big",
+      "label": "gpt-oss-120b (MXFP4)",
+      "files": [
+        {
+          "file": "models/gpt-oss-120b-mxfp4-00001-of-00003.gguf",
+          "url": "https://huggingface.co/ggml-org/gpt-oss-120b-GGUF/resolve/main/gpt-oss-120b-mxfp4-00001-of-00003.gguf",
+          "sha256": "e2865eb6c1df7b2ffbebf305cd5d9074d5ccc0fe3b862f98d343a46dad1606f9",
+          "size": 12980384
+        },
+        {
+          "file": "models/gpt-oss-120b-mxfp4-00002-of-00003.gguf",
+          "url": "https://huggingface.co/ggml-org/gpt-oss-120b-GGUF/resolve/main/gpt-oss-120b-mxfp4-00002-of-00003.gguf",
+          "sha256": "346492f65891fb27cac5c74a8c07626cbfeb4211cd391ec4de37dbbe3109a93b",
+          "size": 31738487200
+        },
+        {
+          "file": "models/gpt-oss-120b-mxfp4-00003-of-00003.gguf",
+          "url": "https://huggingface.co/ggml-org/gpt-oss-120b-GGUF/resolve/main/gpt-oss-120b-mxfp4-00003-of-00003.gguf",
+          "sha256": "66dca81040933f5a49177e82c479c51319cefb83bd22dad9f06dad45e25f1463",
+          "size": 31635878880
+        }
+      ],
+      "sizeGb": 63.39,
+      "llamaSwapModel": "coder-big",
+      "notes": "Heavy-hitter MoE (5.1B active); first-part is a small metadata shard (~12MB) and parts 2/3 carry the bulk of the weights (llama-swap 'coder-big', --n-cpu-moe 22)."
+    },
+    {
+      "id": "reasoning",
+      "role": "reasoning",
+      "label": "gpt-oss-20b (MXFP4)",
+      "files": [
+        {
+          "file": "models/gpt-oss-20b-mxfp4.gguf",
+          "url": "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-mxfp4.gguf",
+          "sha256": "be37a636aca0fc1aae0d32325f82f6b4d21495f06823b5fbc1898ae0303e9935",
+          "size": 12109566560
+        }
+      ],
+      "sizeGb": 12.11,
+      "llamaSwapModel": "fast-candidate-gptoss20b",
+      "notes": "Fits fully on-GPU (no offload); passed the 2026-06-21 tool-call gate (4/4, zero flakes, ~359 tok/s) — kept as an on-demand fast tier, not the coding default."
+    },
+    {
+      "id": "vision",
+      "role": "vision",
+      "label": "Qwen3-VL-32B-Instruct + mmproj",
+      "files": [
+        {
+          "file": "models/Qwen3-VL-32B-Instruct-Q4_K_M.gguf",
+          "url": "https://huggingface.co/unsloth/Qwen3-VL-32B-Instruct-GGUF/resolve/main/Qwen3-VL-32B-Instruct-Q4_K_M.gguf",
+          "sha256": "92d605566f8661b296251c535ed028ecf81c32e14e06948a3d8bef829e96a804",
+          "size": 19762151200
+        },
+        {
+          "file": "models/Qwen3-VL-32B-Instruct-mmproj-F16.gguf",
+          "url": "https://huggingface.co/unsloth/Qwen3-VL-32B-Instruct-GGUF/resolve/main/mmproj-F16.gguf",
+          "sha256": "dde7e407cf72e601455976c2d0daa960d16ee34ba3f0c78718c881d8cd8c1052",
+          "size": 1196795552
+        }
+      ],
+      "sizeGb": 20.96,
+      "llamaSwapModel": "vision",
+      "notes": "Promoted 2026-06-21 over the 8B for fine UI-text/telemetry reading; --mmproj REQUIRED (Qwen3-VL CLIP, llama.cpp PR #16780). The HF mmproj file is named 'mmproj-F16.gguf' upstream — renamed on disk to match llama-swap.yaml."
+    },
+    {
+      "id": "fim",
+      "role": "fim",
+      "label": "Qwen2.5-Coder-3B-Instruct (Q8_0, FIM)",
+      "files": [
+        {
+          "file": "models/qwen2.5-coder-3b-q8_0.gguf",
+          "url": "https://huggingface.co/ggml-org/Qwen2.5-Coder-3B-Q8_0-GGUF/resolve/main/qwen2.5-coder-3b-q8_0.gguf",
+          "sha256": "a522a906e299ed34db738b9626b2cd0da9e446c14674468a22fc2eae3dbd344d",
+          "size": 3285476160
+        }
+      ],
+      "sizeGb": 3.29,
+      "llamaSwapModel": null,
+      "notes": "FIM/autocomplete for llama.vscode's :8012 /infill server (start-fim.ps1), independent of llama-swap; ggml-org's GGUF-my-repo conversion is the canonical repo llama.vscode's own docs recommend for this exact filename — NOT an official Qwen-published repo, flagging that provenance distinction for G1 review."
+    },
+    {
+      "id": "embed",
+      "role": "embed",
+      "label": "nomic-embed-text-v1.5 (F16)",
+      "files": [
+        {
+          "file": "models/nomic-embed-text-v1.5.f16.gguf",
+          "url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf",
+          "sha256": "f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb",
+          "size": 274290560
+        }
+      ],
+      "sizeGb": 0.27,
+      "llamaSwapModel": null,
+      "notes": "Codebase RAG embedding model for the code_search MCP tool, CPU-served on :8090; already auto-fetched by setup.ps1 from this same URL (reused verbatim here)."
+    },
+    {
+      "id": "candidate-devstral",
+      "role": "candidate",
+      "label": "Devstral-Small-2-24B-Instruct-2512 (Q4_K_M, bake-off candidate)",
+      "files": [
+        {
+          "file": "models/Devstral-Small-2-24B-Instruct-2512-Q4_K_M.gguf",
+          "url": "https://huggingface.co/bartowski/mistralai_Devstral-Small-2-24B-Instruct-2512-GGUF/resolve/main/mistralai_Devstral-Small-2-24B-Instruct-2512-Q4_K_M.gguf",
+          "sha256": "bfd11c8679c6b81eb43763505465d7dcfa72e460ab1c220ecc235a3efadd7f7f",
+          "size": 14334438272
+        }
+      ],
+      "sizeGb": 14.33,
+      "llamaSwapModel": "coder-candidate-devstral",
+      "notes": "Bake-off candidate #1 (G2): Apache-2.0, purpose-built for the agentic Read/Grep/Edit/Write/Bash loop (co-built w/ OpenHands). RECONCILE BEFORE UNCOMMENTING: llama-swap.yaml's commented 'coder-candidate-devstral' block currently points at an unsloth UD-Q4_K_XL filename, not this bartowski Q4_K_M file — update the cmd's -m path (or fetch the unsloth build instead) before activating that tier."
+    },
+    {
+      "id": "candidate-a3b",
+      "role": "candidate",
+      "label": "Qwen3.6-35B-A3B (UD-Q4_K_XL, bake-off candidate)",
+      "files": [
+        {
+          "file": "models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+          "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+          "sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450",
+          "size": 22360456160
+        }
+      ],
+      "sizeGb": 22.36,
+      "llamaSwapModel": "coder-candidate-a3b",
+      "notes": "Bake-off candidate #2 (G2): keeps 3B-active speed like coder-fast; filename matches the commented 'coder-candidate-a3b' block in llama-swap.yaml verbatim, and this exact URL is already used by setup.ps1 -LlmCandidates."
+    }
+  ]
+}
