@@ -1054,10 +1054,18 @@ public static class StudioHost
                 File.WriteAllBytes(imgPath, Convert.FromBase64String(body.Image[(comma + 1)..]));
             }
             catch { return Results.BadRequest(new { error = "bad image" }); }
-            var r = await Sam.SegmentAsync(imgPath, body.X, body.Y, ct);
-            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
-            var b64 = Convert.ToBase64String(await File.ReadAllBytesAsync(r.MaskPath!, ct));
-            return Results.Json(new { mask = $"data:image/png;base64,{b64}" });
+            try
+            {
+                var r = await Sam.SegmentAsync(imgPath, body.X, body.Y, ct);
+                if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+                var b64 = Convert.ToBase64String(await File.ReadAllBytesAsync(r.MaskPath!, ct));
+                TryDeleteSamTemp(r.MaskPath);   // mask bytes are now in b64; file no longer referenced by response
+                return Results.Json(new { mask = $"data:image/png;base64,{b64}" });
+            }
+            finally
+            {
+                TryDeleteSamTemp(imgPath);      // input PNG consumed by SAM; never referenced in the response
+            }
         });
 
         // ---- 3D blockout: a software depth rasterizer (primitives -> perspective+occluded depth map), no GPU ----
@@ -1280,6 +1288,24 @@ public static class StudioHost
         => int.TryParse(Cell(row, key), out var n) ? n : dflt;
     private static double DblCell(Dictionary<string, string> row, string key, double dflt)
         => double.TryParse(Cell(row, key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : dflt;
+
+    // Best-effort delete for a SAM temp file (the decoded input PNG or the mask sidecar). Guards: the path
+    // must be inside the system temp directory AND carry the dokidex- prefix so an unexpected path can never
+    // delete a user file — mirrors TryDeleteLiveTemp in GenerationJobs.
+    private static void TryDeleteSamTemp(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            var name = Path.GetFileName(path);
+            if (dir is null || !string.Equals(Path.TrimEndingDirectorySeparator(dir),
+                    Path.TrimEndingDirectorySeparator(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)) return;
+            if (!name.StartsWith("dokidex-", StringComparison.OrdinalIgnoreCase)) return;
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { /* best-effort; a stranded temp file is harmless next to a hang */ }
+    }
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no
     // wwwroot on disk. Loaded once, lazily, from THIS assembly (Control) — the same bytes whether hosted
