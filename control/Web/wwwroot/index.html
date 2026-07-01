@@ -2554,8 +2554,11 @@
         state.llmActive = active==='llm'; renderChatGuard();
         const svcs = doc.services || [];
         const isLlmGroup = active==='llm' || active==='agent' || active==='coexist';
+        // GPU pill's "active model" = llama-swap's LIVE loaded model specifically — NOT any llm-group service
+        // with a model, else a sidecar's static model (2.6: fim/embed/tts/stt now always carry one) would
+        // misattribute as "the loaded chat model" whenever llama-swap is healthy but idle (no model swapped in).
         const activeSvc = isLlmGroup
-          ? svcs.find(s => s.group!=='media' && s.running && s.healthy && s.model)
+          ? svcs.find(s => s.name==='llama-swap' && s.running && s.healthy && s.model)
           : active==='media'
             ? svcs.find(s => s.group==='media' && s.running && s.healthy && s.model)
             : null;

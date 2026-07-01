@@ -26,6 +26,10 @@ public static class StatusProbe
             string? model = null, modelState = null; var configured = new List<string>();
             if (def.Name == "llama-swap" && healthy)
                 (model, modelState, configured) = await LlamaSwapInfoAsync(ct).ConfigureAwait(false);
+            // Sidecars (fim/embed/tts/kokoro/stt) have no live "loaded model" to probe — they only ever serve
+            // one hardcoded model — so fall back to the static ServiceDef.Model (2.6). llama-swap/media are
+            // unaffected: ServiceDef.Model is null for them, so their live value (or lack of one) always wins.
+            model ??= def.Model;
             services.Add(new ServiceStatus
             {
                 Name = def.Name, Group = def.Group, Desc = def.Desc, Port = def.Port, Ui = def.Ui,
