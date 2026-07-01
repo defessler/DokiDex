@@ -95,6 +95,34 @@ internal static class Program
 
     private static void ShowAssistantText(string text) => Paint(ConsoleColor.Gray, "\n" + text + "\n");
 
+    // `/diff` — show the workspace's working-tree changes (what the agent has edited this session, since edits land
+    // as plain working-tree changes) with +/- coloring, so you can review before committing. Read-only.
+    private static void ShowGitDiff(string root)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("git", "-c core.pager=cat diff --no-color")
+            {
+                WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true,
+                UseShellExecute = false, CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null) { Paint(ConsoleColor.DarkGray, "  (git not available)\n"); return; }
+            var outp = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(15000);
+            if (string.IsNullOrWhiteSpace(outp)) { Paint(ConsoleColor.DarkGray, "  (no working-tree changes)\n"); return; }
+            foreach (var l in outp.Replace("\r", "").Split('\n'))
+            {
+                var c = l.StartsWith("+") && !l.StartsWith("+++") ? ConsoleColor.Green
+                      : l.StartsWith("-") && !l.StartsWith("---") ? ConsoleColor.Red
+                      : l.StartsWith("@@") ? ConsoleColor.Cyan
+                      : ConsoleColor.DarkGray;
+                Paint(c, l + "\n");
+            }
+        }
+        catch (Exception ex) { Paint(ConsoleColor.Red, $"  /diff failed: {ex.Message}\n"); }
+    }
+
     private static void ShowToolResult(string name, string result)
     {
         var first = result.Replace("\r", "").Split('\n')[0];
@@ -123,9 +151,9 @@ internal static class Program
                 return false;
             case "/help":
                 Paint(ConsoleColor.Gray,
-                    "  Commands: /help  /model <name>  /undo  /clear  /cwd  /exit\n" +
+                    "  Commands: /help  /model <name>  /diff  /undo  /clear  /cwd  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
-                    "  /undo reverts the last file change from this session (edits are plain working-tree changes).\n");
+                    "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -140,6 +168,9 @@ internal static class Program
                 return true;
             case "/undo":
                 Paint(ConsoleColor.Gray, "  " + CodeAgent.Undo() + "\n");
+                return true;
+            case "/diff":
+                ShowGitDiff(root);
                 return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");
