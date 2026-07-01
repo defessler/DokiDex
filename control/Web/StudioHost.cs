@@ -48,6 +48,7 @@ public static class StudioHost
         builder.Services.AddSingleton<GenerationJobs>();
         builder.Services.AddSingleton<GalleryService>();
         builder.Services.AddSingleton<ModelManager>();
+        builder.Services.AddSingleton<LlmModelManager>();
         builder.Services.AddSingleton<ChatGenCoordinator>(sp => new ChatGenCoordinator(sp.GetRequiredService<DokiService>()));
 
         var app = builder.Build();
@@ -321,6 +322,12 @@ public static class StudioHost
         api.MapGet("/controlnet-models", () => Results.Json(Loras.ControlNets()));   // for the ControlNet model picker
         api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));
         api.MapDelete("/models/{id}", (string id, ModelManager mm) => mm.Delete(id) ? Results.Ok() : Results.NotFound());
+
+        // ---- LLM/GGUF model manager (coder-fast/coder-big/reasoning/vision/fim/embed tiers + bake-off ----
+        // candidates; multi-part-aware -- see LlmModelManager for the per-part G1 hash-verify discipline).
+        api.MapGet("/llm-models", (LlmModelManager lm) => Results.Json(lm.List()));
+        api.MapPost("/llm-models/{id}/install", (string id, LlmModelManager lm) => Results.Json(new { status = lm.Install(id) }));
+        api.MapDelete("/llm-models/{id}", (string id, LlmModelManager lm) => lm.Delete(id) ? Results.Ok() : Results.NotFound());
 
         // ---- script-to-shotlist director (local instruct model on :8080 -> ordered shot prompts) ----
         // Storyboarding is text-only and runs in agent/coexist mode; the user then generates the shots as images
