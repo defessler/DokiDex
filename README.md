@@ -21,6 +21,8 @@ Fully-local AI agentic coding infrastructure — a Claude Code / Codex / Copilot
 .\doki.ps1 up coexist  #   + autocomplete → FIM on :8012
 .\doki.ps1 up media    # image + video + music + image-edit → SwarmUI on :7801
 .\doki.ps1 gen "a neon koi dragon"        # text→media (-Video / -Music / -Edit / -I2v / -Foley / -Fast) — needs `up media`
+.\doki.ps1 code                # interactive coding REPL in the current directory — needs `up agent`
+.\doki.ps1 code "<task>"       # one-shot: run the task and exit
 .\doki.ps1 status      # what's running + health      .\doki.ps1 down
 .\doki.ps1 verify      # full-stack smoke test — cycles all modes, checks every capability
 .\doki.ps1 doctor      # environment + install diagnostics (GPU, disk, toolchain, models, services)
@@ -36,7 +38,22 @@ releases. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z` (builds 
 run it shows a Setup Wizard that installs the whole stack, or adopts an existing DokiDex folder, then
 manages it. No cloned repo required.)
 
-GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and the image/video server. The three things you launch yourself: the CLI (**Crush**), the chat app (**Chatbox**), and the editor (**llama.vscode**).
+GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and the image/video server. The three things you launch yourself: the CLI (**Crush**), the chat app (**Chatbox**), the editor (**llama.vscode**), and the terminal coding agent (**doki code**).
+
+## doki code — local coding agent
+
+`doki code` is a terminal coding agent that mirrors the Claude Code CLI, running Qwen3-Coder-30B locally via llama-swap. The workspace is your **current directory** — `cd` into any project and run it.
+
+```powershell
+.\doki.ps1 up agent         # 1. load the coder model (:8080)
+cd path\to\your\project     # 2. go to the workspace
+.\doki.ps1 code             # 3. interactive REPL (Ctrl+C interrupts; /exit quits)
+.\doki.ps1 code "<task>"    # or: one-shot — run a task and exit
+```
+
+The agent can **Read** files (line-windowed, pageable), **Grep** with a regex (+ optional path scope and file glob), **Edit** existing files (SEARCH/REPLACE blocks), **Write** new files, and run **Bash** commands (PowerShell). Read and Grep run freely; every Edit, Write, and Bash call shows a colored diff or the command text and waits for `[y]es / [a]lways / [n]o` (default: **no**). Edits land as plain working-tree changes — review with `git diff`, revert the last one with `/undo`.
+
+Slash commands inside the REPL: `/help` · `/model <name>` (coder-fast | coder-big | fast-candidate-gptoss20b) · `/undo` · `/clear` · `/cwd` · `/exit`.
 
 ## Layout
 
