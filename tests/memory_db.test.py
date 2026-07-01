@@ -63,6 +63,28 @@ try:
     check(all(m["id"] != a for m in memory_db.recent(10)), "delete removes the row")
     check(all(m["id"] != a for m in memory_db.search("Blackwell")), "delete keeps the FTS index consistent")
 
+    # --- LIKE escape: %, _, and \ in a search term must be treated as literals ---
+    # Force the LIKE fallback path so _like_escape is exercised directly regardless
+    # of whether this Python build has FTS5.
+    _fts_before = memory_db._HAS_FTS
+    memory_db._HAS_FTS = False
+    try:
+        pct_id  = memory_db.save("batch job at 50% progress", "like-escape-test")
+        nosp_id = memory_db.save("GPU model 5090 runs fast",  "like-escape-test")
+        # Without the fix the unescaped pattern '%50%%' == '%50%', which matches any
+        # string containing "50" — including "5090".  With the fix '%50\%%' only matches
+        # strings containing the literal two-char sequence "50%".
+        found_50pct = {m["id"] for m in memory_db.search("50%")}
+        check(pct_id  in     found_50pct, 'LIKE escape: search("50%") finds row with literal "50%"')
+        check(nosp_id not in found_50pct, 'LIKE escape: search("50%") does not false-match "5090" row (% unescaped = wildcard)')
+        # Bare "%" must not match rows that have no literal "%" in them.
+        # Before fix: pattern %% matches every row.
+        found_bare = {m["id"] for m in memory_db.search("%")}
+        check(nosp_id not in found_bare, 'LIKE escape: search("%") does not wildcard-match a row with no literal "%"')
+        check(pct_id  in     found_bare, 'LIKE escape: search("%") matches the row that does contain a literal "%"')
+    finally:
+        memory_db._HAS_FTS = _fts_before
+
     # --- CLI dispatch (the C# MemoryRecall sidecar shells `python memory_db.py <cmd>` like DocSearch->doc_index.py) ---
     import subprocess
     import json as _json
