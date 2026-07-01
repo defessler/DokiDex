@@ -152,6 +152,10 @@
     #kbScopeRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
     #kbScope{font-size:11px;color:var(--dim);font-family:"Cascadia Mono",Consolas,monospace;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 10px}
     #kbScope.named{color:#06121a;background:var(--cyan);border-color:var(--cyan);font-weight:600}
+    /* context/token usage meter */
+    #ctxMeter{font-family:"Cascadia Mono",Consolas,monospace;font-size:11px;color:var(--dim);white-space:nowrap;margin-left:auto}
+    #ctxMeter.amber{color:var(--gold)}
+    #ctxMeter.red{color:var(--danger)}
   </style>
 </head>
 <body>
@@ -425,6 +429,7 @@
         <button class="primary" onclick="sendChat()">Send</button>
         <button class="ghost" onclick="newChat()">New</button>
         <span class="hint" id="chatHint"></span>
+        <span id="ctxMeter"></span>
       </div>
     </section>
     <section id="view-cast" style="display:none">
@@ -1708,6 +1713,17 @@
     function stopJobsPoll(){ if(_jobsTimer){ clearInterval(_jobsTimer); _jobsTimer=null; } }
     // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
     let _chatMsgs=[], _chatConv=null;
+    // Context/token usage meter — purely display, reads _chatMsgs (tokens ≈ chars/4, 128k window).
+    function updateCtxMeter(){
+      const el=document.getElementById('ctxMeter'); if(!el) return;
+      const chars=_chatMsgs.reduce((s,m)=>s+(m&&m.content?m.content.length:0),0);
+      const toks=Math.round(chars/4);
+      const ctx=128000;
+      const pct=toks/ctx;
+      const fmt=toks>=1000?(toks/1000).toFixed(1)+'k':String(toks);
+      el.textContent='~'+fmt+' / 128k';
+      el.className=pct>=0.9?'red':pct>=0.75?'amber':'';
+    }
     // ---- per-conversation KNOWLEDGE BASE (RAG "chat with your documents") ----
     // The KB id IS the conversation id (_chatConv). A doc can only attach once the thread exists (has an id), which
     // happens after the first turn — until then the panel prompts the user to send a message first. Endpoints:
@@ -2055,7 +2071,7 @@
       // it from _chatMsgs.length-1 so a freshly-streamed assistant bubble is still regenerate-able after it lands.
       b._idx = (typeof index==='number') ? index : null;
       attachTurnActions(b, role);
-      log.appendChild(b); log.scrollTop=log.scrollHeight; return b; }
+      log.appendChild(b); log.scrollTop=log.scrollHeight; updateCtxMeter(); return b; }
     // Per-turn interactivity controls (regenerate / edit / delete) as a small sibling group inside the bubble,
     // revealed on hover. The index is read LIVE off b._idx at click time (a delete shifts later indices, so we
     // always re-render from the reloaded conv rather than mutate in place). Regenerate is offered on assistant
@@ -2321,7 +2337,7 @@
       try{ const conv=await (await fetch('/api/chats/'+encodeURIComponent(id))).json(); renderThread(conv); }catch{ document.getElementById('chatHint').textContent='could not open thread'; }
     }
     function newChat(){ _chatMsgs=[]; _chatConv=null; _chatKbId=null; document.getElementById('chatLog').innerHTML='';
-      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); loadChatPendingGens(); syncChatExport(); }
+      document.getElementById('chatHint').textContent=''; const t=document.getElementById('chatThread'); if(t) t.value=''; clearChatImage(); loadKb(); loadChatPendingGens(); syncChatExport(); updateCtxMeter(); }
     // ADDITIVE chat-history search over the thread list: a blank box falls back to loadThreads(); else it
     // re-populates #chatThread's options from GET /api/chats/search (id + persona label + snippet), so selecting
     // a hit still flows through the existing onchange="openThread(this.value)" — zero new open code. Debounced;
