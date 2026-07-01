@@ -579,6 +579,9 @@
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
+      // Poll routing: status probe only on views that display it; jobs grid only on create.
+      if (['home','status','create'].includes(v)) startStatusPoll(); else stopStatusPoll();
+      if (v==='create') startJobsPoll(); else stopJobsPoll();
       if (v==='home') loadHome();
       if (v==='create') loadPendingGen();
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
@@ -1695,6 +1698,14 @@
     let _chatGenTimer=null;
     function startChatGenPoll(){ if(_chatGenTimer) return; loadChatPendingGens(); _chatGenTimer=setInterval(()=>{ if(state.view==='chat') loadChatPendingGens(); }, 2000); }
     function stopChatGenPoll(){ if(_chatGenTimer){ clearInterval(_chatGenTimer); _chatGenTimer=null; } }
+    // View-scoped status + jobs polls (mirror of chatGenPoll above). Started/stopped in setView so
+    // nvidia-smi subprocesses and /api/jobs fetches don't run on views that don't display them.
+    let _statusTimer=null;
+    function startStatusPoll(){ if(_statusTimer) return; pollStatus(); _statusTimer=setInterval(pollStatus, 2000); }
+    function stopStatusPoll(){ if(_statusTimer){ clearInterval(_statusTimer); _statusTimer=null; } }
+    let _jobsTimer=null;
+    function startJobsPoll(){ if(_jobsTimer) return; pollJobs(); _jobsTimer=setInterval(pollJobs, 1500); }
+    function stopJobsPoll(){ if(_jobsTimer){ clearInterval(_jobsTimer); _jobsTimer=null; } }
     // ---- Chat (P0, non-streaming) — persona-first local assistant; the symmetric INVERSE of the media guard ----
     let _chatMsgs=[], _chatConv=null;
     // ---- per-conversation KNOWLEDGE BASE (RAG "chat with your documents") ----
@@ -2734,8 +2745,7 @@
     (function(){ try{ const raw=parseFloat(localStorage.getItem('dd.livepaneW')); if(raw>0){ const p=document.getElementById('livePaneWrap'); const cw=(p&&p.parentElement&&p.parentElement.clientWidth)||960; setLivepaneW(clampWidth(raw, cw)); } }catch{} })();
     renderControls(); renderCast(); loadLoras(); loadStyleChips(); loadControlNets(); loadRecipes(); loadRefs(); loadEffects(); loadImageModels(); loadCapabilities(); document.getElementById('prompt').focus();
     loadHome();
-    pollStatus(); setInterval(pollStatus, 2000);
-    pollJobs(); setInterval(pollJobs, 1500);
+    startStatusPoll(); startJobsPoll();  // view-scoped (initial view is create)
   </script>
 </body>
 </html>

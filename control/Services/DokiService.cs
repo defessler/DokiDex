@@ -16,10 +16,35 @@ public sealed class DokiService
     // Status is NATIVE now (no pwsh on the hot path): StatusProbe probes health + pidfiles + nvidia-smi +
     // llama-swap directly and returns the same StatusDoc the panel already parses. Null only when the home is
     // missing/moved, so the overlay's "Locate DokiDex folder…" recovery still fires for that case.
+
+    // SHORT-TTL cache: /api/home and /api/capabilities both call GetStatusAsync, so a page render fires two
+    // back-to-back nvidia-smi subprocesses (300–800 ms each). ~1 s TTL collapses concurrent/rapid calls to
+    // one probe. The TTL is short enough that status is never meaningfully stale.
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(1);
+    private StatusDoc? _cachedDoc;
+    private DateTime _cacheTime;
+    private readonly SemaphoreSlim _cacheLock = new(1, 1);
+    // Injectable seams: test overrides these to freeze the clock and count probes without hitting nvidia-smi.
+    internal Func<DateTime> _now = () => DateTime.UtcNow;
+    internal Func<CancellationToken, Task<StatusDoc>> _probe = StatusProbe.GetAsync;
+    internal Func<bool> _hasRoot = () => RepoPaths.HasValidRoot;
+
     public async Task<StatusDoc?> GetStatusAsync(CancellationToken ct = default)
     {
-        if (!RepoPaths.HasValidRoot) return null;
-        return await StatusProbe.GetAsync(ct).ConfigureAwait(false);
+        if (!_hasRoot()) return null;
+        // Fast path: lock-free stale-read check. Reference reads are atomic in .NET; a torn _cacheTime
+        // at worst causes one extra probe — acceptable for a 1 s TTL.
+        if (_cachedDoc is { } hit && _now() - _cacheTime < CacheTtl) return hit;
+        // Slow path: serialize concurrent callers so only one probe fires per TTL window.
+        await _cacheLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_cachedDoc is { } hit2 && _now() - _cacheTime < CacheTtl) return hit2;
+            var result = await _probe(ct).ConfigureAwait(false);
+            _cachedDoc = result; _cacheTime = _now();
+            return result;
+        }
+        finally { _cacheLock.Release(); }
     }
 
     // Pure, testable: deserialize the `doki status json` payload. Returns null on empty/invalid.
