@@ -63,11 +63,11 @@ Everything you generate — images, video, music, speech — lands in the **Libr
 
 1. Make sure you're in **agent** mode (`.\doki.ps1 up agent`).
 2. `cd` into the project you want to work on.
-3. Run `.\doki.ps1 code` (interactive REPL) or `.\doki.ps1 code "<task>"` (one-shot, then exit).
+3. Run `.\doki.ps1 code` (interactive REPL) or `.\doki.ps1 code "<task>"` (one-shot, then exit); add `--continue` to resume your last session for this project.
 4. The agent proposes file edits and shell commands; each one shows a colored diff or the command text and waits for **[y]es / [a]lways / [n]o** (default: **no**).
 5. Review changes with `git diff` at any time; `/undo` reverts the last change in-session.
 
-Type `/help` for slash commands (model-swap, clear, cwd, undo, exit). Ctrl+C interrupts the current turn.
+Type `/help` for the full command list (sessions, permissions, plan mode, custom commands, and more). Esc or Ctrl+C interrupts the current turn.
 
 ---
 

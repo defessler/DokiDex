@@ -42,18 +42,20 @@ GPU modes are mutually exclusive on 32GB, so `doki` switches between the LLM and
 
 ## doki code — local coding agent
 
-`doki code` is a terminal coding agent that mirrors the Claude Code CLI, running Qwen3-Coder-30B locally via llama-swap. The workspace is your **current directory** — `cd` into any project and run it.
+`doki code` is a terminal coding agent that mirrors the Claude Code CLI, running Qwen3-Coder-30B locally via llama-swap. The workspace is your **current directory** — `cd` into any project and run it. Content streams live by default (`--no-stream` to disable; **Esc** or **Ctrl+C** interrupts mid-turn). It auto-loads repo orientation (DOKI.md → AGENTS.md → CLAUDE.md, a directory tree, and git status — `/init` writes or improves a DOKI.md), tracks context with a `~Nk / 32k ctx · Ns · N tok/s` meter (`/compact`, auto-compact past ~40k, `/context`), and persists sessions to `%USERPROFILE%\.doki\sessions` (`--continue`, `/resume`, `/export`). `[a]lways` on an approval prompt now saves a persisted allow/deny rule (`/permissions`) instead of a one-off session bypass; `/plan` mode explores read-only before `/act` applies anything.
 
 ```powershell
 .\doki.ps1 up agent         # 1. load the coder model (:8080)
 cd path\to\your\project     # 2. go to the workspace
-.\doki.ps1 code             # 3. interactive REPL (Ctrl+C interrupts; /exit quits)
+.\doki.ps1 code             # 3. interactive REPL (Esc or Ctrl+C interrupts; /exit quits)
 .\doki.ps1 code "<task>"    # or: one-shot — run a task and exit
 ```
 
-The agent can **Read** files (line-windowed, pageable), **Grep** with a regex (+ optional path scope and file glob), **Edit** existing files (SEARCH/REPLACE blocks), **Write** new files, and run **Bash** commands (PowerShell). Read and Grep run freely; every Edit, Write, and Bash call shows a colored diff or the command text and waits for `[y]es / [a]lways / [n]o` (default: **no**). Edits land as plain working-tree changes — review with `git diff`, revert the last one with `/undo`.
+The agent can **Read** files (line-windowed, pageable), **Grep** with a regex (+ optional path scope and file glob), **Edit** existing files (SEARCH/REPLACE blocks), **Write** new files, and run **Bash** commands (PowerShell) — plus opt-in **WebSearch**/**MemoryRecall** (`/tools web on`, off by default). Read and Grep run freely; every Edit, Write, and Bash call shows a colored diff or the command text and waits for `[y]es / [a]lways / [n]o` (default: **no**). Edits land as plain working-tree changes — review with `/diff` (or `git diff`), revert the last one with `/undo`. `@rel/path` inlines a file into your message; `!command` runs a shell command directly, no approval needed. Drop a template at `.doki/commands/<name>.md` to define your own `/name` command.
 
-Slash commands inside the REPL: `/help` · `/model <name>` (coder-fast | coder-big | fast-candidate-gptoss20b) · `/undo` · `/clear` · `/cwd` · `/exit`.
+Slash commands inside the REPL: `/help` `/model <name>` `/diff` `/undo` `/init` `/clear` `/cwd` `/compact [instructions]` `/context` `/resume [index]` (alias `/sessions`) `/export [file]` `/permissions` (alias `/allow`) `/status` `/usage` (aliases `/cost`, `/stats`) `/plan` / `/act` `/tools [web on|off]` `/exit` — plus any custom commands you've defined.
+
+**Scripting:** `doki code -p "<task>"` runs one turn and exits (exit code `1` on failure); pipe input with `git diff | doki code -p "review this"`; add `--output-format json` for one machine-parseable result object on stdout.
 
 ## Layout
 
@@ -80,7 +82,7 @@ Slash commands inside the REPL: `/help` · `/model <name>` (coder-fast | coder-b
 - **Speech (TTS):** Chatterbox on `:8004` — uncensored (watermark stripped), OpenAI `/v1/audio/speech` + zero-shot voice cloning; coexists with the coder LLM
 - **Speech-to-text (STT):** Parakeet (onnx-asr) on `:8005` — OpenAI `/v1/audio/transcriptions`, CPU EP, coexists with the coder
 - **Control panel:** a native WPF cockpit (`doki panel`) that polls status in-process (native C#, ~2 s) and shells `doki.ps1` only for lifecycle actions (start/stop/verify/gen) — grouped live service cards, GPU trust-meter, mode switcher with 32 GB-headroom + eviction confirm, live logs, per-modality ⚡test, and a **DokiGen Studio** page (describe → pick a kind → **Generate** → inline preview → remix) — a no-CLI surface over `doki gen`
-- **DokiGen Studio (web app):** the user-facing studio on `127.0.0.1:5111` (also hosted in-process by the panel) — a guided **Home** command center + 11 areas: **Create / Director / Flow / Scene** (image/video/music/edit with a live sketch canvas, ControlNet stacking, LoRA mixing, multi-character scenes, node-graph flow, shot-list director), an in-app **Chat** assistant (curated tools + vision + document RAG + long-term **Memory**, and **generate / edit images in-thread** via a GPU-flip round-trip), **Cast / Voice** (personas + multi-speaker TTS dialogue), and **Library / Models / Status / Memory** managers. Full map: [docs/CAPABILITIES.md](docs/CAPABILITIES.md)
+- **DokiGen Studio (web app):** the user-facing studio on `127.0.0.1:5111` (also hosted in-process by the panel) — a guided **Home** command center + 11 areas: **Create / Director / Flow / Scene** (image/video/music/edit with a live sketch canvas, ControlNet stacking, LoRA mixing, multi-character scenes, node-graph flow, shot-list director), an in-app **Chat** assistant (curated tools + vision + document RAG + long-term **Memory**, and **generate / edit images in-thread** via a GPU-flip round-trip), **Cast / Voice** (personas + multi-speaker TTS dialogue), and **Library / Models / Status / Memory** managers — plus a **Help** view that renders this whole docs corpus in-app and a **Ctrl+K command palette** to jump to any view or action from anywhere. Full map: [docs/CAPABILITIES.md](docs/CAPABILITIES.md)
 
 ## Status
 

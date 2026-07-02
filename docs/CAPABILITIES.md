@@ -24,6 +24,9 @@ A single-page app with a guided **Home** command center and 11 capability areas,
 | **Models** | Manage | Install / switch / delete local image / video / LLM models |
 | **Status** | Manage | Live service health, the GPU meter (VRAM/util/temp/watts/fan), and the Agent/Coexist/Media mode switch |
 | **Memory** | Manage | Review / add / edit / delete the long-term facts the assistant recalls in every chat |
+| **Help** | — | In-app doc reader — README, quickstart, tutorial, capabilities, and the wiki, browsable without leaving the app |
+
+Home also surfaces a **Code** capability group (a `doki code` card — copy-the-command starter + a link into Help) and "dark-feature" cards for already-shipped-but-easy-to-miss capabilities (LoRA Training, Compare bases, Batch CSV, Image Set, Pitch-deck export, Inpaint/SAM click-to-mask). **Ctrl+K** (⌘K) opens a command palette to jump to any view or run any action from anywhere.
 
 ---
 
@@ -74,7 +77,8 @@ Served via **llama.cpp (b9616, CUDA 13.3) + llama-swap** on `:8080`, **OpenAI- a
 - **coder-big** (heavy) — gpt-oss-120b MoE, GPU+CPU hybrid offload.
 - **vision** — Qwen3-VL-8B-Instruct + mmproj (~7 GB; gated).
 - **coder-fast-lite** — 64k ctx, coexists with the FIM autocomplete server.
-- Bake-off candidates (gated, eval-gated before promotion): Qwen3-Coder-Next-80B, GLM-4.7-Flash, others.
+- **reasoning** — gpt-oss-20b (MXFP4), chain-of-thought via `reasoning_content`; the Studio's "reasoning" speed tier.
+- Bake-off candidates (installable from the Models view's **Text models** section, eval-gated before promotion): Devstral-Small-2-24B-Instruct-2512, Qwen3.6-35B-A3B — both badged `candidate` with an eval-score chip once golden-suite data exists, `ungated` otherwise.
 
 ---
 
@@ -89,9 +93,9 @@ Served via **llama.cpp (b9616, CUDA 13.3) + llama-swap** on `:8080`, **OpenAI- a
 ## 7. Control & operations
 
 - **WPF control panel** (`doki panel` / `DokiDex.lnk`): native .NET 9 cockpit — service cards, GPU trust-meter, mode switcher (with 32 GB-headroom eviction confirm), live per-service log tails, per-modality ⚡ smoke tests, coder model-swap chips, update badges + **in-app auto-updater** (self-contained single-file exe).
-- **Web app** (DokiGen Studio, `:5111`): the Studio in §1 — also hosted in-process by the panel.
+- **Web app** (DokiGen Studio, `:5111`): the Studio in §1 — also hosted in-process by the panel. The Models view adds a **Text models** section (install/delete coder+LLM GGUFs with SHA-256 verification, candidates badged for the bake-off) and a **Tiers** table (tier → model, configured/on-disk/loaded, warm button); both carry eval-gate badges (`N/M` — latest-per-task golden-suite score). Service/status cards show each sidecar's loaded model name.
 - **Installer:** self-contained single-file `.exe` (GitHub releases) with a setup wizard; `control.bat` (builds the panel + shortcut); `setup.ps1` (headless bootstrap with `-Media`/`-Tts`/`-Stt`/feature flags).
-- **CLI** (`doki.ps1`): `up [agent|coexist|media]`, `down`, `status`, `gen "<idea>"`, `code ["<task>"]` (local coding agent — REPL or one-shot, cwd = workspace, needs `up agent`), `panel`, `verify`, `doctor`, `test`.
+- **CLI** (`doki.ps1`): `up [agent|coexist|media]`, `down`, `status`, `gen "<idea>"`, `code ["<task>"]` (local coding agent — REPL or one-shot, cwd = workspace, needs `up agent`; `--continue`/`-p`/`--output-format json`), `panel`, `verify`, `doctor`, `test`, `help` (lists every command).
 
 ---
 

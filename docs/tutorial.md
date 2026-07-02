@@ -97,6 +97,8 @@ The left nav has a **Home** command center plus eleven areas, covered below:
 **Talk:** [Chat](#7-chat--the-assistant)
 **Manage:** [Library](#10-library--manage-your-outputs) · [Models](#11-models--manage-checkpoints) · [Status](#12-status--health--modes) · [Memory](#13-memory--long-term-facts)
 
+**Home** itself is a guided hub, not just a launcher: state-aware capability cards (with a live "▲ Ready"/"needs setup" badge and clickable starters) for every area above, a **Code** group with a `doki code` card, and "dark-feature" cards for things that were already shipped but easy to miss — **LoRA Training**, **Compare bases**, **Batch (CSV)**, **Image Set**, **Pitch-deck export**, and **Inpaint / SAM click-to-mask** (each links straight to where it lives). A **Help** view (nav, far right) renders this whole docs corpus in-app — README, quickstart, tutorial, capabilities, and the wiki — and **Ctrl+K** (or **⌘K**) opens a command palette to jump to any view or run any action from anywhere; press **?** for the full keyboard-shortcut overlay.
+
 ---
 
 ## 6. Create — generate anything
@@ -247,6 +249,9 @@ Everything you generate lands here.
 - **Browse** installed bases, LoRAs, and ControlNets grouped by capability, with size, tier, and install status.
 - **Install / remove** from the catalog (download progress polls live).
 - Installed **image models** populate Create's **Model** dropdown and feed the **✨ auto** router; installed **LoRAs**/**ControlNets** populate the mixer and unit pickers.
+- **Text models:** a parallel section for the LLM/coder side — install or delete GGUFs (`coder-fast`, `coder-big`, `reasoning`, `vision`, `fim`, `embed`, plus bake-off **candidates**) with SHA-256 verification on every download.
+- **Tiers:** a table of every speed/quality tier (fast · quality · reasoning · vision) showing whether it's configured in llama-swap, present on disk, and currently loaded, with a **warm** button to preload it.
+- Both tables show an **eval** badge (e.g. `14/15`) — the latest-per-task golden-suite score for that model — when eval data exists; ungated candidates show **ungated** instead.
 
 ---
 
@@ -287,6 +292,7 @@ Everything the panel does, plus a text→media one-liner. Run from the DokiDex f
 | `doki index` | Rebuild the codebase RAG index for `code_search` |
 | `doki test` | Fast no-GPU unit suite |
 | `doki panel` | Launch the control panel |
+| `doki help` | List every command on one screen (bare `doki` still defaults to `status`) |
 
 ### `doki gen` — text→media
 
@@ -327,16 +333,19 @@ The CLI is the **power surface** — it exposes kinds the studio doesn't yet, no
 
 ### `doki code` — local coding agent
 
-A terminal coding agent that mirrors the Claude Code CLI, running the local coder model via llama-swap. The workspace is your **current directory** — `cd` into any project and run it.
+A terminal coding agent that mirrors the Claude Code CLI, running the local coder model via llama-swap. The workspace is your **current directory** — `cd` into any project and run it. Content streams live by default as the model writes (`--no-stream` forces the old blocking-per-turn path); **Esc** or **Ctrl+C** interrupts mid-turn without exiting the REPL.
 
 ```powershell
-.\doki.ps1 up agent         # 1. load the coder model (:8080)
-cd path\to\your\project     # 2. go to the workspace
-.\doki.ps1 code             # interactive REPL (type a task at the › prompt)
-.\doki.ps1 code "<task>"    # one-shot: run the task and exit
+.\doki.ps1 up agent           # 1. load the coder model (:8080)
+cd path\to\your\project       # 2. go to the workspace
+.\doki.ps1 code                # interactive REPL (type a task at the › prompt)
+.\doki.ps1 code --continue     # ...resume the workspace's most recent saved session
+.\doki.ps1 code "<task>"       # one-shot: run the task and exit
 ```
 
 The agent builds itself on first run (`DokiDex.Cli`). A warning appears if the coder model isn't serving yet.
+
+**Repo orientation:** on startup it auto-loads the first-found `DOKI.md` → `AGENTS.md` → `CLAUDE.md` at the workspace root, plus a depth-2 directory tree and a `git status` snapshot, into a fixed system message — so it isn't Grep-blind for the first several turns like a bare model would be. `/init` explores the repo and writes (or improves) a `DOKI.md` at the workspace root through the normal approval gate.
 
 **Tools the agent can use:**
 
@@ -347,6 +356,7 @@ The agent builds itself on first run (`DokiDex.Cli`). A warning appears if the c
 | **Edit** | Replace an exact block of lines in an existing file (SEARCH/REPLACE blocks) | Yes — shows colored diff |
 | **Write** | Create a new file (or fully overwrite an existing one) | Yes — shows colored diff |
 | **Bash** | Run a PowerShell command in the workspace | Yes — shows the command |
+| **WebSearch** / **MemoryRecall** *(opt-in, off by default)* | Keyless DuckDuckGo lookup / recall your saved long-term memory notes | No — read-only |
 
 **Per-action approval:** every Edit, Write, and Bash call shows a preview and waits:
 
@@ -354,24 +364,51 @@ The agent builds itself on first run (`DokiDex.Cli`). A warning appears if the c
 Allow Edit? [y]es / [a]lways / [n]o:
 ```
 
-Default (Enter or any other key) is **no** — always the safe choice. `[a]lways` skips the prompt for that tool for the rest of the session.
+Default (Enter or any other key) is **no** — always the safe choice. `[a]lways` now saves a **persisted permission rule** (below) instead of just a one-off session bypass; on a Bash call it asks a follow-up — **[c]ommand exact** / **[p]refix** ("first two words *") / **[t]ool-wide** — so you can allow just `git status`, any `dotnet test …`, or all of Bash going forward.
 
 **Edit protocol:** the model emits `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` blocks. A two-stage fuzzy applier tries (1) exact whole-line match, then (2) whitespace-flexible match. On a miss it shows the actual nearby lines from the file so the model can self-correct and retry.
+
+**Context & compaction:** a dim `~Nk / 32k ctx · Ns · N tok/s` meter prints after every turn (32k is the healthy working-set budget; the model's real hard window is 131k). `/compact [instructions]` summarizes older history down to free up context (optionally focused, e.g. `/compact the auth refactor`); the session also **auto-compacts** past ~40k estimated tokens before your next turn runs. `/context` shows the full system/history/total breakdown.
+
+**Sessions:** every turn is saved automatically to `%USERPROFILE%\.doki\sessions\<workspace-hash>\<timestamp>.json` — outside the repo, so there's nothing to gitignore. `doki code --continue` resumes the workspace's most recent session; inside the REPL, `/resume` (alias `/sessions`) lists saved sessions newest-first and `/resume <index>` loads one; `/export [file]` writes the current transcript as markdown.
+
+**Permissions:** `[a]lways` and `/permissions allow|deny <rule>` persist rules to `%USERPROFILE%\.doki\permissions` — a rule is a bare `Tool` (e.g. `Read`, `Edit`) or `Tool(specifier)`, where the specifier is either an exact match or a `prefix *` (e.g. `Bash(dotnet test *)`). A **deny** rule always wins and short-circuits before you'd even be asked. `/permissions` (alias `/allow`) lists the current rules with numbers; `/permissions remove <n>` removes one.
+
+**Plan mode:** `/plan` switches to read-only exploration — only Read/Grep are offered to the model, and any proposed edit is shown but **not applied**; the prompt becomes `plan› ` while it's on. `/act` (or `/plan off`) restores normal editing.
+
+**Custom commands:** drop a template at `.doki/commands/<name>.md` (workspace-local, shared with your team if committed) or `%USERPROFILE%\.doki\commands\<name>.md` (personal, global) and it becomes `/<name> [args]` — its text runs as your next turn, with every `$ARGUMENTS` replaced by whatever you typed after the command name. A workspace command shadows a global one of the same name; built-in commands always win.
+
+**Input shortcuts:** `@rel/path` anywhere in a message inlines a bounded window of that file for the model (up to 3 mentions per message) — e.g. "fix the bug in `@src/app.cs`". A line starting with `!` runs a shell command **directly**, with no model round-trip and no approval prompt (you typed it yourself).
+
+**Opt-in tools:** `WebSearch`/`MemoryRecall` are off by default to keep the tool set small (open models lose tool-selection accuracy as it grows). `/tools` shows the current state; `/tools web on` / `/tools web off` toggles it for the session.
 
 **Slash commands in the REPL:**
 
 | Command | Does |
 |---|---|
-| `/help` | Show available commands |
+| `/help` | Show available commands (built-in and custom) |
 | `/model [<name>]` | Switch or show the active model (`coder-fast` \| `coder-big` \| `fast-candidate-gptoss20b`) |
+| `/diff` | Show this session's working-tree changes |
 | `/undo` | Revert the last file change this session |
+| `/init` | Explore the repo and write/improve a `DOKI.md` |
 | `/clear` | Clear the conversation context (the workspace stays the same) |
 | `/cwd` | Show the workspace root |
+| `/compact [instructions]` | Summarize older history to free up context |
+| `/context` | Token-budget breakdown (system / history / total) |
+| `/resume [index]` (alias `/sessions`) | List saved sessions, or load one by index |
+| `/export [file]` | Write the transcript as markdown |
+| `/permissions` (alias `/allow`) | List/add/remove persisted allow/deny rules |
+| `/status` | llama-swap reachability, loaded model, configured tiers |
+| `/usage` (aliases `/cost`, `/stats`) | This session's turns, tokens, wall time, avg tok/s |
+| `/plan` / `/act` | Enter/exit read-only plan mode |
+| `/tools [web on\|off]` | Show or toggle the opt-in WebSearch/MemoryRecall tools |
 | `/exit` | Exit the REPL |
 
-Ctrl+C interrupts the current turn without exiting.
+Plus any custom `.doki/commands/*.md` commands you've defined.
 
-**Working with edits:** changes land as plain working-tree modifications. Review them with `git diff` at any time. `/undo` restores the most recent change from this session (or deletes a file that Write created); your own git history is the durable backstop.
+**Working with edits:** changes land as plain working-tree modifications. Review them with `/diff` or `git diff` at any time. `/undo` restores the most recent change from this session (or deletes a file that Write created); your own git history is the durable backstop.
+
+**Scripting (one-shot):** `doki code -p "<task>"` runs a single turn and exits — code `1` on failure, `0` on success — for use in scripts. Pipe input in: `git diff | doki code -p "review this"`. Add `--output-format json` to print one machine-parseable `{result, ok, duration_ms}` object on stdout instead of the normal colored console output.
 
 **Default model:** `coder-fast` (Qwen3-Coder-30B-A3B). Switch with `/model coder-big` for the 120B heavy-hitter, or `/model fast-candidate-gptoss20b` to try the Devstral eval candidate (see [docs/mistral-2026-06.md](mistral-2026-06.md)).
 
