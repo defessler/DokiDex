@@ -311,7 +311,7 @@
       <div class="row">
         <button class="primary" id="genBtn" onclick="generate()">Generate</button>
         <button class="ghost" id="exploreBtn" onclick="explore()" title="fan this prompt into 8 fast variations">Explore ×8</button>
-        <button class="ghost" id="cmpBtn" onclick="compareModels()" style="display:none" title="generate this prompt on every installed image base, side by side">Compare bases</button>
+        <button class="ghost" id="cmpBtn" onclick="compareModels()" disabled title="install a 2nd base image model (Models view) to compare">Compare bases</button>
         <button class="ghost" onclick="animate2D()" title="set up image→video tuned for anime/illustration: subtle motion, line/style preserved">✨ Animate 2D</button>
         <span class="hint" id="genHint"></span>
       </div>
@@ -506,6 +506,7 @@
     </section>
     <section id="view-status" style="display:none">
       <div class="modes" id="modes"></div>
+      <p class="hint" style="margin:-4px 0 12px">coding CLI: <code>doki code</code> — needs agent mode</p>
       <div id="statusBody"></div>
     </section>
     <section id="view-library" style="display:none">
@@ -648,7 +649,7 @@
           <input id="quickStart" placeholder="Describe something to make, or ask a question…" onkeydown="if(event.key==='Enter')doQuickStart()" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:11px 14px;font-size:14px;font-family:inherit">
           <button class="primary" onclick="doQuickStart()">Go</button>
         </div>`;
-      for (const [key,label] of [['make','Make'],['talk','Talk'],['manage','Manage']]){
+      for (const [key,label] of [['make','Make'],['talk','Talk'],['code','Code'],['manage','Manage']]){
         const cards = (_homeData.cards||[]).filter(c => c.capability.group===key);
         if(!cards.length) continue;
         html += `<h2>${label}</h2><div class="grid">` + cards.map(homeCardHtml).join('') + `</div>`;
@@ -672,7 +673,7 @@
         ? `<span class="hint" style="font-size:11px">· checking…</span>`
         : `<span onclick="homeReadyClick('${r.action||''}')" title="${homeEsc(r.nextStep||'')}" style="font-size:11px;color:var(--gold);cursor:pointer">▲ ${homeEsc(r.nextStep||'Needs setup')}</span>`;
       const starters = (cap.starters||[]).map((s,i) =>
-        `<button class="ghost" style="font-size:11px;padding:5px 9px;margin:3px 3px 0 0" onclick="runStarter('${cap.id}',${i})">${homeEsc(s.label)}</button>`
+        `<button class="ghost" style="font-size:11px;padding:5px 9px;margin:3px 3px 0 0" onclick="runStarter('${cap.id}',${i},this)">${homeEsc(s.label)}</button>`
       ).join('');
       const guide = (cap.guide||[]).length
         ? `<details style="margin-top:10px"><summary class="hint" style="cursor:pointer;font-size:11px">How it works</summary>
@@ -688,7 +689,9 @@
     }
     function homeReadyClick(action){ if((action||'').startsWith('model:')) setView('models'); else setView('status'); }
     // Shared: jump to a view and pre-fill it (Create -> prompt+kind; Chat -> chat input; else just switch).
-    function applyStarter(view, prompt, kind){
+    // view==='copy' is a pseudo-view (not a real Studio section) for starters like doki code's that hand you a
+    // command rather than an in-app screen — it copies `prompt` to the clipboard and flashes the button instead.
+    function applyStarter(view, prompt, kind, btn){
       if(view==='create'){
         document.getElementById('prompt').value = prompt || '';
         if(kind){ state.kind = kind; renderControls(); }
@@ -696,11 +699,18 @@
       } else if(view==='chat'){
         setView('chat');
         const ci = document.getElementById('chatInput'); if(ci){ if(prompt) ci.value = prompt; ci.focus(); }
+      } else if(view==='copy'){
+        copyStarterText(prompt, btn);
       } else { setView(view); }
     }
-    function runStarter(capId, i){
+    function copyStarterText(text, btn){
+      const flash = (ok) => { if(!btn) return; const orig = btn.textContent; btn.textContent = ok ? 'copied!' : 'copy failed'; setTimeout(() => { btn.textContent = orig; }, 1500); };
+      if(navigator.clipboard?.writeText) navigator.clipboard.writeText(text||'').then(() => flash(true)).catch(() => flash(false));
+      else flash(false);
+    }
+    function runStarter(capId, i, btn){
       const cap = (_homeData?.cards||[]).find(c => c.capability.id===capId)?.capability; if(!cap) return;
-      const s = cap.starters[i]; if(s) applyStarter(s.view, s.prompt, s.kind);
+      const s = cap.starters[i]; if(s) applyStarter(s.view, s.prompt, s.kind, btn);
     }
     // Quick-start box: route the typed text server-side (question -> Chat, else -> Create), then pre-fill + jump.
     async function doQuickStart(){
@@ -1177,7 +1187,7 @@
     let _effects=[];
     async function loadEffects(){ try{ _effects=await (await fetch('/api/effects')).json(); }catch{} }
     let _imageModelCount=0;
-    async function loadImageModels(){ try{ const ms=await (await fetch('/api/image-models')).json(); _imageModelCount=(ms||[]).length; const sel=document.getElementById('genModel'); (ms||[]).forEach(m=>{ const o=document.createElement('option'); o.value=m.file; o.textContent=m.name; sel.appendChild(o); }); const cb=document.getElementById('cmpBtn'); if(cb) cb.style.display=_imageModelCount>1?'':'none'; }catch{} }
+    async function loadImageModels(){ try{ const ms=await (await fetch('/api/image-models')).json(); _imageModelCount=(ms||[]).length; const sel=document.getElementById('genModel'); (ms||[]).forEach(m=>{ const o=document.createElement('option'); o.value=m.file; o.textContent=m.name; sel.appendChild(o); }); const cb=document.getElementById('cmpBtn'); if(cb){ const ready=_imageModelCount>1; cb.disabled=!ready; cb.title=ready?'generate this prompt on every installed image base, side by side':'install a 2nd base image model (Models view) to compare'; } }catch{} }
     // Animate-2D preset: configure image→video tuned for illustration/anime (prompt-only Wan i2v, no new model)
     // — subtle motion + line/style preservation. The user loads a drawing as the init image, then Generates.
     function animate2D(){

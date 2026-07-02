@@ -92,6 +92,16 @@ public sealed class ModelManager
         .Select(e => new RoutableModel(e.Id, Path.GetFileName(e.File), e.Name, e.Default))
         .ToList();
 
+    // Every catalog id + capability tag for entries actually installed on disk -- the media half of HomeCatalog's
+    // ModelsPresent union (2.8). Carries both the specific id ("sdxl-base") and the broader capability ("image")
+    // so a future card can gate on either "this exact model" or "any model of this capability".
+    public IReadOnlyList<string> PresentTags() => Entries()
+        .Where(e => File.Exists(PathFor(e)))
+        .SelectMany(e => new[] { e.Id, e.Capability })
+        .Where(s => !string.IsNullOrWhiteSpace(s))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
     public string Install(string id)
     {
         var e = Entries().FirstOrDefault(x => x.Id == id);

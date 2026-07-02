@@ -66,13 +66,17 @@ public class HomeCatalogTests
         var ids = HomeCatalog.Capabilities.Select(c => c.Id).ToHashSet();
         foreach (var expect in new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status" })
             Assert.Contains(expect, ids);
-        Assert.All(HomeCatalog.Capabilities, c => Assert.Contains(c.Group, new[] { "make", "talk", "manage" }));
+        // "code" (3.1) is a new fourth group alongside the original three; the dark-feature cards (3.4) stay
+        // within make/manage.
+        Assert.All(HomeCatalog.Capabilities, c => Assert.Contains(c.Group, new[] { "make", "talk", "manage", "code" }));
     }
 
     [Fact]
     public void Catalog_starters_target_real_views_and_have_labels()
     {
-        var views = new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status", "memory" }.ToHashSet();
+        // "copy" is a pseudo-view (not a Studio section): the SPA's applyStarter special-cases it to copy the
+        // starter's Prompt to the clipboard instead of switching views (used by the doki code starter, 3.1).
+        var views = new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status", "memory", "copy" }.ToHashSet();
         foreach (var c in HomeCatalog.Capabilities)
         {
             Assert.False(string.IsNullOrWhiteSpace(c.Name));
@@ -80,9 +84,26 @@ public class HomeCatalogTests
             foreach (var s in c.Starters)
             {
                 Assert.False(string.IsNullOrWhiteSpace(s.Label));
-                Assert.Contains(s.View, views);   // every starter jumps to a real Studio view
+                Assert.Contains(s.View, views);   // every starter jumps to a real Studio view (or the "copy" pseudo-view)
             }
         }
+    }
+
+    [Fact]
+    public void Code_card_needs_agent_mode_and_llama_swap_not_a_model()
+    {
+        // F3 correction: readiness is agent-mode-up + llama-swap-healthy, NEVER a specific model presence check.
+        var code = HomeCatalog.Capabilities.First(c => c.Id == "code");
+        Assert.Equal("agent", code.Requires.Mode);
+        Assert.Equal("llama-swap", code.Requires.Service);
+        Assert.Null(code.Requires.Model);
+
+        var notReady = HomeCatalog.Annotate(Snap("media")).First(c => c.Capability.Id == "code");
+        Assert.Equal("needs-mode", notReady.Readiness.Status);
+        var noSwap = HomeCatalog.Annotate(Snap("agent")).First(c => c.Capability.Id == "code");
+        Assert.Equal("needs-setup", noSwap.Readiness.Status);
+        var ready = HomeCatalog.Annotate(Snap("agent", up: new[] { "llama-swap" })).First(c => c.Capability.Id == "code");
+        Assert.Equal("ready", ready.Readiness.Status);
     }
 
     [Fact]
@@ -118,6 +139,36 @@ public class HomeCatalogTests
         var none = HomeCatalog.SnapshotFrom(null);
         Assert.Equal("none", none.Mode);                   // null doc -> idle
         Assert.Empty(none.ServicesUp);
+        Assert.Empty(none.ModelsPresent);                  // no manager tags passed -> empty, not a crash
+    }
+
+    // ---- 2.8: ModelsPresent is the union of media (ModelManager.PresentTags) + LLM (LlmModelManager.PresentTags)
+    //      tags, passed in as plain string collections so SnapshotFrom itself stays pure/no-I/O. ----
+
+    [Fact]
+    public void SnapshotFrom_unions_media_and_llm_model_tags()
+    {
+        var snap = HomeCatalog.SnapshotFrom(null, mediaModelsPresent: new[] { "sdxl-base", "image" }, llmModelsPresent: new[] { "coder-fast", "vision" });
+        Assert.Equal(new[] { "sdxl-base", "image", "coder-fast", "vision" }.ToHashSet(), snap.ModelsPresent);
+    }
+
+    [Fact]
+    public void SnapshotFrom_model_tags_are_case_insensitive_and_ignore_blanks()
+    {
+        var snap = HomeCatalog.SnapshotFrom(null, mediaModelsPresent: new[] { "Image", "" }, llmModelsPresent: new string?[] { "  ", null }!);
+        Assert.Contains("image", snap.ModelsPresent);      // case-insensitive set
+        Assert.Single(snap.ModelsPresent);                 // blanks/nulls never make it in
+    }
+
+    [Fact]
+    public void A_model_gated_capability_becomes_ready_once_SnapshotFrom_sees_that_tag()
+    {
+        // end-to-end: Resolve against a snapshot built the same way GET /api/home builds it.
+        var requires = new CapabilityRequires(null, null, "vision");
+        var withoutIt = HomeCatalog.Resolve(requires, HomeCatalog.SnapshotFrom(null, llmModelsPresent: new[] { "coder-fast" }));
+        Assert.Equal("needs-setup", withoutIt.Status);
+        var withIt = HomeCatalog.Resolve(requires, HomeCatalog.SnapshotFrom(null, llmModelsPresent: new[] { "vision" }));
+        Assert.Equal("ready", withIt.Status);
     }
 
     [Fact]

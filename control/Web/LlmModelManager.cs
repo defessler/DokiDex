@@ -183,6 +183,21 @@ public sealed class LlmModelManager
         return new ModelsResult(models, message);
     }
 
+    // Every catalog id + role tag for entries fully present on disk ("present" status, no partial multi-part
+    // downloads) -- the LLM half of HomeCatalog's ModelsPresent union (2.8). Mirrors ModelManager.PresentTags:
+    // carries both the specific id ("coder-fast") and the role ("coder-fast" role too, or "vision"/"fim"/...) so a
+    // future card can gate on either a specific model or "any model of this role".
+    public IReadOnlyList<string> PresentTags()
+    {
+        var (entries, _) = LoadCatalog();
+        return entries
+            .Where(e => StatusFromPresence(e.Files.Select(f => File.Exists(PathFor(f))).ToList()) == "present")
+            .SelectMany(e => new[] { e.Id, e.Role })
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     // Fire-and-forget install, mirroring ModelManager.Install's contract exactly (so the future UI leaf can
     // reuse the same poll-the-list pattern): returns a status synchronously and kicks off the real work in the
     // background; progress/errors surface through List()'s per-entry downloading/progress/error fields.

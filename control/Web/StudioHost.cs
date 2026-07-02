@@ -90,10 +90,11 @@ public static class StudioHost
         // ---- the guided Home command center: the capability catalog, each entry annotated with live readiness
         // (ready / needs-mode / needs-setup + a next-step) from the SAME status the dashboard uses, plus the GPU
         // snapshot for the meter. The SPA Home view renders this; all the logic is in the pure HomeCatalog. ----
-        api.MapGet("/home", async (DokiService doki, CancellationToken ct) =>
+        api.MapGet("/home", async (DokiService doki, ModelManager mm, LlmModelManager lm, CancellationToken ct) =>
         {
             var doc = await doki.GetStatusAsync(ct);
-            return Results.Json(new { gpu = doc?.Gpu, cards = HomeCatalog.Annotate(HomeCatalog.SnapshotFrom(doc)) });
+            var snap = HomeCatalog.SnapshotFrom(doc, mm.PresentTags(), lm.PresentTags());
+            return Results.Json(new { gpu = doc?.Gpu, cards = HomeCatalog.Annotate(snap) });
         });
         // Instant catalog (no status wait) — the SPA renders these cards + starters immediately, then fills in
         // readiness from /home (which blocks on the live status probe). Keeps the default Home view from waiting.

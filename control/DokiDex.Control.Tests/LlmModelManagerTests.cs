@@ -252,6 +252,20 @@ public class LlmModelManagerTests
     }
 
     [Fact]
+    public void PresentTags_includes_id_and_role_only_for_fully_present_entries()
+    {
+        using var fx = new Fixture(TwoEntryCatalogJson);
+        Directory.CreateDirectory(Path.Combine(fx.ModelsRoot, "models"));
+        File.WriteAllBytes(Path.Combine(fx.ModelsRoot, "models", "coder-fast.gguf"), new byte[100]);   // "present"
+        File.WriteAllBytes(Path.Combine(fx.ModelsRoot, "models", "coder-big-1.gguf"), new byte[10]);   // coder-big stays "partial"
+
+        var tags = fx.Manager.PresentTags();
+        Assert.Contains("coder-fast", tags);   // id
+        // coder-fast's role also happens to be "coder-fast" in the fixture, so this doubles as the role check.
+        Assert.DoesNotContain("coder-big", tags);   // partial entries never contribute a tag
+    }
+
+    [Fact]
     public void Delete_never_touches_files_outside_the_entrys_own_files_list()
     {
         using var fx = new Fixture(TwoEntryCatalogJson);
