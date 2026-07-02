@@ -332,14 +332,14 @@
         <button class="ghost" onclick="animate2D()" title="set up image→video tuned for anime/illustration: subtle motion, line/style preserved">✨ Animate 2D</button>
         <span class="hint" id="genHint"></span>
       </div>
-      <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Batch (CSV) — one generation per row</summary>
+      <details id="batchDetails" style="margin:10px 0"><summary class="hint" style="cursor:pointer">Batch (CSV) — one generation per row</summary>
         <p class="hint" style="margin:6px 0">Header row + one gen per row. Columns: <code>prompt</code> (required), kind, seed, count, aspect, lora, strength, fast, refine, face, realism, upscale, raw.</p>
         <textarea id="csvText" placeholder="prompt,kind,seed&#10;a fox in the rain,image,7&#10;a neon city skyline,image,8" style="min-height:80px;font-family:monospace;font-size:12px"></textarea>
         <div class="row" style="margin-top:6px"><button class="ghost" onclick="runBatch()">Queue batch</button><span class="hint" id="csvHint"></span></div>
         <div class="row" style="margin-top:8px"><input id="recipeName" class="kin" style="width:160px" placeholder="recipe name"><button class="xbtn" onclick="saveRecipe()">save as recipe</button><span class="hint" id="recipeHint"></span></div>
         <div id="recipeList" class="hint" style="margin-top:6px"></div>
       </details>
-      <details style="margin:10px 0"><summary class="hint" style="cursor:pointer">Image Set — a series sharing one locked style</summary>
+      <details id="seriesDetails" style="margin:10px 0"><summary class="hint" style="cursor:pointer">Image Set — a series sharing one locked style</summary>
         <p class="hint" style="margin:6px 0">One locked style + aspect across the set; <b>one prompt per line</b> (each its own cell + seed). The style is merged into every cell, so a card's <b>rerun</b> rerolls just that cell.</p>
         <input id="seriesStyle" class="kin" style="width:100%;margin-bottom:6px" placeholder="locked style — e.g. flat icon, cel shading, soft rim light">
         <textarea id="seriesCells" placeholder="happy face&#10;angry face&#10;surprised face&#10;sleeping face" style="min-height:80px"></textarea>
@@ -2844,6 +2844,7 @@
           <tr><td><b>1–6</b></td><td>switch kind (image…foley)</td></tr>
           <tr><td><b>/</b></td><td>focus prompt / search</td></tr>
           <tr><td><b>Ctrl/⌘+Enter</b></td><td>generate from the prompt</td></tr>
+          <tr><td><b>Ctrl/⌘+K</b></td><td>command palette — search &amp; run any action, from anywhere</td></tr>
           <tr><td colspan="2" style="color:var(--dim);padding-top:8px">Library</td></tr>
           <tr><td><b>F / X / U</b></td><td>favorite / trash / clear</td></tr>
           <tr><td><b>← →</b></td><td>move focus</td></tr>
@@ -2851,9 +2852,103 @@
           </table></div></div>`);
       document.body.appendChild(o);
     }
+    // ---- Command palette (Ctrl+K / Cmd+K, Phase 3.5) — search + run any Studio action from anywhere. A STATIC
+    //      registry (not sourced from live /api/home data) so it's predictable and works no matter which view is
+    //      open or whether /api/home has loaded. Every `run` is a one-liner reusing existing plumbing (setView /
+    //      applyStarter / copyStarterText / newChat) — no new capability logic lives here. ----
+    const PALETTE_ACTIONS = [
+      // -- views --
+      { name:'Go to Home', synonyms:['start','dashboard','overview'], run:()=>setView('home') },
+      { name:'Go to Create', synonyms:['generate','render','image','video','music','make'], run:()=>setView('create') },
+      { name:'Go to Director', synonyms:['storyboard','script','shotlist','shots'], run:()=>setView('director') },
+      { name:'Go to Chat', synonyms:['talk','assistant','llm','conversation'], run:()=>setView('chat') },
+      { name:'Go to Cast', synonyms:['persona','personas','character','characters'], run:()=>setView('cast') },
+      { name:'Go to Voice', synonyms:['tts','speech','chatterbox','speak'], run:()=>setView('voice') },
+      { name:'Go to Flow', synonyms:['node','graph','pipeline','workflow'], run:()=>setView('flow') },
+      { name:'Go to Scene', synonyms:['compose','regions','multi-character'], run:()=>setView('scene') },
+      { name:'Go to Library', synonyms:['gallery','browse','history','saved'], run:()=>setView('library') },
+      { name:'Go to Models', synonyms:['catalog','install','checkpoints','loras'], run:()=>setView('models') },
+      { name:'Go to Memory', synonyms:['facts','remember','recall'], run:()=>setView('memory') },
+      { name:'Go to Status', synonyms:['gpu','services','health','mode'], run:()=>setView('status') },
+      { name:'Go to Help', synonyms:['docs','manual','tutorial','quickstart'], run:()=>setView('help') },
+      // -- mode switches: reuse the exact call the Status view's mode buttons make (a bare POST, no confirm --
+      //    see the input-guard note above appKeys for why the palette mirrors that rather than adding a confirm) --
+      { name:'Switch to Agent mode', synonyms:['llm mode','chat mode','coder mode'], run:()=>fetch('/api/mode/agent',{method:'POST'}) },
+      { name:'Switch to Coexist mode', synonyms:['autocomplete mode'], run:()=>fetch('/api/mode/coexist',{method:'POST'}) },
+      { name:'Switch to Media mode', synonyms:['image mode','video mode'], run:()=>fetch('/api/mode/media',{method:'POST'}) },
+      // -- key actions --
+      { name:'New chat', synonyms:['start chat','clear chat'], run:()=>{ setView('chat'); newChat(); } },
+      { name:'Generate', synonyms:['focus prompt','create image'], run:()=>{ setView('create'); document.getElementById('prompt')?.focus(); } },
+      { name:'Compare bases', synonyms:['compare models','side by side'], run:()=>applyStarter('create','a lighthouse at dawn, painterly','image') },
+      { name:'Batch CSV', synonyms:['batch generate','csv queue'], run:()=>{ setView('create'); const d=document.getElementById('batchDetails'); if(d) d.open=true; document.getElementById('csvText')?.focus(); } },
+      { name:'Image Set / Series', synonyms:['series','locked style set'], run:()=>{ setView('create'); const d=document.getElementById('seriesDetails'); if(d) d.open=true; document.getElementById('seriesCells')?.focus(); } },
+      { name:'Train LoRA', synonyms:['training','fine-tune','kohya'], run:()=>setView('library') },
+      { name:'Pitch-deck export', synonyms:['story bible','export'], run:()=>setView('library') },
+      { name:'Inpaint', synonyms:['sam','click to mask','mask edit'], run:()=>applyStarter('create',null,'edit') },
+      { name:'Copy doki code command', synonyms:['cli','terminal','copy command'], run:()=>copyStarterText('doki code') },
+      { name:'Open tutorial', synonyms:['quickstart','guide','onboarding','docs'], run:()=>applyStarter('help','tutorial') },
+      { name:'Check for image models', synonyms:['install models','model catalog'], run:()=>setView('models') },
+    ];
+    let _cmdPaletteItems = [], _cmdPaletteSel = 0;
+    // Simple substring scoring: name-prefix (3) > name-substring (2) > synonym-substring (1); zero score = hidden.
+    // Stable sort (V8/spec-guaranteed) keeps the registry's own order as the tiebreak within each score band.
+    function paletteMatches(q){
+      const s=(q||'').trim().toLowerCase();
+      if(!s) return PALETTE_ACTIONS.slice();
+      const scored = [];
+      for (const a of PALETTE_ACTIONS){
+        const name = a.name.toLowerCase();
+        const score = name.startsWith(s) ? 3 : name.includes(s) ? 2 : (a.synonyms||[]).some(y=>y.toLowerCase().includes(s)) ? 1 : 0;
+        if(score>0) scored.push({a,score});
+      }
+      scored.sort((x,y)=>y.score-x.score);
+      return scored.map(x=>x.a);
+    }
+    function renderCmdPaletteList(){
+      const list = document.getElementById('cmdPaletteList'); if(!list) return;
+      if(_cmdPaletteSel>=_cmdPaletteItems.length) _cmdPaletteSel = Math.max(0, _cmdPaletteItems.length-1);
+      list.innerHTML = _cmdPaletteItems.length ? _cmdPaletteItems.map((a,i) =>
+        `<div class="cmdPaletteItem" data-i="${i}" style="padding:9px 11px;border-radius:7px;cursor:pointer;${i===_cmdPaletteSel?'background:var(--surface);color:var(--cyan)':'color:var(--text)'}">${esc(a.name)}</div>`
+      ).join('') : '<p class="hint" style="padding:9px 11px">No matching commands.</p>';
+      list.querySelectorAll('.cmdPaletteItem').forEach(el => { el.onclick = () => runPaletteAction(_cmdPaletteItems[+el.dataset.i]); });
+    }
+    function runPaletteAction(a){ if(!a) return; try{ a.run(); } finally { closeCommandPalette(); } }
+    function commandPaletteKeys(e){
+      if(e.key==='Escape'){ e.preventDefault(); closeCommandPalette(); return; }
+      if(e.key==='ArrowDown'){ e.preventDefault(); _cmdPaletteSel = Math.min(_cmdPaletteItems.length-1, _cmdPaletteSel+1); renderCmdPaletteList(); return; }
+      if(e.key==='ArrowUp'){ e.preventDefault(); _cmdPaletteSel = Math.max(0, _cmdPaletteSel-1); renderCmdPaletteList(); return; }
+      if(e.key==='Enter'){ e.preventDefault(); runPaletteAction(_cmdPaletteItems[_cmdPaletteSel]); return; }
+    }
+    function openCommandPalette(){
+      if(document.getElementById('cmdPalette')) return;
+      _cmdPaletteSel = 0;
+      const o = $(`<div id="cmdPalette" style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;z-index:60" onclick="if(event.target===this)closeCommandPalette()">
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px;width:100%;max-width:520px;max-height:60vh;display:flex;flex-direction:column">
+            <input id="cmdPaletteInput" placeholder="Type a command… views, modes, actions" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit">
+            <div id="cmdPaletteList" style="margin-top:10px;overflow:auto"></div>
+          </div></div>`);
+      document.body.appendChild(o);
+      _cmdPaletteItems = paletteMatches('');
+      renderCmdPaletteList();
+      const input = document.getElementById('cmdPaletteInput');
+      input.addEventListener('input', () => { _cmdPaletteSel=0; _cmdPaletteItems = paletteMatches(input.value); renderCmdPaletteList(); });
+      input.addEventListener('keydown', commandPaletteKeys);
+      input.focus();
+    }
+    function closeCommandPalette(){ const ex=document.getElementById('cmdPalette'); if(ex) ex.remove(); }
     function appKeys(e){
       const t=e.target.tagName, typing=(t==='INPUT'||t==='TEXTAREA'||t==='SELECT');
-      if(e.key==='Escape'){ const h=document.getElementById('keyhelp'); if(h){ h.remove(); e.preventDefault(); } return; }
+      // Ctrl/Cmd+K: command palette. Deliberately NOT gated on `typing` -- it's a chord, not text entry, so it
+      // should open the palette even from inside the prompt/chat/library search boxes. The one exception is
+      // while the palette itself is already open: then this is a no-op (its own input handles Esc to close).
+      if((e.ctrlKey||e.metaKey) && (e.key==='k'||e.key==='K')){
+        if(!document.getElementById('cmdPalette')){ e.preventDefault(); openCommandPalette(); }
+        return;
+      }
+      if(e.key==='Escape'){
+        const p=document.getElementById('cmdPalette'); if(p){ closeCommandPalette(); e.preventDefault(); return; }
+        const h=document.getElementById('keyhelp'); if(h){ h.remove(); e.preventDefault(); } return;
+      }
       if(e.key==='?'&&!typing){ e.preventDefault(); toggleKeyHelp(); return; }
       if(e.key==='/'&&!typing){ e.preventDefault(); const id=state.view==='library'?'libQuery':(state.view==='voice'?'ttsText':'prompt'); const el=document.getElementById(id); if(el) el.focus(); return; }
       if(typing) return;
