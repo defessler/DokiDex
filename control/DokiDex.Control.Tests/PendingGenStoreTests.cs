@@ -185,4 +185,66 @@ public class PendingGenStoreTests
         Assert.Equal(new[] { "a", "b" }, PendingGenStore.FilterQueued(all).Select(p => p.Id).ToArray());   // queued only, FIFO
         Assert.Empty(PendingGenStore.FilterQueued(all.Where(p => p.Status != "queued")));
     }
+
+    // ---- NormalizeSubmit (1.2): the POST /api/pending-gen ("Queue for later" from Create/Director) test seam ----
+
+    [Fact]
+    public void NormalizeSubmit_trims_the_prompt_and_model_and_lowercases_the_kind()
+    {
+        var (prompt, kind, model, count) = PendingGenStore.NormalizeSubmit(
+            new PendingGenSubmit("  a neon dragon  ", "  IMAGE  ", "  sdxl.safetensors  ", 3));
+        Assert.Equal("a neon dragon", prompt);
+        Assert.Equal("image", kind);
+        Assert.Equal("sdxl.safetensors", model);
+        Assert.Equal(3, count);
+    }
+
+    [Fact]
+    public void NormalizeSubmit_blank_kind_defaults_to_image_and_blank_model_becomes_null()
+    {
+        var (_, kind, model, _) = PendingGenStore.NormalizeSubmit(new PendingGenSubmit("p", "   ", "   "));
+        Assert.Equal("image", kind);
+        Assert.Null(model);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]     // below the floor clamps up
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    [InlineData(9, 9)]
+    [InlineData(99, 9)]    // above the ceiling clamps down — matches /api/generate's Math.Clamp(_, 1, 9)
+    public void NormalizeSubmit_clamps_count_to_1_through_9(int input, int expected)
+    {
+        var (_, _, _, count) = PendingGenStore.NormalizeSubmit(new PendingGenSubmit("p", Count: input));
+        Assert.Equal(expected, count);
+    }
+
+    [Fact]
+    public void NormalizeSubmit_does_not_restrict_kind_to_the_image_family()
+    {
+        // UNLIKE ChatTools.MapGenArgs (which guards against an LLM's guess by narrowing to image/edit), a
+        // Create-queued submit is an explicit human choice from the composer — video/music/i2v/foley pass through.
+        foreach (var kind in new[] { "video", "music", "i2v", "foley", "edit" })
+        {
+            var (_, normalized, _, _) = PendingGenStore.NormalizeSubmit(new PendingGenSubmit("p", kind));
+            Assert.Equal(kind, normalized);
+        }
+    }
+
+    [Fact]
+    public void NormalizeSubmit_a_null_body_degrades_to_safe_defaults_without_throwing()
+    {
+        var (prompt, kind, model, count) = PendingGenStore.NormalizeSubmit(null);
+        Assert.Equal("", prompt);
+        Assert.Equal("image", kind);
+        Assert.Null(model);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void NormalizeSubmit_a_missing_prompt_yields_an_empty_trimmed_prompt()
+    {
+        var (prompt, _, _, _) = PendingGenStore.NormalizeSubmit(new PendingGenSubmit(null!));
+        Assert.Equal("", prompt);
+    }
 }

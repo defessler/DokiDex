@@ -22,6 +22,11 @@
     main { padding:22px 28px; max-width:1080px; margin:0 auto; }
     .banner { background:#1a1606; border:1px solid #5a4a16; color:var(--gold); border-radius:8px; padding:12px 14px; margin-bottom:18px; display:flex; align-items:center; gap:14px; font-size:13px; }
     .banner button { margin-left:auto; }
+    /* 1.2: the floating "needs-the-other-engine" prompt (#modeChoice) — a .banner, just fixed-position so it works
+       from any view. Its leading text carries flex:1 (see modeChoice()), so the existing .banner button margin
+       rule above still lands every button flush right with no extra overrides needed here. */
+    #modeChoice { position:fixed; left:50%; top:70px; transform:translateX(-50%); z-index:40; width:min(94vw,560px); display:none; }
+    #modeChoice .banner { margin-bottom:0; box-shadow:0 10px 30px rgba(0,0,0,.45); }
     textarea { width:100%; min-height:84px; resize:vertical; background:var(--surface2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:12px 14px; font-size:15px; font-family:inherit; }
     textarea:focus { outline:none; border-color:#80E8C77A; }
     .pills { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
@@ -205,6 +210,9 @@
     </nav>
     <span id="gpuPill" class="gpu-pill"></span>
   </header>
+  <!-- 1.2: the ONE "needs-the-other-engine" prompt mounts here — fixed position, outside every view <section>, so
+       it works from any view (Create, Director, Chat, Cast, Flow, …), not just the ones with their own #guard. -->
+  <div id="modeChoice"></div>
   <main>
     <section id="view-home"><p class="hint">Loading…</p></section>
 
@@ -277,7 +285,7 @@
               <canvas id="sketch" width="384" height="256" style="border:1px solid var(--border);border-radius:6px;background:#fff;cursor:crosshair;touch-action:none"></canvas>
               <div style="margin-top:4px" class="mods">
                 <button class="xbtn" onclick="clearSketch()">clear sketch</button>
-                <label title="render the sketch as a fast low-denoise img2img as you draw (turbo, seed-locked) — GPU-exclusive, needs MEDIA mode"><input id="liveCanvas" type="checkbox" onchange="onLiveCanvasToggle()"> Live render</label>
+                <label title="render the sketch as a fast low-denoise img2img as you draw (turbo, seed-locked) — GPU-exclusive, needs the Image & Video engine"><input id="liveCanvas" type="checkbox" onchange="onLiveCanvasToggle()"> Live render</label>
                 <label class="hint" title="denoise: lower = closer to the sketch, higher = more imagined detail">denoise <input id="liveDenoise" type="range" min="0.15" max="0.85" step="0.05" value="0.35" style="width:90px;vertical-align:middle"> <span id="liveDenoiseVal">0.35</span></label>
               </div>
             </div>
@@ -623,11 +631,14 @@
         document.getElementById('view-'+x).style.display = v===x?'':'none';
         document.getElementById('nav-'+x).className = v===x?'on':'';
       }
-      // Poll routing: status probe only on views that display it; jobs grid only on create.
-      if (['home','status','create'].includes(v)) startStatusPoll(); else stopStatusPoll();
+      // Poll routing: status probe on views that display it, PLUS every view with an ensureMedia()/ensureLlm()
+      // gated action (director/cast/flow submit through ensureMedia, chat through ensureLlm) — their bounded
+      // wait (waitForMedia/waitForLlm) reads state.mediaActive/llmActive, which ONLY pollStatus() updates; without
+      // this those views' Switch&run wait-loops always time out (state frozen at whatever it was on entry).
+      if (['home','status','create','director','chat','cast','flow'].includes(v)) startStatusPoll(); else stopStatusPoll();
       if (v==='create') startJobsPoll(); else stopJobsPoll();
       if (v==='home') loadHome();
-      if (v==='create') loadPendingGen();
+      if (v==='create') { state.mediaGuardDismissed=false; loadPendingGen(); }
       if (v==='library') { loadLibrary(); renderPalette(); loadSaved(); }
       if (v==='models') { loadModels(); loadLlmModels(); loadLlmTiers(); }
       if (v==='memory') loadMemory();
@@ -635,7 +646,7 @@
       if (v==='flow') renderFlow();
       if (v==='scene') renderSceneBoxes();
       if (v==='help') loadHelp();
-      if (v==='chat') { loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKbLibraries(); loadKb(); renderChatGuard(); startChatGenPoll(); document.getElementById('chatInput').focus(); }
+      if (v==='chat') { state.chatGuardDismissed=false; loadPersonas(); loadLorebooks(); loadPersonaVoices(); loadThreads(); loadKbLibraries(); loadKb(); renderChatGuard(); startChatGenPoll(); document.getElementById('chatInput').focus(); }
       else stopChatGenPoll();   // only poll the chat-thread render cards while chat is open
     }
 
@@ -1198,12 +1209,10 @@
       const prompt = document.getElementById('prompt').value.trim();
       const hint = document.getElementById('genHint');
       if(!prompt){ hint.textContent='enter a prompt first'; return; }
-      if(!state.mediaActive){
-        if(!confirm("The GPU isn't in MEDIA mode. Switch now (this stops the running LLM) and generate?")) return;
-        hint.textContent='switching to MEDIA…';
-        try{ await switchMode('media'); }catch{}
-        if(!await waitForMedia(90)){ hint.textContent='still switching to MEDIA — click Generate again in a moment'; return; }
-      }
+      // 1.2: Queue for later is only offered without an init image — PendingGen needs a durable Library-relative
+      // reference, not a fresh upload's data: URL (see queueCurrentGen), and silently dropping an edit's source
+      // image would render the WRONG thing later. Plain text-to-image/video/music/etc still queues fine.
+      if(!await ensureMedia(state.initImage ? null : queueCurrentGen)) return;
       hint.textContent='submitting…';
       try {
         const seedVal = document.getElementById('seed').value.trim();
@@ -1380,6 +1389,7 @@
     async function pollJobs(){
       try {
         const jobs = await (await fetch('/api/jobs')).json();
+        armAutoFlipBack();   // 1.2: idempotent no-op unless a Switch&run flow just armed the flip-back watcher
         const g = document.getElementById('results');
         if(!jobs.length){ g.innerHTML='<p class="hint">Nothing generated yet.</p>'; return; }
         g.innerHTML=''; jobs.forEach(j => g.appendChild($(jobCard(j))));
@@ -1719,13 +1729,39 @@
       try{ await fetch('/api/llm/warm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model})}); }catch{}
       setTimeout(loadLlmTiers, 2000);
     }
-    // ---- director (script -> shotlist -> generate each shot) ----
-    async function ensureMedia(){
+    // ---- 1.2: ONE mode-switch policy, everywhere (see modeChoice() near switchMode for the shared prompt). ----
+    // Gate a MEDIA-needing action. true = the Image & Video engine is ready NOW (already active, or the user
+    // picked Switch & run and it came up in time) — the caller proceeds to submit. false = the caller must NOT
+    // submit: Cancel, a timed-out switch, or Queue for later (queueFn already enqueued it).
+    // queueFn (optional async): pass one to offer "Queue for later"; omit where queuing doesn't cleanly apply
+    // (bulk/multi-item submissions, edits needing fields PendingGen can't carry, live canvas's open-ended
+    // session — see each call site).
+    async function ensureMedia(queueFn){
       if(state.mediaActive) return true;
-      if(!confirm("The GPU isn't in MEDIA mode. Switch now (this stops the running LLM) and generate?")) return false;
-      try{ await switchMode('media'); }catch{}
+      if(await modeChoice('media', queueFn) !== 'switch') return false;
+      await switchMode('media', true);   // true = WE initiated it — arms the auto-flip-back once the render finishes
       return await waitForMedia(90);
     }
+    // "Queue for later" for the primary Create action (generate()): persist the CURRENT composer prompt/kind/
+    // model/count via the SAME pending-gen queue the chat generate_image tool uses (conversation=null — this is
+    // Create-originated), then refresh the pending strip so it shows up immediately. Deliberately narrow: only
+    // the fields PendingGen can carry (see PendingGenStore.PendingGenSubmit) — NOT ControlNet/LoRA/aspect/seed/
+    // camera/etc (Switch & run is the full-fidelity path for those), and never an init image (see generate()).
+    async function queueCurrentGen(){
+      const hint=document.getElementById('genHint');
+      const body={
+        prompt: document.getElementById('prompt').value.trim(),
+        kind: state.kind,
+        model: document.getElementById('genModel').value || null,
+        count: parseInt(document.getElementById('count').value) || 1,
+      };
+      try{
+        await fetch('/api/pending-gen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        hint.textContent='queued for later — see below, or "Render queued" when ready';
+      }catch{ hint.textContent='queue failed'; }
+      loadPendingGen();
+    }
+    // ---- director (script -> shotlist -> generate each shot) ----
     async function storyboard(){
       const idea=document.getElementById('dirIdea').value.trim();
       const hint=document.getElementById('dirHint'), out=document.getElementById('shots');
@@ -1758,16 +1794,23 @@
       const all=$(`<button class="primary" style="margin-top:12px">Generate all shots</button>`);
       all.onclick=genAllShots; out.appendChild(all);
     }
+    // Queue-for-later for a shot: a bare prompt + kind='image' is EXACTLY what PendingGen carries — unlike
+    // generate()'s composer, nothing is lost by queuing a shot.
+    function queueShot(prompt){
+      return fetch('/api/pending-gen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,kind:'image'})})
+        .then(()=>{ document.getElementById('dirHint').textContent='queued for later — see the pending strip on Create'; });
+    }
     async function genShot(prompt){
       prompt=(prompt||'').trim(); if(!prompt) return;
-      if(!await ensureMedia()) return;
+      if(!await ensureMedia(()=>queueShot(prompt))) return;
       try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,kind:'image'})}); }catch{}
       setView('create'); pollJobs();
     }
     async function genAllShots(){
       const prompts=[...document.querySelectorAll('#shots textarea')].map(t=>t.value.trim()).filter(Boolean);
       if(!prompts.length) return;
-      if(!await ensureMedia()) return;
+      const queueAll=()=>Promise.all(prompts.map(queueShot)).then(()=>{ document.getElementById('dirHint').textContent=`queued ${prompts.length} shots for later — see the pending strip on Create`; });
+      if(!await ensureMedia(queueAll)) return;
       for(const p of prompts){ try{ await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,kind:'image'})}); }catch{} }
       setView('create'); pollJobs();
     }
@@ -1861,22 +1904,26 @@
     }
     function renderGuard(){
       const el = document.getElementById('guard');
-      if(state.mediaActive){ el.innerHTML=''; return; }
+      if(state.mediaActive || state.mediaGuardDismissed){ el.innerHTML=''; return; }
       el.innerHTML='';
-      const b = $(`<div class="banner"><span>The GPU isn't in MEDIA mode — generation needs it.</span><button class="ghost">Switch to MEDIA</button></div>`);
-      b.querySelector('button').onclick = async()=>{ await switchMode('media'); };
+      const human=esc(MODE_HUMAN.media);
+      const b=$(`<div class="banner"><span style="flex:1">This needs the <b>${human}</b> engine.</span></div>`);
+      const sw=$(`<button class="ghost">Switch to ${human}</button>`); sw.onclick=async()=>{ await switchMode('media'); }; b.appendChild(sw);
+      const c=$(`<button class="ghost">Cancel</button>`); c.onclick=()=>{ state.mediaGuardDismissed=true; renderGuard(); }; b.appendChild(c);
       el.appendChild(b);
     }
-    // ---- Pending image-gens queued FROM CHAT (generate_image tool). Chat runs the LLM resident on the single GPU,
-    // GPU-exclusive with SwarmUI, so a chat-requested gen can't render mid-conversation — the tool persists it and
-    // we surface it here in the create view so the user picks it up after flipping to MEDIA. "→ composer" prefills
-    // the existing fields (no new gen path); dismiss DELETEs the durable file. Newest-first, bounded preview. ----
+    // ---- Pending gens awaiting render: queued from CHAT (the generate_image/edit_image tools) OR from Create's
+    // own "Queue for later" (queueCurrentGen/queueShot, 1.2). Chat runs the LLM resident on the single GPU,
+    // GPU-exclusive with SwarmUI, so a queued gen can't render immediately — this strip surfaces every pending
+    // item here (regardless of origin) so the user can pick one into the composer, or render the whole queue with
+    // the button below (the SAME flip-to-media/render/flip-back round-trip the chat thread uses). "→ composer"
+    // prefills the existing fields (no new gen path); dismiss DELETEs the durable file. Newest-first. ----
     async function loadPendingGen(){
       const el = document.getElementById('pendingGen'); if(!el) return; el.innerHTML='';
       let list=[]; try{ list = await (await fetch('/api/pending-gen')).json(); }catch{ return; }
       if(!Array.isArray(list) || !list.length) return;
       const wrap = $(`<div class="banner" style="background:#06181a;border-color:#16505a;color:var(--cyan);flex-direction:column;align-items:stretch;gap:8px"></div>`);
-      wrap.appendChild($(`<span><b>${list.length}</b> image${list.length>1?'s':''} queued from chat — pick one into the composer, then Generate.</span>`));
+      wrap.appendChild($(`<span><b>${list.length}</b> image${list.length>1?'s':''} queued — pick one into the composer, or render the whole queue below.</span>`));
       list.forEach(p=>{
         const cnt = p.count>1 ? ` ×${p.count}` : '';
         const mdl = p.model ? ` · ${esc(p.model)}` : '';
@@ -1894,6 +1941,16 @@
         del.onclick = async()=>{ try{ await fetch('/api/pending-gen/'+encodeURIComponent(p.id),{method:'DELETE'}); }catch{} loadPendingGen(); };
         row.appendChild(use); row.appendChild(del); wrap.appendChild(row);
       });
+      // 1.2: the SAME round-trip trigger the chat pending strip uses — /api/chat/render-queued drains the WHOLE
+      // pending-gen queue regardless of origin (ChatGenEndpoints/PendingGenStore.Queued are conversation-
+      // agnostic) — so Create-queued gens now reach the identical proven flip-to-media/render/flip-back path.
+      const queuedN = list.filter(p=>(p.status||'queued').toLowerCase()==='queued').length;
+      const busy = list.some(p=>(p.status||'').toLowerCase()==='rendering');
+      if(queuedN>0 && !busy){
+        const rb=$(`<button class="primary" type="button" style="margin-top:2px" title="Switch to Image & Video, render the queued item(s), then switch back">Render ${queuedN} queued →</button>`);
+        rb.onclick=async()=>{ rb.disabled=true; rb.textContent='starting render — switching to Image & Video…'; try{ await fetch('/api/chat/render-queued',{method:'POST'}); }catch{} setTimeout(loadPendingGen, 1000); };
+        wrap.appendChild(rb);
+      }
       el.appendChild(wrap);
     }
     // ---- Render round-trip surfacing IN THE CHAT THREAD: image gens the assistant queued from THIS conversation
@@ -1945,8 +2002,8 @@
       const queuedN = list.filter(p=>(p.status||'queued').toLowerCase()==='queued').length;
       const busy = list.some(p=>(p.status||'').toLowerCase()==='rendering');
       if(queuedN>0 && !busy){
-        const b=$(`<button class="primary gqbtn" type="button" title="Flip the GPU to Media, render the queued image(s), then flip back to chat">Render ${queuedN} queued image${queuedN>1?'s':''} →</button>`);
-        b.onclick=async()=>{ b.disabled=true; b.textContent='starting render — flipping to Media…'; try{ await fetch('/api/chat/render-queued',{method:'POST'}); }catch{} setTimeout(loadChatPendingGens, 1000); };
+        const b=$(`<button class="primary gqbtn" type="button" title="Switch to Image & Video, render the queued image(s), then switch back to Chat & Code">Render ${queuedN} queued image${queuedN>1?'s':''} →</button>`);
+        b.onclick=async()=>{ b.disabled=true; b.textContent='starting render — switching to Image & Video…'; try{ await fetch('/api/chat/render-queued',{method:'POST'}); }catch{} setTimeout(loadChatPendingGens, 1000); };
         el.appendChild(b);
       }
     }
@@ -2080,7 +2137,7 @@
       try{
         const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs/file',{method:'POST',body:fd});
         const j=await r.json().catch(()=>({}));
-        if(!r.ok){ status.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to AGENT mode':'upload failed'); return; }
+        if(!r.ok){ status.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to Chat & Code mode':'upload failed'); return; }
         if((j.chunks||0)===0){ status.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — scanned/image PDF with no extractable text (install -Ocr for OCR, or the scan is unreadable)'); }
         else status.textContent='attached '+(j.source||f.name)+' ('+j.chunks+' chunks)';
         await loadKb();
@@ -2098,7 +2155,7 @@
         const r=await fetch('/api/chats/'+encodeURIComponent(_chatConv)+'/docs',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({source, text})});
         const j=await r.json().catch(()=>({}));
-        if(!r.ok){ status.textContent=(j&&j.error)||(r.status===503?'embed server unavailable — switch to AGENT mode':'attach failed'); return; }
+        if(!r.ok){ status.textContent=(j&&j.error)||(r.status===503?'embed server unavailable — switch to Chat & Code mode':'attach failed'); return; }
         document.getElementById('kbText').value=''; document.getElementById('kbName').value='';
         status.textContent='attached '+(j.source||source)+' ('+(j.chunks||0)+' chunks)';
         await loadKb();
@@ -2278,7 +2335,7 @@
       try{
         const r=await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs/file',{method:'POST',body:fd});
         const j=await r.json().catch(()=>({}));
-        if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to AGENT mode':'upload failed'); return; }
+        if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===413?'file too large':r.status===503?'embed server unavailable — switch to Chat & Code mode':'upload failed'); return; }
         if((j.chunks||0)===0){ if(st) st.textContent=(j.note)||('attached '+(j.source||f.name)+' but no text found — scanned/image PDF with no extractable text (install -Ocr for OCR, or the scan is unreadable)'); }
         else if(st) st.textContent='attached '+(j.source||f.name)+' ('+j.chunks+' chunks)';
         await loadLibDocs(id);
@@ -2294,7 +2351,7 @@
       try{
         const r=await fetch('/api/kbs/'+encodeURIComponent(id)+'/docs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source, text})});
         const j=await r.json().catch(()=>({}));
-        if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===503?'embed server unavailable — switch to AGENT mode':'attach failed'); return; }
+        if(!r.ok){ if(st) st.textContent=(j&&j.error)||(r.status===503?'embed server unavailable — switch to Chat & Code mode':'attach failed'); return; }
         if(ta) ta.value=''; if(sin) sin.value='';
         if(st) st.textContent='attached '+(j.source||source)+' ('+(j.chunks||0)+' chunks)';
         await loadLibDocs(id);
@@ -2430,7 +2487,7 @@
     // duplicate assistant bubble and no off-by-one. A subsequent edit/delete therefore targets the right turn.
     async function streamRegenerate(id){
       const hint=document.getElementById('chatHint'), log=document.getElementById('chatLog');
-      if(!await ensureLlm()){ hint.textContent='chat needs AGENT mode'; return; }
+      if(!await ensureLlm()){ hint.textContent='chat needs the Chat & Code engine'; return; }
       hint.textContent='thinking…';
       // Transient streaming bubble — index=null so it carries NO turn-action controls and is reconciled away by the
       // post-'done' reload (we never client-push it into _chatMsgs; the reload re-derives the authoritative thread).
@@ -2613,19 +2670,22 @@
     }
     function renderChatGuard(){
       const el=document.getElementById('chatGuard'); if(!el) return;
-      if(state.llmActive){ el.innerHTML=''; return; }
+      if(state.llmActive || state.chatGuardDismissed){ el.innerHTML=''; return; }
       el.innerHTML='';
-      const b=$(`<div class="banner"><span>The GPU is in MEDIA mode — chat needs AGENT.</span><button class="ghost">Switch to AGENT</button></div>`);
-      b.querySelector('button').onclick=async()=>{ await switchMode('agent'); };
+      const human=esc(MODE_HUMAN.agent);
+      const b=$(`<div class="banner"><span style="flex:1">This needs the <b>${human}</b> engine.</span></div>`);
+      const sw=$(`<button class="ghost">Switch to ${human}</button>`); sw.onclick=async()=>{ await switchMode('agent'); }; b.appendChild(sw);
+      const c=$(`<button class="ghost">Cancel</button>`); c.onclick=()=>{ state.chatGuardDismissed=true; renderChatGuard(); }; b.appendChild(c);
       el.appendChild(b);
     }
     function waitForLlm(maxSec){ return new Promise(res=>{ let n=0; const t=setInterval(()=>{ if(state.llmActive){clearInterval(t);res(true);} else if(++n>=maxSec){clearInterval(t);res(false);} },1000); }); }
+    // Gate an AGENT-needing action (chat). No queue concept — a chat turn either sends now or doesn't.
     async function ensureLlm(){
       if(state.llmActive) return true;
-      if(!confirm("The GPU is in MEDIA mode. Switch to AGENT now (this stops SwarmUI / image+video) and chat?")) return false;
-      try{ await switchMode('agent'); }catch{}
+      if(await modeChoice('agent', null) !== 'switch') return false;
+      await switchMode('agent');
       const ok=await waitForLlm(90);
-      renderChatGuard();   // clear the stale MEDIA banner immediately, don't wait for the next pollStatus tick
+      renderChatGuard();   // clear the stale banner immediately, don't wait for the next pollStatus tick
       return ok;
     }
     // ---- P5 attach-image: one pending Library image (gallery NAME) rides the next turn → vision model server-side ----
@@ -2744,7 +2804,7 @@
       const inp=document.getElementById('chatInput'), hint=document.getElementById('chatHint');
       const log=document.getElementById('chatLog');
       const text=inp.value.trim(); if(!text) return;
-      if(!await ensureLlm()){ hint.textContent='chat needs AGENT mode'; return; }
+      if(!await ensureLlm()){ hint.textContent='chat needs the Chat & Code engine'; return; }
       // P5: snapshot + clear the pending image now so the chip isn't left dangling across the async send.
       const image=_chatImage; clearChatImage();
       _chatMsgs.push({role:'user',content:text}); appendBubble('user',text,_chatMsgs.length-1); inp.value=''; hint.textContent='thinking…';
@@ -2802,11 +2862,68 @@
     // actually turns active (or 90s passes — then truth wins unconditionally). Human mode names on purpose.
     const MODE_HUMAN={agent:'Chat & Code',coexist:'Chat & Code + Autocomplete',media:'Image & Video'};
     const MODE_GROUP={agent:'llm',coexist:'llm',media:'media'};
-    function switchMode(m){
+    // `auto`: true ONLY for the Switch&run flow (modeChoice's 'switch' resolution on the media side, see
+    // ensureMedia) — it arms the post-render auto-flip-back watcher below. Every other caller (Status view mode
+    // buttons, the command palette, a guard's Switch button, the flip-back itself) omits it, which DISARMS the
+    // watcher — so any manual, deliberate mode choice always wins and the watcher never overrides it. Also clears
+    // a dismissed guard banner: a fresh mode decision supersedes an earlier Cancel.
+    function switchMode(m, auto){
       state.switchingTo=m; state.switchingSince=Date.now();
+      state.autoFlipMedia = !!auto;
+      state.mediaGuardDismissed = false; state.chatGuardDismissed = false;
       const pill=document.getElementById('gpuPill');
       if(pill) pill.innerHTML=`switching to <b>${esc(MODE_HUMAN[m]||m)}</b>…`;
       return fetch('/api/mode/'+m,{method:'POST'}).catch(()=>{});
+    }
+    // ---- 1.2: ONE "needs-the-other-engine" prompt — replaces confirm() everywhere AND the old direct-flip guard
+    // buttons. Renders a small inline choice (styled like the guard banners, human vocabulary via MODE_HUMAN)
+    // into the floating #modeChoice mount, so the SAME component works from every view:
+    //   "This needs the Image & Video engine — [ Switch & run ] [ Queue for later ] [ Cancel ]"
+    // `queueFn` (optional async): supply it to add "Queue for later" (awaited, then resolves 'queued'); omit it
+    // where queuing doesn't cleanly apply. Resolves 'switch' | 'queued' | 'cancel'. `mode` is 'media' or 'agent'
+    // (never 'coexist' — nothing ever needs that specific profile, only the llm or media engine).
+    function modeChoice(mode, queueFn){
+      return new Promise(resolve=>{
+        const el=document.getElementById('modeChoice');
+        if(!el){ resolve('cancel'); return; }   // no mount (shouldn't happen) — fail safe to Cancel, never confirm()
+        const human=esc(MODE_HUMAN[mode]||mode);
+        const switchLabel = mode==='media' ? 'Switch & run' : ('Switch to '+human);
+        const done=v=>{ el.innerHTML=''; el.style.display='none'; resolve(v); };
+        const b=$(`<div class="banner"><span style="flex:1">This needs the <b>${human}</b> engine.</span></div>`);
+        const sw=$(`<button class="primary">${esc(switchLabel)}</button>`); sw.onclick=()=>done('switch'); b.appendChild(sw);
+        if(queueFn){
+          const q=$(`<button class="ghost">Queue for later</button>`);
+          q.onclick=async()=>{ q.disabled=true; q.textContent='queueing…'; try{ await queueFn(); }catch{} done('queued'); };
+          b.appendChild(q);
+        }
+        const c=$(`<button class="ghost">Cancel</button>`); c.onclick=()=>done('cancel'); b.appendChild(c);
+        el.innerHTML=''; el.appendChild(b); el.style.display='';
+      });
+    }
+    // 1.2 flip-back watcher: once Switch&run auto-switches to media (state.autoFlipMedia armed), poll /api/jobs —
+    // view-independently, since the user may navigate away mid-render — until nothing is running/queued, then
+    // flip back to the agent LLM automatically. Mirrors ChatGenCoordinator's flip-back semantics on the
+    // /api/generate (GenerationJobs) path, which the coordinator can't drive directly: PendingGen only carries
+    // prompt/kind/model/count(+initImage/strength), far short of GenSubmit's full field set (ControlNet/LoRA/
+    // aspect/seed/camera/…), so a Create gen renders through GenerationJobs, not the pending-gen queue (see
+    // ensureMedia/queueCurrentGen/queueShot for the cases simple enough to queue instead). Piggybacks on
+    // pollJobs() — every media-submitting call site already calls it — so no call site needs to remember to arm
+    // this. Self-stopping: any manual switchMode() call clears state.autoFlipMedia and this watcher stands down
+    // on its next tick, never overriding a mode the user set on purpose.
+    let _flipBackTimer=null;
+    function armAutoFlipBack(){
+      if(_flipBackTimer || !state.autoFlipMedia) return;
+      _flipBackTimer=setInterval(async()=>{
+        if(!state.autoFlipMedia){ clearInterval(_flipBackTimer); _flipBackTimer=null; return; }
+        try{
+          const jobs=await (await fetch('/api/jobs')).json();
+          const busy=Array.isArray(jobs) && jobs.some(j=>j.status==='running'||j.status==='queued');
+          if(!busy && state.autoFlipMedia){
+            clearInterval(_flipBackTimer); _flipBackTimer=null;
+            await switchMode('agent');   // auto=false (default) — this clears state.autoFlipMedia as a side effect
+          }
+        }catch{}
+      }, 2000);
     }
     async function pollStatus(){
       try {
@@ -2835,9 +2952,11 @@
           : `GPU <b>${active.toUpperCase()}</b>${modelLabel} · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
         // status view
         const modes=document.getElementById('modes'); modes.innerHTML='';
-        [['agent','chat + code'],['coexist','+ autocomplete'],['media','image + video']].forEach(([m,sub])=>{
+        // 1.2: human vocabulary primary (MODE_HUMAN); the technical id is demoted to small/secondary text — the
+        // one place a raw mode id may still appear at all, per the leaf's scope note.
+        ['agent','coexist','media'].forEach(m=>{
           const on = active===m || (m==='agent'&&active==='llm');
-          const b=$(`<button class="mode ${on?'active':''}"><span>${m.toUpperCase()}</span><small>${sub}</small></button>`);
+          const b=$(`<button class="mode ${on?'active':''}"><span>${esc(MODE_HUMAN[m])}</span><small>${esc(m)}</small></button>`);
           b.onclick=()=>switchMode(m); modes.appendChild(b);
         });
         const body=document.getElementById('statusBody'); body.innerHTML='';

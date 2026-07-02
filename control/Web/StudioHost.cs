@@ -1071,9 +1071,20 @@ public static class StudioHost
             return ChatStore.Save(conv with { KbId = kbId }) ? Results.Ok() : Results.BadRequest(new { error = "could not attach KB" });
         });
 
-        // ---- pending image-gen queued FROM CHAT (the generate_image tool's durable side; the create view surfaces
-        // it so the user can pick it up after flipping the GPU to MEDIA). Id is server-generated => no client path. ----
+        // ---- pending image-gen queue: written by the chat generate_image/edit_image tools AND (1.2) by Create's
+        // own "Queue for later" choice; the create/chat views surface it so the user can pick an item up or render
+        // the whole queue. Id is server-generated => no client path. ----
         api.MapGet("/pending-gen", () => Results.Json(PendingGenStore.List()));
+        // 1.2 "Queue for later" (Create/Director): conversation is always null here (a Create-originated item, not
+        // a chat thread) — PendingGenStore.NormalizeSubmit does the trim/clamp; /api/chat/render-queued (below)
+        // already drains the WHOLE queue regardless of conversation, so no other backend touch was needed for the
+        // round-trip to reach a Create-queued item.
+        api.MapPost("/pending-gen", (PendingGenSubmit body) =>
+        {
+            var (prompt, kind, model, count) = PendingGenStore.NormalizeSubmit(body);
+            if (prompt.Length == 0) return Results.BadRequest(new { error = "empty prompt" });
+            return Results.Json(PendingGenStore.Enqueue(prompt, kind, model, count, conversation: null));
+        });
         api.MapDelete("/pending-gen/{id}", (string id) => PendingGenStore.Delete(id) ? Results.Ok() : Results.NotFound());
         ChatGenEndpoints.Map(api);   // GET /api/chat/pending-gens?conversation=<id> — per-thread render lifecycle for inline chat surfacing
         // Drive the chat->media round-trip: flip the GPU to media, render the queued chat gens (oldest-first), flip back.

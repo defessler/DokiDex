@@ -7,12 +7,13 @@ using DokiDex.Control.Services;
 
 namespace DokiDex.Web;
 
-// A pending image-gen request queued FROM CHAT. A chat turn runs with the coder LLM resident on the single 32GB
-// GPU; SwarmUI (the renderer) is GPU-exclusive with it (26GB LLM + 18GB SwarmUI > 32GB — decisions.md), so a gen
-// CANNOT render mid-conversation and the chat model must NOT be evicted mid-turn. The generate_image tool's job
-// is therefore QUEUE-AND-NOTIFY: persist the request under RepoPaths.Root and tell the user to switch to Media
-// mode. This record is the durable, small subset of GenSubmit that survives the eventual GPU flip. Conversation
-// links it back to the chat thread for later surfacing (optional). Id/Created are SERVER-set — no client path => no traversal.
+// A pending image-gen request queued FROM CHAT, or (1.2) from Create's own "Queue for later" choice. A chat turn
+// runs with the coder LLM resident on the single 32GB GPU; SwarmUI (the renderer) is GPU-exclusive with it (26GB
+// LLM + 18GB SwarmUI > 32GB — decisions.md), so a gen CANNOT render mid-conversation and the chat model must NOT
+// be evicted mid-turn. The generate_image tool's job is therefore QUEUE-AND-NOTIFY: persist the request under
+// RepoPaths.Root and tell the user to switch to Media mode. This record is the durable, small subset of GenSubmit
+// that survives the eventual GPU flip. Conversation links it back to the chat thread for later surfacing
+// (null for a Create-originated queue item — see PendingGenSubmit). Id/Created are SERVER-set — no client path => no traversal.
 public sealed record PendingGen(
     string Id, string Prompt, string Kind, string? Model, int Count, string Created, string? Conversation,
     string? Status = null, string? ResultRel = null, string? Error = null,
@@ -20,6 +21,14 @@ public sealed record PendingGen(
     // lifecycle: queued -> rendering -> done/failed; ResultRel = finished media (gallery-relative); Error on failure.
     // InitImage/Strength = edit/img2img source (the edit_image tool). Preview = in-flight data-URL while rendering
     // (the ChatGenCoordinator streams it so the chat thread can show a warming-up preview before the final image).
+
+// POST /api/pending-gen body (1.2, "Queue for later" from Create/Director — see StudioHost + queueCurrentGen/
+// queueShot in index.html). Deliberately the SAME reduced field set the chat generate_image tool already
+// persists — prompt/kind/model/count — NOT the full GenSubmit (no ControlNet/LoRA/aspect/seed/camera/etc; the
+// Create "Switch & run" choice is the full-fidelity path for those) and never an init image at this seam (a
+// fresh browser upload is a data: URL with no durable Library-relative home until the deferred render runs — see
+// PendingGenStore.NormalizeSubmit and the JS-side comment on why generate() only offers Queue for later without one).
+public sealed record PendingGenSubmit(string Prompt, string? Kind = "image", string? Model = null, int Count = 1);
 
 // Pending-gen store — file-based under RepoPaths.Root/pending-gen/<id>.json (the durable install/repo root that
 // survives a mode-switch), mirroring ChatStore exactly (JSON via the same serializer, graceful try/catch). The
@@ -31,6 +40,22 @@ public static class PendingGenStore
     private static string Dir => Path.Combine(RepoPaths.Root, "pending-gen");
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+    // PURE: normalize a POST /api/pending-gen body (1.2's "Queue for later") the same way ChatTools.MapGenArgs
+    // normalizes a chat tool call — trimmed prompt, lower-cased kind (blank -> "image"). UNLIKE MapGenArgs this
+    // does NOT restrict kind to the image family: a Create-queued submit is an explicit human choice from the
+    // composer, not an LLM's guess, so video/music/i2v/foley pass through (the deferred render just gets fewer
+    // of the recipe's extra fields than a full Switch & run would carry). Model trimmed-or-null; count clamped to
+    // [1,9] (matches /api/generate's clamp). A null body degrades to safe defaults rather than throwing. Total +
+    // side-effect-free => the endpoint's test seam (no disk/HTTP).
+    public static (string prompt, string kind, string? model, int count) NormalizeSubmit(PendingGenSubmit? body)
+    {
+        var prompt = (body?.Prompt ?? "").Trim();
+        var kind = string.IsNullOrWhiteSpace(body?.Kind) ? "image" : body!.Kind!.Trim().ToLowerInvariant();
+        var model = string.IsNullOrWhiteSpace(body?.Model) ? null : body!.Model!.Trim();
+        var count = Math.Clamp(body?.Count ?? 1, 1, 9);
+        return (prompt, kind, model, count);
+    }
 
     // Append a pending gen with a server-generated, traversal-free id (timestamp + short guid, all SafeName-legal),
     // writing its JSON file and returning the record. Graceful: a disk hiccup still returns the in-memory record
