@@ -63,6 +63,9 @@
     .tmchip.candidate { color:var(--dim); }
     .tmchip.yes { color:var(--cyan); }
     .tmchip.loaded { color:var(--gold); border-color:var(--gold); font-weight:600; }
+    /* Eval-gate badges (2.5): gold when the latest-per-task run is a clean sweep, dim otherwise / when ungated. */
+    .tmchip.eval.full { color:var(--gold); border-color:var(--gold); font-weight:600; }
+    .tmchip.dim { color:var(--dim); }
     .spinner { width:22px; height:22px; border:2px solid var(--border); border-top-color:var(--cyan); border-radius:50%; animation:spin 0.9s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
     .pbar { height:3px; background:var(--bg); } .pbar > div { height:100%; background:var(--cyan); transition:width .3s; }
@@ -1485,16 +1488,28 @@
     // progress,error} shape LlmModelManager.List() serializes (camelCase, verified against the media-models
     // consumers above which already read camelCase fields off the sibling /api/models endpoint). ----
     let llmModelsTimer=null;
+    // Eval-gate badge (2.5): "eval: 14/15" (gold once every latest-per-task run passes, dim otherwise) when
+    // evalStr is present; a dim "ungated" chip when there's no eval data yet AND the row is a bake-off
+    // candidate (a live tier with no eval data yet just shows nothing -- isCandidate=false there).
+    function evalChip(evalStr, isCandidate){
+      if (evalStr) {
+        const parts = String(evalStr).split('/');
+        const full = parts.length===2 && parts[0]===parts[1];
+        return ` <span class="tmchip eval ${full?'full':'dim'}">eval: ${esc(evalStr)}</span>`;
+      }
+      return isCandidate ? ' <span class="tmchip dim">ungated</span>' : '';
+    }
     function llmModelRow(m){
       const roleBadge = `<span class="tmchip role">${esc(m.role)}</span>`;
       const candBadge = m.role==='candidate' ? ' <span class="tmchip candidate">bake-off — gate before promoting</span>' : '';
+      const evalBadge = evalChip(m.eval, m.role==='candidate');
       const statusChip = m.downloading ? `<span class="s running">downloading ${Math.round((m.progress||0)*100)}%</span>`
         : `<span class="s ${esc(m.status)}">${esc(m.status)}</span>`;
       const btn = m.downloading ? ''
         : m.status==='present' ? `<button class="xbtn" onclick="delLlmModel('${m.id}')">remove</button>`
         : `<button class="xbtn" onclick="installLlmModel('${m.id}')">install</button>`;
       const errLine = m.error ? `<div class="hint" style="color:var(--danger);margin-top:4px">${esc(m.error)}</div>` : '';
-      return `<div class="scard" title="${esc(m.notes||'')}"><div class="row" style="justify-content:space-between"><span>${esc(m.label)}${roleBadge}${candBadge}</span>${btn}</div>
+      return `<div class="scard" title="${esc(m.notes||'')}"><div class="row" style="justify-content:space-between"><span>${esc(m.label)}${roleBadge}${candBadge}${evalBadge}</span>${btn}</div>
         <div class="hint" style="margin-top:5px;font-family:monospace">~${m.sizeGb} GB · ${statusChip}</div>${errLine}</div>`;
     }
     async function loadLlmModels(){
@@ -1518,11 +1533,12 @@
       const cfgChip = `<span class="tmchip ${t.configured?'yes':''}">${t.configured?'configured':'not configured'}</span>`;
       const diskChip = t.onDisk===null ? '' : `<span class="tmchip ${t.onDisk?'yes':''}">${t.onDisk?'on disk':'missing on disk'}</span>`;
       const loadedChip = t.loaded ? `<span class="tmchip loaded">LOADED</span>` : '';
+      const evalBadge = evalChip(t.eval, false);   // live tiers aren't candidates -- no data just shows nothing
       const canWarm = reachable && !t.loaded;
       const btn = `<button class="xbtn" ${canWarm?'':'disabled'} onclick="warmModel('${esc(t.model)}')">warm</button>`;
       return `<div class="scard"><div class="row" style="justify-content:space-between">
         <span>${esc(t.label)} <span class="hint" style="font-family:monospace">${esc(t.model)}</span></span>${btn}</div>
-        <div class="hint" style="margin-top:5px">${cfgChip}${diskChip}${loadedChip}</div></div>`;
+        <div class="hint" style="margin-top:5px">${cfgChip}${diskChip}${loadedChip}${evalBadge}</div></div>`;
     }
     async function loadLlmTiers(){
       try {

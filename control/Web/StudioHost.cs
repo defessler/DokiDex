@@ -329,7 +329,20 @@ public static class StudioHost
 
         // ---- LLM/GGUF model manager (coder-fast/coder-big/reasoning/vision/fim/embed tiers + bake-off ----
         // candidates; multi-part-aware -- see LlmModelManager for the per-part G1 hash-verify discipline).
-        api.MapGet("/llm-models", (LlmModelManager lm) => Results.Json(lm.List()));
+        // eval (2.5): "passed/total" golden-run badge from evals/results.jsonl, joined by llamaSwapModel; null
+        // when that model has no eval rows (never run, or a fim/embed entry with no llamaSwapModel at all).
+        // Loaded fresh per request -- EvalResults.LoadSummaries reads one small jsonl file, no caching needed.
+        api.MapGet("/llm-models", (LlmModelManager lm) =>
+        {
+            var result = lm.List();
+            var evalSummaries = EvalResults.LoadSummaries();
+            var models = result.Models.Select(m => new
+            {
+                m.Id, m.Role, m.Label, m.SizeGb, m.LlamaSwapModel, m.Notes, m.Status, m.Files, m.Downloading, m.Progress, m.Error,
+                eval = EvalResults.Badge(m.LlamaSwapModel, evalSummaries),
+            });
+            return Results.Json(new { models, message = result.Message });
+        });
         api.MapPost("/llm-models/{id}/install", (string id, LlmModelManager lm) => Results.Json(new { status = lm.Install(id) }));
         api.MapDelete("/llm-models/{id}", (string id, LlmModelManager lm) => lm.Delete(id) ? Results.Ok() : Results.NotFound());
 
@@ -337,7 +350,8 @@ public static class StudioHost
         // loaded models (reused via GetStatusAsync -- no second llama-swap HTTP call, per F3) and
         // LlmModelManager's on-disk catalog presence, so the SPA can show tier readiness + a warm button without
         // polling llama-swap directly. onDisk is null when no catalog entry references that tier's model
-        // (unknown, not "missing") -- true/false only when a catalog entry actually names it.
+        // (unknown, not "missing") -- true/false only when a catalog entry actually names it. eval (2.5): same
+        // results.jsonl-derived badge as /api/llm-models, joined by tier model name.
         api.MapGet("/llm/tiers", async (DokiService doki, LlmModelManager lm, CancellationToken ct) =>
         {
             var doc = await doki.GetStatusAsync(ct).ConfigureAwait(false);
@@ -347,6 +361,7 @@ public static class StudioHost
                 .Where(m => !string.IsNullOrWhiteSpace(m.LlamaSwapModel))
                 .GroupBy(m => m.LlamaSwapModel!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First().Status == "present", StringComparer.OrdinalIgnoreCase);
+            var evalSummaries = EvalResults.LoadSummaries();
             var tiers = LlmTiers.AllRoles.Select(r => new
             {
                 tier = r.Id,
@@ -355,6 +370,7 @@ public static class StudioHost
                 configured = configured.Contains(r.Model),
                 onDisk = onDiskByModel.TryGetValue(r.Model, out var present) ? (bool?)present : null,
                 loaded = llamaSwap?.Model is string loadedModel && string.Equals(loadedModel, r.Model, StringComparison.OrdinalIgnoreCase),
+                eval = EvalResults.Badge(r.Model, evalSummaries),
             }).ToList();
             return Results.Json(new { tiers, reachable = llamaSwap?.Healthy ?? false });
         });
