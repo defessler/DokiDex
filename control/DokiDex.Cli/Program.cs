@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using DokiDex.Web;
@@ -9,11 +11,12 @@ namespace DokiDex.Cli;
 // (coder-fast/coder-big via llama-swap) through CodeAgent's ReAct loop. The workspace is the current directory, so
 // you `cd` into any project and run it. Read/Grep run freely; Edit/Write/Bash show a diff or the command and wait
 // for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /compact /context /resume
-// /sessions /export /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old blocking-per-
-// turn path). Esc or Ctrl+C interrupts. A dim context meter prints after each interactive turn (1.3); past ~40k
-// estimated tokens the session auto-compacts before the next turn runs (never in one-shot mode). Sessions persist
-// automatically (1.4) to %USERPROFILE%\.doki\sessions\<workspace-hash>\<timestamp>.json — OUTSIDE the repo, so
-// there's nothing to gitignore; `--continue` resumes the workspace's most recent one (composes with `-p`).
+// /sessions /export /status /usage /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old
+// blocking-per-turn path). Esc or Ctrl+C interrupts. A dim context meter prints after each interactive turn (1.3),
+// extended (1.6) with wall-clock seconds and tok/s; past ~40k estimated tokens the session auto-compacts before the
+// next turn runs (never in one-shot mode). Sessions persist automatically (1.4) to
+// %USERPROFILE%\.doki\sessions\<workspace-hash>\<timestamp>.json — OUTSIDE the repo, so there's nothing to
+// gitignore; `--continue` resumes the workspace's most recent one (composes with `-p`).
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
@@ -27,6 +30,21 @@ internal static class Program
     // persisted too, so the in-memory copy and the on-disk file never drift apart within a session).
     private static string _permRoot = "";
     private static CodePermissions.Rules _rules = CodePermissions.Rules.Empty;
+
+    // Usage accumulation (1.6): summed for the WHOLE interactive session — turns, prompt/completion tokens (from
+    // LocalLlm.LastUsage right after each turn), and wall-clock seconds spent in RunOneTurnInteractive. Backs
+    // /usage (aliases /cost, /stats) and the per-turn meter suffix. Reset only by process restart; a one-shot
+    // (`-p`) run never touches these — a single-turn process has no running "session" total worth showing.
+    private static int _usageTurnCount;
+    private static long _usagePromptTokensTotal;
+    private static long _usageCompletionTokensTotal;
+    private static double _usageWallSecondsTotal;
+
+    // Dedicated short-timeout client for `/status` (1.6, folds in the old 1.8 /status per the F3 merge) — probes
+    // llama-swap directly from the CLI rather than shelling out to `doki status`. Separate from LocalLlm's own
+    // clients: this is a read-only, CLI-local status probe, not part of the chat path, and wants to fail FAST
+    // (~3s) rather than share LocalLlm's multi-minute chat timeout.
+    private static readonly HttpClient StatusHttp = new() { Timeout = TimeSpan.FromSeconds(3) };
 
     // CodeAgent.RunTurnAsync never throws on a dead/unreachable model — its !turn.Ok path (CodeAgent.cs) returns the
     // error TEXT as the turn's content instead. These are the exact prefixes LocalLlm.ChatToolsAsync produces for
@@ -149,8 +167,7 @@ internal static class Program
                 if (string.Equals(cmd, "/init", StringComparison.OrdinalIgnoreCase))
                 {
                     await MaybeAutoCompactAsync(root, working, model);
-                    await RunOneTurnInteractive(root, working, model, always, InitPrompt, !noStream);
-                    PrintContextMeter(working);
+                    await RunTimedInteractiveTurnAsync(root, working, model, always, InitPrompt, !noStream);
                     SaveSession(root, sessionId, working, model);
                     continue;
                 }
@@ -162,12 +179,16 @@ internal static class Program
                     SaveSession(root, sessionId, working, model);
                     continue;
                 }
+                if (string.Equals(cmd, "/status", StringComparison.OrdinalIgnoreCase))
+                {
+                    await ShowStatusAsync(model);
+                    continue;
+                }
                 if (!SlashCommand(line, ref model, working, root, ref sessionId)) break;
                 continue;
             }
             await MaybeAutoCompactAsync(root, working, model);
-            await RunOneTurnInteractive(root, working, model, always, line, !noStream);
-            PrintContextMeter(working);
+            await RunTimedInteractiveTurnAsync(root, working, model, always, line, !noStream);
             SaveSession(root, sessionId, working, model);
         }
         return 0;
@@ -219,6 +240,26 @@ internal static class Program
             pollCts.Cancel();
             try { await poller; } catch { /* best-effort */ }
         }
+    }
+
+    // 1.6 usage/timing wrapper shared by every interactive turn (the plain user-turn path and /init's special
+    // case): resets LocalLlm.LastUsage BEFORE the turn so a turn that fails before ever reaching the model reports
+    // zeros for itself rather than showing a stale carry-over from a previous turn's hop; times the turn's
+    // wall-clock duration; accumulates both into the session totals (/usage); then prints the extended meter.
+    private static async Task RunTimedInteractiveTurnAsync(
+        string root, List<object> working, string model, HashSet<string> always, string userText, bool stream)
+    {
+        LocalLlm.LastUsage = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await RunOneTurnInteractive(root, working, model, always, userText, stream);
+        sw.Stop();
+        var usage = LocalLlm.LastUsage;
+        var wallSeconds = sw.Elapsed.TotalSeconds;
+        _usageTurnCount++;
+        _usagePromptTokensTotal += usage?.PromptTokens ?? 0;
+        _usageCompletionTokensTotal += usage?.CompletionTokens ?? 0;
+        _usageWallSecondsTotal += wallSeconds;
+        PrintContextMeter(working, usage, wallSeconds);
     }
 
     // Polls for Esc every ~100ms while a turn is in flight; Ctrl+C (Console.CancelKeyPress) still works too.
@@ -502,17 +543,72 @@ internal static class Program
         Paint(ConsoleColor.DarkGray, "  " + line + "\n");
     }
 
-    // 1.3 meter: printed after each interactive turn (never in one-shot mode) — "~12.3k / 32k ctx", colored by
-    // CodeContext's healthy-working-set thresholds (DarkGray under 24k, Yellow 24-32k, Red over 32k). 32k is the
-    // HEALTHY budget label shown here; the model's actual hard context window is 131k (CodeContext.HardWindowTokens,
-    // surfaced by /context instead — not part of this one-liner).
-    private static void PrintContextMeter(List<object> working)
+    // 1.3 meter (extended by 1.6): printed after each interactive turn (never in one-shot mode) —
+    // "~12.3k / 32k ctx · 12.4s · 38 tok/s", colored by CodeContext's healthy-working-set thresholds (DarkGray
+    // under 24k, Yellow 24-32k, Red over 32k). 32k is the HEALTHY budget label shown here; the model's actual hard
+    // context window is 131k (CodeContext.HardWindowTokens, surfaced by /context instead — not part of this
+    // one-liner). The wall-clock segment always prints; the tok/s segment is OMITTED when `usage` is null or both
+    // fields are zero (the 1.6 degrade path — no usage frame arrived, so a computed rate would be meaningless).
+    private static void PrintContextMeter(List<object> working, LocalLlm.UsageInfo? usage, double wallSeconds)
     {
         var tokens = CodeContext.EstimateTokens(working);
         var color = tokens > CodeContext.HealthyBudgetTokens ? ConsoleColor.Red
                    : tokens > CodeContext.AmberThresholdTokens ? ConsoleColor.Yellow
                    : ConsoleColor.DarkGray;
-        Paint(color, $"  ~{CodeContext.FormatK(tokens)} / {CodeContext.HealthyBudgetTokens / 1000}k ctx\n");
+        var line = $"  ~{CodeContext.FormatK(tokens)} / {CodeContext.HealthyBudgetTokens / 1000}k ctx"
+            + $" · {wallSeconds.ToString("0.0", CultureInfo.InvariantCulture)}s";
+        if (usage is { PromptTokens: > 0 } or { CompletionTokens: > 0 } && wallSeconds > 0)
+        {
+            var tokPerSec = usage!.CompletionTokens / wallSeconds;
+            line += $" · {tokPerSec.ToString("0", CultureInfo.InvariantCulture)} tok/s";
+        }
+        Paint(color, line + "\n");
+    }
+
+    // `/usage` (aliases `/cost`, `/stats` — F2): the WHOLE session's accumulated totals (1.6) — turn count,
+    // prompt/completion tokens (each hop's LocalLlm.LastUsage, summed by RunTimedInteractiveTurnAsync),
+    // wall-clock time, and the average tok/s over that time. Degrades cleanly to all-zero output (never divides by
+    // zero) when no turn has run yet, or every turn's usage was zero (stack down / older llama.cpp build).
+    private static void ShowUsage()
+    {
+        var avgTokPerSec = _usageWallSecondsTotal > 0 ? _usageCompletionTokensTotal / _usageWallSecondsTotal : 0.0;
+        Paint(ConsoleColor.Gray,
+            $"  turns: {_usageTurnCount}\n" +
+            $"  prompt tokens: {_usagePromptTokensTotal}\n" +
+            $"  completion tokens: {_usageCompletionTokensTotal}\n" +
+            $"  wall time: {_usageWallSecondsTotal.ToString("0.0", CultureInfo.InvariantCulture)}s\n" +
+            $"  avg tok/s: {avgTokPerSec.ToString("0.0", CultureInfo.InvariantCulture)}\n");
+    }
+
+    // `/status` (1.6 — folds in the old 1.8 /status per the F3 merge): probe llama-swap DIRECTLY from the CLI
+    // (no `doki status` subprocess) — GET /v1/models first (the configured-tiers list; also doubles as the
+    // reachability check) then, only if that answered, GET /running (the currently loaded model/state). Both
+    // probes are best-effort against StatusHttp's ~3s timeout; a connect failure on /v1/models means llama-swap
+    // itself is down, so this degrades straight to the documented "not reachable" message and skips /running
+    // entirely (no point probing a second endpoint on a server that's already unreachable).
+    private static async Task ShowStatusAsync(string currentModel)
+    {
+        string? modelsJson = null;
+        try { modelsJson = await StatusHttp.GetStringAsync("http://127.0.0.1:8080/v1/models"); } catch { /* unreachable */ }
+        if (modelsJson is null)
+        {
+            Paint(ConsoleColor.Red, "  llama-swap not reachable — run: doki up agent\n");
+            return;
+        }
+
+        string? runningJson = null;
+        try { runningJson = await StatusHttp.GetStringAsync("http://127.0.0.1:8080/running"); } catch { /* degrade below */ }
+
+        var configured = CodeStatus.ParseModels(modelsJson);
+        var running = CodeStatus.ParseRunning(runningJson);
+
+        Paint(ConsoleColor.Gray, "  llama-swap: reachable\n");
+        var loadedModel = running.Model is { Length: > 0 } m ? m : "(none)";
+        var loadedState = running.State is { Length: > 0 } st ? $" ({st})" : "";
+        Paint(ConsoleColor.Gray, $"  loaded model: {loadedModel}{loadedState}\n");
+        Paint(ConsoleColor.Gray, $"  configured tiers: {(configured.Count > 0 ? string.Join(", ", configured) : "(none)")}\n");
+        var configuredNote = configured.Count == 0 ? "" : configured.Contains(currentModel) ? " (configured)" : " (NOT in configured tiers)";
+        Paint(ConsoleColor.Gray, $"  session model: {currentModel}{configuredNote}\n");
     }
 
     private static bool SlashCommand(string line, ref string model, List<object> working, string root, ref string sessionId)
@@ -526,14 +622,16 @@ internal static class Program
             case "/help":
                 Paint(ConsoleColor.Gray,
                     "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
-                    "            /context  /resume [index]  /sessions  /export [file]  /permissions  /exit\n" +
+                    "            /context  /resume [index]  /sessions  /export [file]  /permissions  /status\n" +
+                    "            /usage  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
                     "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
                     "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n" +
                     "  /compact summarizes older history down to free up context (optionally focus it, e.g.\n" +
                     "  \"/compact the auth refactor\"); the session also auto-compacts past ~40k estimated tokens.\n" +
                     "  /context shows a small token-budget breakdown (system / history / total vs 32k healthy /\n" +
-                    "  131k hard window); a dim \"~Nk / 32k ctx\" meter prints after every turn too.\n" +
+                    "  131k hard window); a dim \"~Nk / 32k ctx · Ns · N tok/s\" meter prints after every turn too\n" +
+                    "  (the tok/s part is omitted when no usage frame arrived).\n" +
                     "  Sessions persist automatically (outside the repo) after every turn: `doki code --continue`\n" +
                     "  resumes the workspace's most recent one; /resume (alias /sessions) lists them newest-first\n" +
                     "  and /resume <index> loads one; /export [file] writes the transcript as markdown.\n" +
@@ -541,7 +639,11 @@ internal static class Program
                     "  saves a persisted rule instead of a session-only bypass (Bash offers exact/prefix/tool-wide).\n" +
                     "  /permissions allow|deny <rule> adds a rule; /permissions remove <n> removes one — rules look\n" +
                     "  like `Read`, `Edit`, `Bash(git status)`, or `Bash(dotnet test *)`; a deny rule always wins and\n" +
-                    "  is checked before you'd even be asked.\n");
+                    "  is checked before you'd even be asked.\n" +
+                    "  /status probes llama-swap directly: reachable?, loaded model, configured tiers, and whether\n" +
+                    "  the session's model is among them.\n" +
+                    "  /usage (aliases /cost, /stats) shows this session's totals: turns, prompt/completion tokens,\n" +
+                    "  wall time, and average tok/s.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -577,6 +679,11 @@ internal static class Program
             case "/permissions":
             case "/allow":
                 HandlePermissions(parts, root);
+                return true;
+            case "/usage":
+            case "/cost":
+            case "/stats":
+                ShowUsage();
                 return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");

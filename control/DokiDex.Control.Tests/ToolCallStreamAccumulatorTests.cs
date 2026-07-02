@@ -149,4 +149,45 @@ public class ToolCallStreamAccumulatorTests
         Assert.Empty(calls);
         Assert.Null(finishReason);
     }
+
+    // ---- usage frame capture (1.6) ----
+    // llama.cpp (given `stream_options: {include_usage: true}` on the request — LocalLlm.ChatToolsStreamAsync sets
+    // this) emits a FINAL SSE chunk carrying `usage` at the ROOT, typically alongside an EMPTY or absent `choices`
+    // array — so Usage must be read BEFORE the choices-array early-return, or this chunk's usage would never be seen.
+
+    [Fact]
+    public void Usage_frame_with_empty_choices_is_captured_without_affecting_content()
+    {
+        var acc = new ToolCallStreamAccumulator();
+        Assert.Equal("hi", acc.Push("""{"choices":[{"delta":{"content":"hi"}}]}"""));
+        Assert.Null(acc.Usage);   // not yet seen
+
+        var shown = acc.Push("""{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":34}}""");
+        Assert.Null(shown);   // no displayable content in a usage-only frame
+        Assert.NotNull(acc.Usage);
+        Assert.Equal(120, acc.Usage!.PromptTokens);
+        Assert.Equal(34, acc.Usage.CompletionTokens);
+
+        var (content, _, _) = acc.Finish();
+        Assert.Equal("hi", content);   // the usage frame never pollutes accumulated content
+    }
+
+    [Fact]
+    public void Usage_frame_with_absent_choices_is_still_captured()
+    {
+        var acc = new ToolCallStreamAccumulator();
+        Assert.Null(acc.Push("""{"usage":{"prompt_tokens":5,"completion_tokens":2}}"""));
+        Assert.NotNull(acc.Usage);
+        Assert.Equal(5, acc.Usage!.PromptTokens);
+        Assert.Equal(2, acc.Usage.CompletionTokens);
+    }
+
+    [Fact]
+    public void No_usage_frame_leaves_Usage_null_the_degrade_path()
+    {
+        var acc = new ToolCallStreamAccumulator();
+        acc.Push("""{"choices":[{"delta":{"content":"hi"}}]}""");
+        acc.Push("""{"choices":[{"delta":{},"finish_reason":"stop"}]}""");
+        Assert.Null(acc.Usage);   // an llama.cpp build that ignores stream_options never emits the frame
+    }
 }

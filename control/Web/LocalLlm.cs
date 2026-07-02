@@ -37,6 +37,41 @@ public static class LocalLlm
     // Error mirrors ChatResult's degradation (LLM down / no model) so the agent loop ends gracefully.
     public sealed record ToolChatResult(bool Ok, string Content, IReadOnlyList<ToolCall> ToolCalls, string? Error);
 
+    // ONE call's token usage from llama.cpp's `usage` object (1.6): prompt + completion tokens. Present on the
+    // blocking path's response body (ChatToolsAsync, via ParseUsage below) and, best-effort, on the FINAL streamed
+    // SSE chunk (ChatToolsStreamAsync, via ToolCallStreamAccumulator.Usage) when `stream_options.include_usage`
+    // is honored. A build that ignores that option simply never emits the frame — the degrade path is zeros, not
+    // an exception or a stale carry-over from a previous call.
+    public sealed record UsageInfo(int PromptTokens, int CompletionTokens);
+
+    // The MOST RECENT hop's usage, set by BOTH ChatToolsAsync and ChatToolsStreamAsync right after each call
+    // completes successfully. `volatile` here is NOT a general thread-safety mechanism — `doki code` runs one turn
+    // at a time on one thread, so there is never real concurrent access. It only stops the compiler/JIT/CPU from
+    // reordering this write past the read Program.cs does moments later on the same thread after RunTurnAsync's hop
+    // loop returns. LIMITATION (accepted, smallest-seam per the plan): a multi-hop turn overwrites this on every
+    // hop, so by the time the turn finishes it reflects only the LAST hop's usage, not the turn's true total.
+    public static volatile UsageInfo? LastUsage;
+
+    // PURE: extract `usage.{prompt_tokens, completion_tokens}` from a llama-swap /v1/chat/completions response
+    // body. Returns null when `usage` is absent (an older llama.cpp build, or a chunk that never carried it) or
+    // malformed — the caller (ChatToolsAsync) degrades that to LastUsage = zeros rather than leaving a stale value.
+    public static UsageInfo? ParseUsage(string? responseJson)
+    {
+        if (string.IsNullOrWhiteSpace(responseJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(responseJson);
+            if (!doc.RootElement.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+                return null;
+            var promptTokens = usage.TryGetProperty("prompt_tokens", out var pt) && pt.ValueKind == JsonValueKind.Number
+                ? pt.GetInt32() : 0;
+            var completionTokens = usage.TryGetProperty("completion_tokens", out var ct) && ct.ValueKind == JsonValueKind.Number
+                ? ct.GetInt32() : 0;
+            return new UsageInfo(promptTokens, completionTokens);
+        }
+        catch { return null; }
+    }
+
     // PURE: extract choices[0].message.tool_calls[].{id, function.name, function.arguments} from a llama-swap
     // /v1/chat/completions response. The exact shape is proven by serving/test-toolcall.ps1
     // (choices[0].message.tool_calls[].function.{name,arguments}). Returns EMPTY for: a plain content reply with
@@ -135,6 +170,7 @@ public static class LocalLlm
                     content = c.GetString() ?? "";
             }
             catch { /* content stays "" — tool_calls already parsed above */ }
+            LastUsage = ParseUsage(raw) ?? new UsageInfo(0, 0);   // 1.6: degrade path is zeros, never stale
             return new ToolChatResult(true, content, toolCalls, null);
         }
         catch (OperationCanceledException) { return new ToolChatResult(false, "", Array.Empty<ToolCall>(), "cancelled"); }
@@ -162,6 +198,10 @@ public static class LocalLlm
         body["tools"] = toolsJson;
         body["tool_choice"] = "auto";
         body["stream"] = true;
+        // 1.6: ask llama.cpp to emit a final usage-bearing chunk. Supported since b5497 (we run b9616); a build
+        // that ignores this option simply never sends the frame — ToolCallStreamAccumulator.Usage stays null and
+        // LastUsage below degrades to zeros, never an error.
+        body["stream_options"] = new { include_usage = true };
 
         var acc = new ToolCallStreamAccumulator();
         var needsFallback = false;
@@ -226,6 +266,7 @@ public static class LocalLlm
         if (acc.HasMalformedArguments)
             return await ChatToolsAsync(messages, toolsJson, temperature, maxTokens, ct, model).ConfigureAwait(false);
 
+        LastUsage = acc.Usage ?? new UsageInfo(0, 0);   // 1.6: degrade path is zeros (no usage frame arrived)
         return new ToolChatResult(true, content, calls, null);
     }
 
@@ -414,15 +455,34 @@ internal sealed class ToolCallStreamAccumulator
     // caller's signal to fall back to a blocking retry (F1c) rather than dispatch a tool call with broken args.
     public bool HasMalformedArguments { get; private set; }
 
+    // The FINAL chunk's usage (1.6), when `stream_options.include_usage` is honored — set by Push, read by the
+    // caller (LocalLlm.ChatToolsStreamAsync) after the read loop ends. Null when no usage frame ever arrived (the
+    // degrade path — an older llama.cpp build, or the stream ended before one showed up).
+    public LocalLlm.UsageInfo? Usage { get; private set; }
+
     // Feed one SSE data-line PAYLOAD. Returns the content delta to display live (onToken), or null when this
-    // line carried no displayable content (a tool-call fragment, reasoning_content, a role/finish-only chunk, or
-    // unparseable JSON — all handled the same defensive way as ParseSseDelta, but total: never throws).
+    // line carried no displayable content (a tool-call fragment, reasoning_content, a role/finish-only chunk, a
+    // usage-only frame, or unparseable JSON — all handled the same defensive way as ParseSseDelta, but total:
+    // never throws).
     public string? Push(string sseDataPayloadJson)
     {
         if (string.IsNullOrWhiteSpace(sseDataPayloadJson)) return null;
         try
         {
             using var doc = JsonDocument.Parse(sseDataPayloadJson);
+
+            // Usage frame (1.6): llama.cpp's FINAL chunk often carries `usage` at the ROOT alongside an empty or
+            // absent `choices` array — read this FIRST, before the choices-array early-return below would
+            // otherwise skip the chunk entirely and lose it.
+            if (doc.RootElement.TryGetProperty("usage", out var usageEl) && usageEl.ValueKind == JsonValueKind.Object)
+            {
+                var promptTokens = usageEl.TryGetProperty("prompt_tokens", out var pt) && pt.ValueKind == JsonValueKind.Number
+                    ? pt.GetInt32() : 0;
+                var completionTokens = usageEl.TryGetProperty("completion_tokens", out var ct) && ct.ValueKind == JsonValueKind.Number
+                    ? ct.GetInt32() : 0;
+                Usage = new LocalLlm.UsageInfo(promptTokens, completionTokens);
+            }
+
             if (!doc.RootElement.TryGetProperty("choices", out var choices)
                 || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
                 return null;
