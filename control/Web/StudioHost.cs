@@ -428,11 +428,11 @@ public static class StudioHost
         // When body.Tools is true the turn runs through the bounded TOOL-CALLING agent loop (Chat.AgentAsync) with
         // the curated single-tool registry (search_library) and returns the tool steps taken; Tools=false (the
         // default) keeps the exact current Chat.SendAsync path. Same 503 + canonical-string contract either way.
-        api.MapPost("/chat", async (ChatRequest body, CancellationToken ct) =>
+        api.MapPost("/chat", async (ChatRequest body, GalleryService gal, CancellationToken ct) =>
         {
             var r = body.Tools
-                ? await Chat.AgentAsync(body, LlmTiers.Resolve(body.Tier), ct)
-                : await Chat.SendAsync(body, LlmTiers.Resolve(body.Tier), ct);
+                ? await Chat.AgentAsync(body, LlmTiers.Resolve(body.Tier), gal, ct)
+                : await Chat.SendAsync(body, LlmTiers.Resolve(body.Tier), gal, ct);
             if (!r.Ok)
                 return Results.Json(new { error = r.Message }, statusCode: 503);   // canonical "start agent mode first"
             // kbId carries the conversation's effective attached KB so the SPA can refresh _chatKbId after a FRESH
@@ -450,7 +450,7 @@ public static class StudioHost
         // with the canonical "start agent mode first" string; the non-streaming /api/chat above keeps the real 503
         // (it is the P2 fallback). Each token delta is JSON-wrapped ('data: {"t":...}') so newlines/quotes in a
         // token survive SSE framing; the SPA JSON.parses each data frame. Bounded by ctx.RequestAborted.
-        api.MapPost("/chat/stream", async (ChatRequest body, HttpContext ctx) =>
+        api.MapPost("/chat/stream", async (ChatRequest body, GalleryService gal, HttpContext ctx) =>
         {
             ctx.Response.Headers.ContentType = "text/event-stream";
             ctx.Response.Headers.CacheControl = "no-cache";
@@ -458,7 +458,7 @@ public static class StudioHost
 
             var ct = ctx.RequestAborted;
             var any = false;
-            await foreach (var ev in Chat.StreamAsync(body, LlmTiers.Resolve(body.Tier), ct))
+            await foreach (var ev in Chat.StreamAsync(body, LlmTiers.Resolve(body.Tier), gal, ct))
             {
                 if (ev.IsMeta)
                 {
@@ -568,7 +568,7 @@ public static class StudioHost
         // assistant reply), Save, then drive the UNCHANGED Chat.StreamAsync with body.Message = that user content.
         // The normal append re-adds one user + one assistant turn — a fresh streamed reply. 404 when the thread is
         // missing; an in-band 'event: error' (the LLM-down contract) when there is no user turn to redo.
-        api.MapPost("/chats/{id}/regenerate", async (string id, HttpContext ctx) =>
+        api.MapPost("/chats/{id}/regenerate", async (string id, GalleryService gal, HttpContext ctx) =>
         {
             ctx.Response.Headers.ContentType = "text/event-stream";
             ctx.Response.Headers.CacheControl = "no-cache";
@@ -616,7 +616,7 @@ public static class StudioHost
             var any = false;
             try
             {
-                await foreach (var ev in Chat.StreamAsync(resend, LlmTiers.Resolve(resend.Tier), ct))
+                await foreach (var ev in Chat.StreamAsync(resend, LlmTiers.Resolve(resend.Tier), gal, ct))
                 {
                     if (ev.IsMeta)
                     {

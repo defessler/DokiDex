@@ -84,6 +84,11 @@ models:
 
   # Fast fallback vision tier — Qwen3-VL-8B (~7GB, sub-second warm). Request "vision-8b" for
   # high-volume / interactive vision where the 32B's extra accuracy isn't needed.
+  # AUDIT quick-win #11 (2026-07-01): added --cache-type-k/v q8_0 to match the "vision" tier above
+  # and reclaim ~1.6GB VRAM. --cache-reuse deliberately NOT added here, for consistency with
+  # "vision" (which also omits it): vision prompts carry per-request image tokens, so the
+  # text-prefix-reuse win that justifies --cache-reuse 256 on the text-only coder-* tiers is
+  # marginal for this tier. Config-only change; VRAM/latency not re-verified live (GPU-gated).
   "vision-8b":
     cmd: |
       __DOKI_ROOT__\serving\llama.cpp\llama-server.exe
@@ -93,6 +98,8 @@ models:
       -ngl 99
       -c 16384
       --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
       --jinja
 
   # ---- Bake-off candidates (COMMENTED OUT; the field moved since the last refresh — see docs/decisions.md).

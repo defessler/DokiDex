@@ -351,12 +351,15 @@ public static class ChatTools
     // unknown tool name yields a clear "unknown tool" text (the model can recover / re-plan) rather than throwing,
     // and the search_library executor is wrapped so a disk hiccup degrades to a graceful message — the agent loop
     // must never crash on a tool. Names are matched case-insensitively, exact.
-    public static string Run(string? name, string? argumentsJson, string? conversation = null)
+    // AUDIT P2-4 (2026-07-01): `gallery` is threaded in by the caller (Chat.AgentAsync, which gets it from the
+    // endpoint's DI-resolved singleton) rather than `new`-ed here, so search_library reuses the one GalleryService
+    // instance instead of splitting state across a second instance.
+    public static string Run(string? name, string? argumentsJson, GalleryService gallery, string? conversation = null)
     {
         switch ((name ?? "").Trim().ToLowerInvariant())
         {
             case "search_library":
-                return RunSearchLibrary(ParseQuery(argumentsJson));
+                return RunSearchLibrary(ParseQuery(argumentsJson), gallery);
             case "web_search":
             {
                 var (q, k) = ParseQueryAndK(argumentsJson, 5);
@@ -384,11 +387,11 @@ public static class ChatTools
 
     // The one thin disk call: query the gallery and fold the top matches into a compact text block (file name +
     // its prompt). Kept minimal and graceful so the pure ParseQuery + unknown-tool paths carry the test weight.
-    private static string RunSearchLibrary(string query)
+    private static string RunSearchLibrary(string query, GalleryService gallery)
     {
         try
         {
-            var items = new GalleryService().List(query).Take(MaxResults).ToList();
+            var items = gallery.List(query).Take(MaxResults).ToList();
             if (items.Count == 0)
                 return string.IsNullOrEmpty(query)
                     ? "The library is empty — nothing has been generated yet."

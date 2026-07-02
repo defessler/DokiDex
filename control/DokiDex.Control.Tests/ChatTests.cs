@@ -56,7 +56,7 @@ public class ChatTests
     public async System.Threading.Tasks.Task SendAsync_rejects_a_blank_message_without_any_network_call()
     {
         // A whitespace-only message hits the guard before the LLM is ever contacted (no :8080 dependency here).
-        var r = await Chat.SendAsync(new ChatRequest(null, null, "  ", null), null, CancellationToken.None);
+        var r = await Chat.SendAsync(new ChatRequest(null, null, "  ", null), null, new GalleryService(), CancellationToken.None);
 
         Assert.False(r.Ok);
         Assert.Equal("empty message", r.Message);

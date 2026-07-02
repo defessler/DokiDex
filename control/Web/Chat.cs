@@ -96,7 +96,7 @@ public static class Chat
         public static StreamEvent Token(string delta) => new(false, null, delta);
     }
 
-    public static async Task<Result> SendAsync(ChatRequest body, string? model, CancellationToken ct)
+    public static async Task<Result> SendAsync(ChatRequest body, string? model, GalleryService gallery, CancellationToken ct)
     {
         var userMessage = (body?.Message ?? "").Trim();
         if (userMessage.Length == 0) return new Result(false, "", "", "empty message");
@@ -117,7 +117,7 @@ public static class Chat
         // P5 vision-in-chat: resolve an attached gallery image to a data: URL. When it resolves we (a) attach it as
         // the multimodal user-turn content and (b) FORCE the Vision model/tier (vision needs the VL block regardless
         // of the requested speed tier). An unresolvable/absent image => text-only with the originally requested tier.
-        var imageDataUrl = ResolveImage(body.Image);
+        var imageDataUrl = ResolveImage(body.Image, gallery);
         model = VisionModel(imageDataUrl, model);
 
         // KB context-injection: retrieve the conversation's top-K relevant doc chunks for the latest turn (null +
@@ -195,7 +195,7 @@ public static class Chat
     // graceful "stopped after N steps" if none). Persists the user + final assistant turns exactly like SendAsync
     // (reusing SelectHistory + the empty-message guard). The live LLM call degrades like SendAsync when :8080 is
     // down (Ok=false + the canonical message => the endpoint maps to the same 503 contract).
-    public static async Task<Result> AgentAsync(ChatRequest body, string? model, CancellationToken ct)
+    public static async Task<Result> AgentAsync(ChatRequest body, string? model, GalleryService gallery, CancellationToken ct)
     {
         var userMessage = (body?.Message ?? "").Trim();
         if (userMessage.Length == 0) return new Result(false, "", "", "empty message");
@@ -256,7 +256,7 @@ public static class Chat
             var results = new List<string>(turn.ToolCalls.Count);
             foreach (var tc in turn.ToolCalls)
             {
-                var result = ChatTools.Run(tc.Name, tc.ArgumentsJson, conv.Id);
+                var result = ChatTools.Run(tc.Name, tc.ArgumentsJson, gallery, conv.Id);
                 steps.Add(new ToolStep(tc.Name, tc.ArgumentsJson, result));
                 results.Add(result);
             }
@@ -292,7 +292,7 @@ public static class Chat
     // Meta carrying the (server-generated) conversation id so the endpoint can frame it before any token; each
     // later event is one token Delta. Zero deltas (LLM down / no model) => the caller emits the in-band error.
     public static async IAsyncEnumerable<StreamEvent> StreamAsync(
-        ChatRequest body, string? model, [EnumeratorCancellation] CancellationToken ct)
+        ChatRequest body, string? model, GalleryService gallery, [EnumeratorCancellation] CancellationToken ct)
     {
         var userMessage = (body?.Message ?? "").Trim();
         if (userMessage.Length == 0)
@@ -313,7 +313,7 @@ public static class Chat
 
         // P5 vision-in-chat (same rule as SendAsync): a resolvable gallery image attaches as multimodal content and
         // forces the Vision model/tier; an unresolvable/absent image streams text-only on the requested tier.
-        var imageDataUrl = ResolveImage(body.Image);
+        var imageDataUrl = ResolveImage(body.Image, gallery);
         model = VisionModel(imageDataUrl, model);
 
         // KB context-injection (same as SendAsync): retrieve the conversation's relevant doc chunks before the
@@ -366,10 +366,12 @@ public static class Chat
     // name, or a non-image artifact => null (the turn proceeds text-only). Graceful — never throws: a bad name is
     // simply ignored, exactly like /api/describe rejects an unresolvable name. GalleryService.ImageDataUrl is
     // path-scoped (no traversal) and returns null for anything that isn't a real image in the gallery root.
-    private static string? ResolveImage(string? imageName)
+    // AUDIT P2-4 (2026-07-01): takes the caller's GalleryService instance (the DI singleton in production) instead
+    // of `new`-ing one, so this reuses the same instance StudioHost registers rather than splitting state.
+    private static string? ResolveImage(string? imageName, GalleryService gallery)
     {
         if (string.IsNullOrWhiteSpace(imageName)) return null;
-        try { return new GalleryService().ImageDataUrl(imageName.Trim()); }
+        try { return gallery.ImageDataUrl(imageName.Trim()); }
         catch { return null; }
     }
 

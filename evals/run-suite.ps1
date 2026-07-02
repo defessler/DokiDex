@@ -3,7 +3,12 @@
 param(
     [Parameter(Mandatory)][ValidateSet("crush", "opencode", "claw")][string]$Harness,
     [Parameter(Mandatory)][string]$Model,
-    [int]$TimeoutSec = 540
+    [int]$TimeoutSec = 540,
+    # AUDIT quick-win #8 (2026-07-01): gate enforcement is opt-in (default 0 = no gate, matching prior
+    # behavior) so ad-hoc suite runs are unaffected. Bake-off / promotion callers pass e.g.
+    # -MinPassRate 91 to make the ">=91% golden" policy documented in docs/decisions.md an enforced,
+    # scriptable gate instead of a manually-eyeballed number.
+    [double]$MinPassRate = 0
 )
 $ErrorActionPreference = "Stop"
 $evals = $PSScriptRoot
@@ -42,4 +47,10 @@ $lines | Set-Content $card
 
 Write-Host ""
 Write-Host "SUITE COMPLETE  $Harness x $Model  $passed/$total ($rate%)  -> $card"
+
+if ($MinPassRate -gt 0 -and $rate -lt $MinPassRate) {
+    Write-Error "GATE FAIL: $rate% < required $MinPassRate%"
+    exit 1
+}
+
 exit 0

@@ -50,7 +50,7 @@ public class AgentLoopTests
     public async System.Threading.Tasks.Task AgentAsync_rejects_a_blank_message_without_any_network_call()
     {
         // The same empty-message guard SendAsync uses: a whitespace-only message returns before any :8080 call.
-        var r = await Chat.AgentAsync(new ChatRequest(null, null, "  ", null, Tools: true), null, CancellationToken.None);
+        var r = await Chat.AgentAsync(new ChatRequest(null, null, "  ", null, Tools: true), null, new GalleryService(), CancellationToken.None);
         Assert.False(r.Ok);
         Assert.Equal("empty message", r.Message);
     }

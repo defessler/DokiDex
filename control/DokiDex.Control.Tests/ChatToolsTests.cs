@@ -18,6 +18,10 @@ namespace DokiDex.Control.Tests;
 [Collection("PendingGenStore")]
 public class ChatToolsTests
 {
+    // AUDIT P2-4 (2026-07-01): Run now takes an explicit GalleryService (the DI singleton in production; here just
+    // a plain instance — these tests are not exercising the DI container) instead of `new`-ing one internally.
+    private static readonly GalleryService Gal = new();
+
     [Fact]
     public void The_tools_array_is_well_formed_openai_function_shape()
     {
@@ -71,7 +75,7 @@ public class ChatToolsTests
     [Fact]
     public void Run_with_an_unknown_tool_name_returns_a_clear_unknown_tool_message_listing_all_tools()
     {
-        var result = ChatTools.Run("get_weather", "{\"city\":\"Tokyo\"}");
+        var result = ChatTools.Run("get_weather", "{\"city\":\"Tokyo\"}", Gal);
         Assert.Contains("unknown tool", result, System.StringComparison.OrdinalIgnoreCase);
         Assert.Contains("get_weather", result);
         // The default text now lists the full curated set so the model can re-plan.
@@ -132,7 +136,7 @@ public class ChatToolsTests
         // The disk touch (PendingGenStore.Enqueue) is graceful; a present prompt returns the queued notice and
         // names the Media-mode switch. We clean up any file this enqueues so the test leaves no residue.
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
-        var result = ChatTools.Run("generate_image", "{\"prompt\":\"a neon dragon\",\"count\":2}");
+        var result = ChatTools.Run("generate_image", "{\"prompt\":\"a neon dragon\",\"count\":2}", Gal);
         Assert.Contains("Media mode", result, System.StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Queued 2", result);   // the surfaced phrase (FormatGenQueued), not a position-blind stray '2'
         foreach (var p in PendingGenStore.List())
@@ -147,7 +151,7 @@ public class ChatToolsTests
         // hardcoded null, so a completed gen could never be surfaced inline in its conversation.
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
         var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];
-        ChatTools.Run("generate_image", "{\"prompt\":\"a neon dragon\"}", convId);
+        ChatTools.Run("generate_image", "{\"prompt\":\"a neon dragon\"}", Gal, convId);
         var created = PendingGenStore.List().Where(p => !before.Contains(p.Id)).ToList();
         try
         {
@@ -160,10 +164,10 @@ public class ChatToolsTests
     [Fact]
     public void Run_for_generate_image_without_a_conversation_leaves_the_backlink_null()
     {
-        // Backward-compatible default: the 2-arg Run (no conversation) still enqueues a null backlink (a stateless
-        // caller / non-chat dispatch), so the new overload can't silently fabricate a wrong link.
+        // Backward-compatible default: Run with no conversation argument still enqueues a null backlink (a
+        // stateless caller / non-chat dispatch), so the optional parameter can't silently fabricate a wrong link.
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
-        ChatTools.Run("generate_image", "{\"prompt\":\"a quiet meadow\"}");
+        ChatTools.Run("generate_image", "{\"prompt\":\"a quiet meadow\"}", Gal);
         var created = PendingGenStore.List().Where(p => !before.Contains(p.Id)).ToList();
         try
         {
@@ -181,7 +185,7 @@ public class ChatToolsTests
         // PendingGenStoreTests) would move a plain before/after Count and spuriously fail. Snapshot the set of ids
         // before, then assert NO NEW id appeared — robust no matter how many records a sibling class adds.
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
-        var result = ChatTools.Run("generate_image", "{\"prompt\":\"   \"}");
+        var result = ChatTools.Run("generate_image", "{\"prompt\":\"   \"}", Gal);
         Assert.Contains("prompt", result, System.StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));   // this call queued nothing
     }
@@ -315,7 +319,7 @@ public class ChatToolsTests
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
         var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];
         var result = ChatTools.Run("edit_image",
-            "{\"prompt\":\"make it bluer\",\"source\":\"2026/06/img_001.png\",\"strength\":0.4}", convId);
+            "{\"prompt\":\"make it bluer\",\"source\":\"2026/06/img_001.png\",\"strength\":0.4}", Gal, convId);
         var created = PendingGenStore.List().Where(p => !before.Contains(p.Id)).ToList();
         try
         {
@@ -344,7 +348,7 @@ public class ChatToolsTests
         PendingGenStore.SetStatus(seed.Id, "done", resultRel: "2026/06/seeded.png");
         try
         {
-            ChatTools.Run("edit_image", "{\"prompt\":\"same dragon, new pose\"}", convId);
+            ChatTools.Run("edit_image", "{\"prompt\":\"same dragon, new pose\"}", Gal, convId);
             var edit = PendingGenStore.List().Single(p => p.Conversation == convId && p.InitImage == "2026/06/seeded.png");
             Assert.Equal("same dragon, new pose", edit.Prompt);
             Assert.NotNull(edit.Strength);   // the default vary dial was applied
@@ -359,7 +363,7 @@ public class ChatToolsTests
     public void Run_for_edit_image_with_a_blank_prompt_asks_for_a_prompt_and_does_not_queue()
     {
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
-        var result = ChatTools.Run("edit_image", "{\"prompt\":\"   \",\"source\":\"x.png\"}");
+        var result = ChatTools.Run("edit_image", "{\"prompt\":\"   \",\"source\":\"x.png\"}", Gal);
         Assert.Contains("edit instruction", result, System.StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));   // queued nothing
     }
@@ -371,7 +375,7 @@ public class ChatToolsTests
         // it returns a clear "which image" line WITHOUT touching disk (a fresh conversation id has zero done gens).
         var before = PendingGenStore.List().Select(p => p.Id).ToHashSet();
         var convId = "conv-" + System.Guid.NewGuid().ToString("N")[..8];   // no done gens => nothing to default to
-        var result = ChatTools.Run("edit_image", "{\"prompt\":\"make it bluer\"}", convId);
+        var result = ChatTools.Run("edit_image", "{\"prompt\":\"make it bluer\"}", Gal, convId);
         Assert.Contains("image", result, System.StringComparison.OrdinalIgnoreCase);   // names that it needs a source image
         Assert.DoesNotContain(PendingGenStore.List(), p => !before.Contains(p.Id));     // queued nothing
     }
@@ -380,7 +384,7 @@ public class ChatToolsTests
     public void Run_with_an_unknown_tool_name_lists_edit_image_in_the_curated_set()
     {
         // The unknown-tool fall-through advertises the full curated set so the model can re-plan onto edit_image.
-        var result = ChatTools.Run("frobnicate", "{}");
+        var result = ChatTools.Run("frobnicate", "{}", Gal);
         Assert.Contains("edit_image", result);
     }
 
@@ -460,7 +464,7 @@ public class ChatToolsTests
     {
         // The disk call (GalleryService.List) is thin; with no gallery present it degrades to a clear "no
         // matching" text rather than throwing. Locks that Run is total even when the library is empty.
-        var result = ChatTools.Run("search_library", "{\"query\":\"zzz-unlikely-match-zzz\"}");
+        var result = ChatTools.Run("search_library", "{\"query\":\"zzz-unlikely-match-zzz\"}", Gal);
         Assert.False(string.IsNullOrWhiteSpace(result));
     }
 

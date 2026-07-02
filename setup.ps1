@@ -836,16 +836,36 @@ if ($FaceId) {
         Get-Model "$ix/ControlNetModel/config.json"                          (Join-Path $cnDir "instantid_controlnet_config.json")
         # antelopev2 face encoder: a 361MB zip (upstream's primary pointer is Google Drive = not scriptable; this
         # is the MonsterMMORPG HF mirror). Unzip to insightface\models\antelopev2\ (the 5 .onnx models — a MIX, not
-        # all detectors: glintr100 = recognition/embedding, genderage = attribute, scrfd/det = detection). The
-        # 5-.onnx contents are NOT byte-verified at rest — confirm on-GPU, or delete the dir to let the node
-        # auto-download antelopev2 on first run.
+        # all detectors: glintr100 = recognition/embedding, genderage = attribute, scrfd/det = detection). Expected
+        # layout is FLAT: the 5 .onnx files directly under $insDir, NOT under a nested antelopev2\ subfolder — the
+        # InstantID node reads them at the immediate child level. The 5-.onnx contents are NOT byte-verified at
+        # rest — confirm on-GPU, or delete the dir to let the node auto-download antelopev2 on first run.
         $anteZip = Join-Path $insDir "antelopev2.zip"
         $anteOk  = Join-Path $insDir "glintr100.onnx"   # sentinel: one of the 5 expected detectors
         if (-not (Test-Path $anteOk)) {
             Get-Model "https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip" $anteZip
             if (Test-Path $anteZip) {
                 Info "unzipping antelopev2 face encoder ..."
-                try { Expand-Archive -Path $anteZip -DestinationPath $insDir -Force; Remove-Item $anteZip -Force -ErrorAction SilentlyContinue; Ok "antelopev2 unzipped -> $insDir" }
+                try {
+                    Expand-Archive -Path $anteZip -DestinationPath $insDir -Force
+                    Remove-Item $anteZip -Force -ErrorAction SilentlyContinue
+                    # AUDIT quick-win #7 / P2-9 (2026-07-01): some antelopev2 zip builds carry a top-level
+                    # "antelopev2\" folder, so the 5 .onnx files land one directory deeper than $insDir
+                    # (insightface\models\antelopev2\antelopev2\*.onnx). The sentinel exists "somewhere" but
+                    # the InstantID node looks in $insDir directly and silently fails to find them at runtime.
+                    # Detect the nested case post-extract and flatten it; if the layout is unrecognized, warn
+                    # loudly instead of leaving a half-usable install.
+                    if (-not (Test-Path $anteOk)) {
+                        $nested = Get-ChildItem $insDir -Recurse -File -Filter "glintr100.onnx" -ErrorAction SilentlyContinue | Select-Object -First 1
+                        if ($nested) {
+                            Get-ChildItem $nested.DirectoryName -File | Move-Item -Destination $insDir -Force
+                            Remove-Item $nested.DirectoryName -Recurse -Force -ErrorAction SilentlyContinue
+                            Info "antelopev2 zip nested one level deep ($($nested.DirectoryName)); flattened -> $insDir"
+                        }
+                    }
+                    if (Test-Path $anteOk) { Ok "antelopev2 unzipped -> $insDir" }
+                    else { Warn "antelopev2 unzipped but expected file 'glintr100.onnx' not found under $insDir (unrecognized zip layout); delete $insDir and re-run, or let the InstantID node auto-download it on first run" }
+                }
                 catch { Warn "antelopev2 unzip failed ($($_.Exception.Message)); the InstantID node can auto-download it on first run instead" }
             } else { Warn "antelopev2 mirror unreachable; the InstantID node can auto-download it on first run instead" }
         } else { Ok "antelopev2 present" }
