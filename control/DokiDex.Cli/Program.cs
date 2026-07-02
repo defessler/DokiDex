@@ -19,6 +19,9 @@ namespace DokiDex.Cli;
 // gitignore; `--continue` resumes the workspace's most recent one (composes with `-p`). Input ergonomics (1.7):
 // `@rel/path` inline in any message (interactive or `-p`) appends a bounded read of that file for the model (up to
 // 3 per message); a line starting `!` runs a shell command DIRECTLY, with no approval gate — the user typed it.
+// Custom slash commands (1.9): a `.doki/commands/<name>.md` file (workspace-local, wins) or
+// `%USERPROFILE%\.doki\commands\<name>.md` (global) becomes `/<name> [args]` — its text runs as a normal turn,
+// "$ARGUMENTS" replaced by whatever followed the command name; built-ins above always take precedence.
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
@@ -207,7 +210,15 @@ internal static class Program
                     await ShowStatusAsync(model);
                     continue;
                 }
-                if (!SlashCommand(line, ref model, working, root, ref sessionId)) break;
+                var outcome = SlashCommand(line, ref model, working, root, ref sessionId);
+                if (outcome == SlashOutcome.Exit) break;
+                if (outcome == SlashOutcome.Unmatched)
+                {
+                    // Custom slash commands (1.9): only reached once every built-in has already failed to match
+                    // (SlashCommand's own `default:` case) — built-ins always win over a same-named custom command.
+                    await HandleCustomCommandAsync(root, working, model, always, cmd, cmdParts, noStream);
+                    SaveSession(root, sessionId, working, model);
+                }
                 continue;
             }
             // @rel/path file mentions (1.7a): augment BEFORE the turn runs — the original "@token" wording stays in
@@ -639,14 +650,20 @@ internal static class Program
         Paint(ConsoleColor.Gray, $"  session model: {currentModel}{configuredNote}\n");
     }
 
-    private static bool SlashCommand(string line, ref string model, List<object> working, string root, ref string sessionId)
+    // SlashCommand's three-way outcome (1.9): built-ins return Handled or Exit exactly as the old bool did
+    // (true/false); Unmatched is new — the `default:` case now falls through to it INSTEAD of printing "unknown"
+    // directly, so Main can try a custom command (CodeCommands.Discover) before ever reporting a miss. Built-ins
+    // always win: Unmatched is only ever produced once every case above it has already failed to match.
+    private enum SlashOutcome { Handled, Exit, Unmatched }
+
+    private static SlashOutcome SlashCommand(string line, ref string model, List<object> working, string root, ref string sessionId)
     {
         var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         switch (parts[0].ToLowerInvariant())
         {
             case "/exit":
             case "/quit":
-                return false;
+                return SlashOutcome.Exit;
             case "/help":
                 Paint(ConsoleColor.Gray,
                     "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
@@ -678,12 +695,17 @@ internal static class Program
                     "  @rel/path mentions a workspace file inline (up to 3 per message) — its first ~200 lines are\n" +
                     "  appended for the model to see; an unresolved path is noted instead.\n" +
                     "  !command runs a shell command DIRECTLY, no approval needed (you typed it yourself) — its\n" +
-                    "  output is shown and also given to the model as context for your next turn.\n");
-                return true;
+                    "  output is shown and also given to the model as context for your next turn.\n" +
+                    "  Custom commands (1.9): a `.doki/commands/<name>.md` file (workspace) or\n" +
+                    "  `%USERPROFILE%\\.doki\\commands\\<name>.md` (global; workspace wins on a name clash) becomes\n" +
+                    "  `/<name> [args]` — its text runs as your next turn, with every \"$ARGUMENTS\" replaced by\n" +
+                    "  whatever you typed after the command name.\n");
+                PrintCustomCommandsHelp(root);
+                return SlashOutcome.Handled;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
                 else Paint(ConsoleColor.Gray, $"  model = {model}  (coder-fast | coder-big | fast-candidate-gptoss20b)\n");
-                return true;
+                return SlashOutcome.Handled;
             case "/clear":
                 // Keep ALL leading system messages (the system prompt AND, since 1.2, the orientation message) —
                 // NOT just working[0]. A fixed RemoveRange(1, ...) would nuke the orientation message the moment
@@ -691,35 +713,35 @@ internal static class Program
                 var keep = LeadingSystemCount(working);
                 if (working.Count > keep) working.RemoveRange(keep, working.Count - keep);
                 Paint(ConsoleColor.Gray, "  context cleared.\n");
-                return true;
+                return SlashOutcome.Handled;
             case "/cwd":
                 Paint(ConsoleColor.Gray, $"  workspace: {root}\n");
-                return true;
+                return SlashOutcome.Handled;
             case "/undo":
                 Paint(ConsoleColor.Gray, "  " + CodeAgent.Undo() + "\n");
-                return true;
+                return SlashOutcome.Handled;
             case "/diff":
                 ShowGitDiff(root);
-                return true;
+                return SlashOutcome.Handled;
             case "/context":
                 ShowContext(working);
-                return true;
+                return SlashOutcome.Handled;
             case "/resume":
             case "/sessions":
                 HandleResume(parts, working, root, ref sessionId);
-                return true;
+                return SlashOutcome.Handled;
             case "/export":
                 HandleExport(parts, working, root);
-                return true;
+                return SlashOutcome.Handled;
             case "/permissions":
             case "/allow":
                 HandlePermissions(parts, root);
-                return true;
+                return SlashOutcome.Handled;
             case "/usage":
             case "/cost":
             case "/stats":
                 ShowUsage();
-                return true;
+                return SlashOutcome.Handled;
             case "/plan":
                 if (parts.Length > 1 && string.Equals(parts[1].Trim(), "off", StringComparison.OrdinalIgnoreCase))
                 {
@@ -731,15 +753,55 @@ internal static class Program
                     _planMode = true;
                     Paint(ConsoleColor.Yellow, "  plan mode on — read-only (Read/Grep); /act to apply changes.\n");
                 }
-                return true;
+                return SlashOutcome.Handled;
             case "/act":
                 _planMode = false;
                 Paint(ConsoleColor.Gray, "  plan mode off — Edit/Write/Bash restored.\n");
-                return true;
+                return SlashOutcome.Handled;
             default:
-                Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");
-                return true;
+                // Not a built-in — Main tries a custom command (CodeCommands.Discover) before reporting "unknown".
+                return SlashOutcome.Unmatched;
         }
+    }
+
+    // /help's custom-commands section (1.9): re-scanned on every /help call (cheap — a couple of directory
+    // listings) rather than cached, so a command file added mid-session shows up immediately. Printed in a
+    // separate dim line, names only ("custom: /review /changelog ..."), and omitted entirely when none are
+    // discovered — an empty "custom:" line would just be noise.
+    private static void PrintCustomCommandsHelp(string root)
+    {
+        var names = CodeCommands.Discover(root).Keys.OrderBy(n => n, StringComparer.Ordinal).ToList();
+        if (names.Count == 0) return;
+        Paint(ConsoleColor.DarkGray, "  custom: " + string.Join(" ", names.Select(n => "/" + n)) + "\n");
+    }
+
+    // Custom slash commands (1.9): reached only once SlashCommand's own switch has already failed to match every
+    // built-in (SlashOutcome.Unmatched) — built-ins always win over a same-named custom command. Looks up
+    // `<workspace>\.doki\commands\<name>.md` (wins) then `%USERPROFILE%\.doki\commands\<name>.md` via
+    // CodeCommands.Discover, expands "$ARGUMENTS" with everything typed after "/<name> " (CodeCommands.
+    // ExpandTemplate), and runs the result as a completely NORMAL user turn through RunOneTurnInteractive — the
+    // exact same path as anything hand-typed, so streaming/the context meter/session-save all apply unchanged. A
+    // miss prints the same dim "unknown command" note SlashCommand's old default case used to, now hinting at
+    // defining one.
+    private static async Task HandleCustomCommandAsync(
+        string root, List<object> working, string model, HashSet<string> always, string cmd, string[] cmdParts, bool noStream)
+    {
+        var name = cmd.Length > 1 ? cmd[1..].ToLowerInvariant() : "";
+        if (name.Length == 0 || !CodeCommands.Discover(root).TryGetValue(name, out var path))
+        {
+            Paint(ConsoleColor.DarkGray, $"  unknown command {cmd} — try /help or define .doki/commands/{(name.Length > 0 ? name : "<name>")}.md\n");
+            return;
+        }
+
+        string template;
+        try { template = File.ReadAllText(path); }
+        catch (Exception ex) { Paint(ConsoleColor.Red, $"  could not read {path}: {ex.Message}\n"); return; }
+
+        var arguments = cmdParts.Length > 1 ? cmdParts[1].Trim() : "";
+        var expanded = CodeCommands.ExpandTemplate(template, arguments);
+
+        await MaybeAutoCompactAsync(root, working, model);
+        await RunTimedInteractiveTurnAsync(root, working, model, always, expanded, !noStream, _planMode);
     }
 
     // `!command` shell passthrough (1.7b, F2): a bang-prefixed REPL line runs DIRECTLY, with NO approval gate and
