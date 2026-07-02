@@ -11,7 +11,7 @@ namespace DokiDex.Cli;
 // (coder-fast/coder-big via llama-swap) through CodeAgent's ReAct loop. The workspace is the current directory, so
 // you `cd` into any project and run it. Read/Grep run freely; Edit/Write/Bash show a diff or the command and wait
 // for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /compact /context /resume
-// /sessions /export /status /usage /plan /act /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old
+// /sessions /export /status /usage /plan /act /tools /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old
 // blocking-per-turn path). Esc or Ctrl+C interrupts. A dim context meter prints after each interactive turn (1.3),
 // extended (1.6) with wall-clock seconds and tok/s; past ~40k estimated tokens the session auto-compacts before the
 // next turn runs (never in one-shot mode). Sessions persist automatically (1.4) to
@@ -22,6 +22,11 @@ namespace DokiDex.Cli;
 // Custom slash commands (1.9): a `.doki/commands/<name>.md` file (workspace-local, wins) or
 // `%USERPROFILE%\.doki\commands\<name>.md` (global) becomes `/<name> [args]` — its text runs as a normal turn,
 // "$ARGUMENTS" replaced by whatever followed the command name; built-ins above always take precedence.
+// Opt-in web/memory tools (1.10): OFF by default — `/tools` shows the state, `/tools web on|off` toggles it. When
+// on, the model additionally gets WebSearch (DuckDuckGo, the same ddgs sidecar chat mode uses) and MemoryRecall
+// (the user's saved long-term memory notes); both are read-only, so they run with no approval prompt. Closes the
+// asymmetry with Crush's memory+websearch MCP servers (harness/crush.json) and real Claude Code's WebSearch, while
+// keeping the default five-tool set small (decisions.md: open models lose tool-selection accuracy as it grows).
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
@@ -41,6 +46,13 @@ internal static class Program
     // session-scoped (like `always`/permission rules being loaded once) — never persisted, reset by process
     // restart. /plan turns it on; /act (or `/plan off`) turns it back off.
     private static bool _planMode;
+
+    // Opt-in web/memory tools (1.10): OFF by default, preserving the small-curated-tool-set discipline
+    // (decisions.md: open models lose tool-selection accuracy as the tool list grows) for anyone who never opts
+    // in. While true, every turn additionally offers CodeAgent's WebSearch + MemoryRecall (CodeAgent.
+    // ExtendedToolsJson) via SelectTools — planMode still always wins (see RunTurnAsync's doc comment). Purely
+    // session-scoped, like _planMode — never persisted, reset by process restart. `/tools web on|off` toggles it.
+    private static bool _webTools;
 
     // Usage accumulation (1.6): summed for the WHOLE interactive session — turns, prompt/completion tokens (from
     // LocalLlm.LastUsage right after each turn), and wall-clock seconds spent in RunOneTurnInteractive. Backs
@@ -193,7 +205,7 @@ internal static class Program
                 if (string.Equals(cmd, "/init", StringComparison.OrdinalIgnoreCase))
                 {
                     await MaybeAutoCompactAsync(root, working, model);
-                    await RunTimedInteractiveTurnAsync(root, working, model, always, InitPrompt, !noStream, _planMode);
+                    await RunTimedInteractiveTurnAsync(root, working, model, always, InitPrompt, !noStream, _planMode, _webTools);
                     SaveSession(root, sessionId, working, model);
                     continue;
                 }
@@ -225,7 +237,7 @@ internal static class Program
             // the message exactly as typed; Augment only ever returns extra text to APPEND after it.
             var augmented = line + CodeMentions.Augment(root, line);
             await MaybeAutoCompactAsync(root, working, model);
-            await RunTimedInteractiveTurnAsync(root, working, model, always, augmented, !noStream, _planMode);
+            await RunTimedInteractiveTurnAsync(root, working, model, always, augmented, !noStream, _planMode, _webTools);
             SaveSession(root, sessionId, working, model);
         }
         return 0;
@@ -268,11 +280,11 @@ internal static class Program
     // instant the flag flips (best-effort, as specified — not worth a bigger console-arbitration mechanism here).
     private static async Task<(bool Ok, string Text)> RunOneTurnInteractive(
         string root, List<object> working, string model, HashSet<string> always, string userText, bool stream,
-        bool planMode = false)
+        bool planMode = false, bool webTools = false)
     {
         using var pollCts = new CancellationTokenSource();
         var poller = Task.Run(() => PollEscape(pollCts.Token));
-        try { return await RunOneTurn(root, working, model, always, userText, stream: stream, planMode: planMode); }
+        try { return await RunOneTurn(root, working, model, always, userText, stream: stream, planMode: planMode, webTools: webTools); }
         finally
         {
             pollCts.Cancel();
@@ -286,11 +298,11 @@ internal static class Program
     // wall-clock duration; accumulates both into the session totals (/usage); then prints the extended meter.
     private static async Task RunTimedInteractiveTurnAsync(
         string root, List<object> working, string model, HashSet<string> always, string userText, bool stream,
-        bool planMode = false)
+        bool planMode = false, bool webTools = false)
     {
         LocalLlm.LastUsage = null;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await RunOneTurnInteractive(root, working, model, always, userText, stream, planMode);
+        await RunOneTurnInteractive(root, working, model, always, userText, stream, planMode, webTools);
         sw.Stop();
         var usage = LocalLlm.LastUsage;
         var wallSeconds = sw.Elapsed.TotalSeconds;
@@ -331,7 +343,7 @@ internal static class Program
     // (json mode wants machine output only, no token noise on stdout) and by `--no-stream`.
     private static async Task<(bool Ok, string Text)> RunOneTurn(
         string root, List<object> working, string model, HashSet<string> always, string userText,
-        bool quiet = false, bool stream = true, bool planMode = false)
+        bool quiet = false, bool stream = true, bool planMode = false, bool webTools = false)
     {
         working.Add(new { role = "user", content = userText });
         _turnCts = new CancellationTokenSource();
@@ -351,7 +363,7 @@ internal static class Program
 
         try
         {
-            var text = await CodeAgent.RunTurnAsync(root, working, model, ApproveGated, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token, planMode);
+            var text = await CodeAgent.RunTurnAsync(root, working, model, ApproveGated, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token, planMode, webTools);
             var ok = !(text.StartsWith(ErrLlmReturned, StringComparison.Ordinal) || text.StartsWith(ErrLlmUnreachable, StringComparison.Ordinal));
             if (!quiet)
             {
@@ -668,7 +680,7 @@ internal static class Program
                 Paint(ConsoleColor.Gray,
                     "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
                     "            /context  /resume [index]  /sessions  /export [file]  /permissions  /status\n" +
-                    "            /usage  /plan [off]  /act  /exit\n" +
+                    "            /usage  /plan [off]  /act  /tools [web on|off]  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
                     "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
                     "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n" +
@@ -692,6 +704,10 @@ internal static class Program
                     "  /plan switches to read-only PLAN MODE: only Read/Grep are offered to the model, and any\n" +
                     "  proposed edit is shown but NOT applied — the prompt becomes \"plan› \" while it's on. /act\n" +
                     "  (or /plan off) restores normal editing.\n" +
+                    "  /tools shows whether the opt-in WebSearch/MemoryRecall tools are offered to the model\n" +
+                    "  (default off, closing the gap with Crush's memory+websearch MCP servers and Claude Code's\n" +
+                    "  WebSearch); /tools web on|off toggles it for this session. Both are read-only, so no\n" +
+                    "  approval prompt; /plan always keeps the model to Read/Grep regardless of this setting.\n" +
                     "  @rel/path mentions a workspace file inline (up to 3 per message) — its first ~200 lines are\n" +
                     "  appended for the model to see; an unresolved path is noted instead.\n" +
                     "  !command runs a shell command DIRECTLY, no approval needed (you typed it yourself) — its\n" +
@@ -758,6 +774,9 @@ internal static class Program
                 _planMode = false;
                 Paint(ConsoleColor.Gray, "  plan mode off — Edit/Write/Bash restored.\n");
                 return SlashOutcome.Handled;
+            case "/tools":
+                HandleTools(parts);
+                return SlashOutcome.Handled;
             default:
                 // Not a built-in — Main tries a custom command (CodeCommands.Discover) before reporting "unknown".
                 return SlashOutcome.Unmatched;
@@ -801,7 +820,7 @@ internal static class Program
         var expanded = CodeCommands.ExpandTemplate(template, arguments);
 
         await MaybeAutoCompactAsync(root, working, model);
-        await RunTimedInteractiveTurnAsync(root, working, model, always, expanded, !noStream, _planMode);
+        await RunTimedInteractiveTurnAsync(root, working, model, always, expanded, !noStream, _planMode, _webTools);
     }
 
     // `!command` shell passthrough (1.7b, F2): a bang-prefixed REPL line runs DIRECTLY, with NO approval gate and
@@ -932,6 +951,25 @@ internal static class Program
         foreach (var r in numbered)
             Paint(ConsoleColor.Gray, $"  [{r.Index}] {(r.IsDeny ? "deny " : "allow")}  {r.Rule}\n");
         Paint(ConsoleColor.DarkGray, "  /permissions remove <n> to remove one.\n");
+    }
+
+    // `/tools` (1.10): the toggle for the opt-in WebSearch/MemoryRecall tools — bare prints the current state (with
+    // the toggle command to flip it, so a user who forgot the syntax sees it right there); `/tools web on|off` sets
+    // it. Session-scoped only (like /plan) — never persisted, reset by process restart. Deliberately NOT surfaced
+    // in the banner (keeping that uncluttered); `/help` and this bare form are the discovery paths.
+    private static void HandleTools(string[] parts)
+    {
+        var argLine = parts.Length > 1 ? parts[1].Trim() : "";
+        var argParts = argLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (argParts.Length >= 2 && string.Equals(argParts[0], "web", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(argParts[1], "on", StringComparison.OrdinalIgnoreCase)) _webTools = true;
+            else if (string.Equals(argParts[1], "off", StringComparison.OrdinalIgnoreCase)) _webTools = false;
+            else { Paint(ConsoleColor.Gray, "  usage: /tools web on|off\n"); return; }
+            Paint(ConsoleColor.Gray, $"  web tools: {(_webTools ? "on" : "off")} (WebSearch, MemoryRecall {(_webTools ? "now available to the model" : "hidden again")})\n");
+            return;
+        }
+        Paint(ConsoleColor.Gray, $"  web tools: {(_webTools ? "on" : "off")} — /tools web {(_webTools ? "off" : "on")}\n");
     }
 
     private static void Banner(string root, string model, string? instructionsFile)

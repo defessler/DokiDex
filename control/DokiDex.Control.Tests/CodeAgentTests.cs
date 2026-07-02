@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -285,5 +286,88 @@ public class CodeAgentTests
             Assert.Contains("hello", readResult);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    // ---- opt-in WebSearch/MemoryRecall tools (1.10): closes the Crush/CC asymmetry, default OFF ----
+
+    [Fact]
+    public void ExtendedToolsJson_is_the_base_five_plus_WebSearch_and_MemoryRecall()
+    {
+        Assert.Equal(5, CodeAgent.ToolsJson.Length);
+        Assert.Equal(7, CodeAgent.ExtendedToolsJson.Length);
+        for (var i = 0; i < CodeAgent.ToolsJson.Length; i++)
+            Assert.Same(CodeAgent.ToolsJson[i], CodeAgent.ExtendedToolsJson[i]);   // base five untouched, same order
+        Assert.Same(CodeAgent.WebSearchToolSchema, CodeAgent.ExtendedToolsJson[5]);
+        Assert.Same(CodeAgent.MemoryRecallSchema, CodeAgent.ExtendedToolsJson[6]);
+    }
+
+    [Fact]
+    public void WebSearchToolSchema_and_MemoryRecallSchema_are_well_formed_and_CC_named()
+    {
+        var wsFn = JsonDocument.Parse(JsonSerializer.Serialize(CodeAgent.WebSearchToolSchema)).RootElement.GetProperty("function");
+        Assert.Equal("WebSearch", wsFn.GetProperty("name").GetString());
+        var wsRequired = wsFn.GetProperty("parameters").GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(new[] { "query" }, wsRequired);
+
+        var mrFn = JsonDocument.Parse(JsonSerializer.Serialize(CodeAgent.MemoryRecallSchema)).RootElement.GetProperty("function");
+        Assert.Equal("MemoryRecall", mrFn.GetProperty("name").GetString());
+        Assert.Empty(mrFn.GetProperty("parameters").GetProperty("required").EnumerateArray());   // takes no arguments
+    }
+
+    [Fact]
+    public void SelectTools_plan_mode_always_wins_even_with_web_tools_on()
+    {
+        Assert.Same(CodeAgent.PlanToolsJson, CodeAgent.SelectTools(planMode: true, webTools: true));
+        Assert.Same(CodeAgent.PlanToolsJson, CodeAgent.SelectTools(planMode: true, webTools: false));
+    }
+
+    [Fact]
+    public void SelectTools_web_tools_toggles_between_the_base_and_extended_set()
+    {
+        Assert.Same(CodeAgent.ToolsJson, CodeAgent.SelectTools(planMode: false, webTools: false));
+        Assert.Same(CodeAgent.ExtendedToolsJson, CodeAgent.SelectTools(planMode: false, webTools: true));
+    }
+
+    [Theory]
+    [InlineData("WebSearch", "websearch")]
+    [InlineData("web_search", "websearch")]
+    [InlineData("Web_Search", "websearch")]
+    [InlineData("MemoryRecall", "memoryrecall")]
+    [InlineData("memory_recall", "memoryrecall")]
+    [InlineData("Read", "read")]
+    [InlineData(null, "")]
+    public void NormalizeToolName_lowercases_and_strips_underscores(string? name, string expected)
+        => Assert.Equal(expected, CodeAgent.NormalizeToolName(name));
+
+    [Fact]
+    public void ExecuteTool_dispatches_WebSearch_and_never_falls_through_to_unknown_tool()
+    {
+        // web_search is network-backed (uvx ddgs) — bounded by WebSearch.SearchAsync's own 20s cap either way, and
+        // its executor never throws, so this assertion holds whether the sidecar is up (real results) or down
+        // (the "web_search unavailable: ..." degrade text) — it must simply never be the generic unknown-tool text.
+        var result = CodeAgent.ExecuteTool(Directory.GetCurrentDirectory(), "WebSearch",
+            JsonSerializer.Serialize(new { query = "doki code agent test" }),
+            _ => CodeAgent.ApprovalDecision.Once, new System.Collections.Generic.HashSet<string>(), CancellationToken.None);
+        Assert.DoesNotContain("unknown tool", result, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(result));
+    }
+
+    [Fact]
+    public void ExecuteTool_dispatches_MemoryRecall_and_degrades_gracefully()
+    {
+        var result = CodeAgent.ExecuteTool(Directory.GetCurrentDirectory(), "MemoryRecall", null,
+            _ => CodeAgent.ApprovalDecision.Once, new System.Collections.Generic.HashSet<string>(), CancellationToken.None);
+        Assert.DoesNotContain("unknown tool", result, StringComparison.OrdinalIgnoreCase);
+        // Content depends on whatever is (or isn't) saved in the local memory store, but the shape is always one
+        // of these two — RunMemoryRecallTool never throws and never returns anything else.
+        Assert.True(result.Contains("memory note(s):") || result == "No long-term memory notes are saved yet.");
+    }
+
+    [Fact]
+    public void ExecuteTool_recognizes_the_underscore_variant_of_MemoryRecall_too()
+    {
+        var result = CodeAgent.ExecuteTool(Directory.GetCurrentDirectory(), "memory_recall", null,
+            _ => CodeAgent.ApprovalDecision.Once, new System.Collections.Generic.HashSet<string>(), CancellationToken.None);
+        Assert.DoesNotContain("unknown tool", result, StringComparison.OrdinalIgnoreCase);
     }
 }

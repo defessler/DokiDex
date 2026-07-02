@@ -109,6 +109,35 @@ public static class CodeAgent
     // safety net below, in place of ApplyTextEdits' normal "Edited x.txt." result.
     public const string PlanModeEditNote = "[plan mode: proposed edits were NOT applied — run /act to enable changes]";
 
+    // ---- opt-in web/memory tools (1.10) ----
+    // Closes the asymmetry F4 flagged: Crush gets the stack's memory+websearch MCP servers (harness/crush.json)
+    // and real Claude Code has WebSearch, but `doki code` had neither. These two tools stay OUT of the default
+    // ToolsJson set — decisions.md warns open models lose tool-selection accuracy as the tool list grows, so the
+    // small-curated-set discipline holds by DEFAULT; `/tools web on` (Program.cs) is the only way a session opts
+    // in. Both are READ-ONLY (a web lookup / a memory recall never touch the workspace), so ExecuteTool below
+    // never gates them behind approval — same treatment as Read/Grep.
+    public static readonly object WebSearchToolSchema = Fn("WebSearch",
+        "Search the public web (DuckDuckGo) for current or external information you don't already know — news, "
+        + "docs, facts, prices, definitions, recent releases. Returns the top result titles, URLs, and snippets.",
+        new { type = "object", properties = new {
+            query = new { type = "string", description = "The web search query (e.g. 'llama.cpp latest release notes')." },
+            k = new { type = "integer", description = "How many results to return (1-10, default 5)." },
+        }, required = new[] { "query" } });
+
+    // MemoryRecall takes NO arguments: the only wired C# path is MemoryRecall.RetrieveAsync, which always pulls
+    // the recent/global long-term memory set (memory_db.py's `recent N`). memory_db.py also has a `search Q N`
+    // command and MemoryRecall.BuildSearchArgs is a pure argv seam for it, but nothing wires that seam to a
+    // callable async method today — a query-based recall is a natural follow-on once that's built, not this leaf.
+    public static readonly object MemoryRecallSchema = Fn("MemoryRecall",
+        "Recall the user's saved long-term memory notes (facts/preferences remembered from past conversations) "
+        + "that might be relevant to this task. Takes no arguments — always returns the current set of recent "
+        + "saved notes.",
+        new { type = "object", properties = new { }, required = Array.Empty<string>() });
+
+    // The opt-in EXTENDED tool set: the base five PLUS WebSearch + MemoryRecall. RunTurnAsync's `webTools` flag
+    // (default false) chooses between this and ToolsJson — see SelectTools below.
+    public static readonly object[] ExtendedToolsJson = ToolsJson.Concat(new object[] { WebSearchToolSchema, MemoryRecallSchema }).ToArray();
+
     // PURE: which tools change the machine (and so require approval). Case-insensitive, total.
     public static bool IsMutating(string? name)
         => (name ?? "").Trim().ToLowerInvariant() is "edit" or "write" or "bash";
@@ -219,14 +248,19 @@ public static class CodeAgent
     // traffic. Schema filtering alone can't stop a model from proposing a change though — SEARCH/REPLACE blocks
     // are parsed out of plain CONTENT below, not tool calls — so planMode ALSO makes the edit-apply step below a
     // no-op (SkipEditsForPlanMode) and guards ExecuteTool against a stray mutating tool_call arriving anyway.
+    //
+    // `webTools` (1.10, default false): swaps in ExtendedToolsJson (the base five + WebSearch/MemoryRecall) via
+    // SelectTools below. planMode ALWAYS wins over webTools — even though the two opt-in tools are themselves
+    // read-only, plan mode is about FOCUS (a small, exploration-only set the model can't get distracted by), not
+    // just mutation-safety, so it never grows past Read/Grep regardless of the webTools toggle.
     public static async Task<string> RunTurnAsync(
         string root, List<object> working, string? model,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed,
         Action<string> onTool, Action<string, string> onToolResult, Action<string> onAssistantText,
-        Action<string>? onToken, CancellationToken ct = default, bool planMode = false)
+        Action<string>? onToken, CancellationToken ct = default, bool planMode = false, bool webTools = false)
     {
         var finalText = "";
-        var tools = planMode ? PlanToolsJson : ToolsJson;
+        var tools = SelectTools(planMode, webTools);
         for (var hop = 0; ; hop++)
         {
             var callMessages = planMode
@@ -344,25 +378,68 @@ public static class CodeAgent
         return sb.ToString().TrimEnd();
     }
 
+    // PURE decision seam (1.10) for RunTurnAsync's per-hop tool schema — factored out (same reason as
+    // SkipEditsForPlanMode above) so it's unit-testable with no live LLM. planMode always beats webTools; see
+    // RunTurnAsync's doc comment for why. internal (not private): CodeAgentTests exercises it directly.
+    internal static object[] SelectTools(bool planMode, bool webTools)
+        => planMode ? PlanToolsJson : webTools ? ExtendedToolsJson : ToolsJson;
+
+    // PURE: lower-case a tool name AND strip underscores before matching in ExecuteTool's switch below, so both
+    // the schema's PascalCase names ("WebSearch", "MemoryRecall") and an underscore variant a model might emit
+    // instead ("web_search", "memory_recall" — the style ChatTools' OWN OpenAI-convention tool names use) route to
+    // the same case. Harmless for the other five names (none contain an underscore). internal (not private):
+    // CodeAgentTests exercises it directly, no process needed.
+    internal static string NormalizeToolName(string? name) => (name ?? "").Trim().ToLowerInvariant().Replace("_", "");
+
     // internal (not private): lets CodeAgentTests exercise the plan-mode mutating-tool guard directly, with no
     // network and no model — same InternalsVisibleTo pattern as RunBash below. `planMode` guards Edit/Write/Bash
     // even though schema-level filtering (PlanToolsJson) should already keep the model from calling them at all —
     // belt-and-suspenders for a stray tool_call arriving anyway (never executed, never prompted).
+    // WebSearch/MemoryRecall (1.10) dispatch here too, regardless of whether webTools is currently on — they are
+    // READ-ONLY, so unlike Edit/Write/Bash there is no safety reason to guard them further: at worst a model that
+    // hallucinates a call to a tool it wasn't offered gets a harmless real answer back.
     internal static string ExecuteTool(string root, string name, string? json,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed, CancellationToken ct,
         bool planMode = false)
     {
         var n = (name ?? "").Trim();
         if (planMode && IsMutating(n)) return $"plan mode: {n} is disabled — /act to enable";
-        return n.ToLowerInvariant() switch
+        return NormalizeToolName(n) switch
         {
             "read" => CodeTools.RunReadFile(root, json),
             "grep" => CodeTools.RunGrep(root, json),
             "edit" => RunEdit(root, json, approve, alwaysAllowed),
             "write" => RunWrite(root, json, approve, alwaysAllowed),
             "bash" => RunBash(root, json, approve, alwaysAllowed, ct),
-            _ => $"unknown tool: '{name}'. Available: Read, Grep, Edit, Write, Bash.",
+            "websearch" => RunWebSearchTool(json),
+            "memoryrecall" => RunMemoryRecallTool(ct),
+            _ => $"unknown tool: '{name}'. Available: Read, Grep, Edit, Write, Bash, WebSearch, MemoryRecall.",
         };
+    }
+
+    // WebSearch executor (1.10): a thin reuse of ChatTools' web_search parse seam (ParseQueryAndK) + its
+    // internal RunWebSearch sidecar exec — no duplicated ddgs-shelling logic. RunWebSearch already never throws
+    // (its own try/catch degrades to a "web_search unavailable: ..." text), so this stays a one-liner.
+    private static string RunWebSearchTool(string? json)
+    {
+        var (query, k) = ChatTools.ParseQueryAndK(json, 5);
+        return ChatTools.RunWebSearch(query, k);
+    }
+
+    // MemoryRecall executor (1.10): the SAME global RetrieveAsync path Chat.cs injects into every normal chat
+    // turn's [Memory] block — recall here means "the current recent/global note set", not a query-focused search
+    // (see MemoryRecallSchema's doc comment for why). Rendered through ChatPrompt.MemoryBlock — the SAME bounded
+    // formatter the [Memory] system turn uses — rather than a second ad-hoc renderer. Never throws/hangs:
+    // RetrieveAsync already degrades to an empty list on any sidecar failure (missing uv/python, timeout,
+    // malformed output), and ExecuteTool runs synchronously so GetAwaiter().GetResult() just blocks on the SAME
+    // 20s-capped contract as every other sidecar tool here.
+    private static string RunMemoryRecallTool(CancellationToken ct)
+    {
+        IReadOnlyList<MemoryNote> notes;
+        try { notes = MemoryRecall.RetrieveAsync(ct).GetAwaiter().GetResult(); }
+        catch { return "memory recall unavailable."; }
+        var block = ChatPrompt.MemoryBlock(notes);
+        return block.Length > 0 ? "long-term memory note(s):\n" + block : "No long-term memory notes are saved yet.";
     }
 
     private static bool Gate(string tool, string title, string preview,
