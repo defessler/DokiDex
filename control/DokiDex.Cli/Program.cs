@@ -22,6 +22,12 @@ internal static class Program
     // interrupt poller doesn't race the approval gate for the same keystroke (1.1).
     private static volatile bool _approvalActive;
 
+    // Permission rules (1.5): the current workspace root and its loaded rule set, set ONCE in Main and mutated
+    // in place by ApproveGated/HandlePermissions as rules are added/removed (each mutation is immediately
+    // persisted too, so the in-memory copy and the on-disk file never drift apart within a session).
+    private static string _permRoot = "";
+    private static CodePermissions.Rules _rules = CodePermissions.Rules.Empty;
+
     // CodeAgent.RunTurnAsync never throws on a dead/unreachable model — its !turn.Ok path (CodeAgent.cs) returns the
     // error TEXT as the turn's content instead. These are the exact prefixes LocalLlm.ChatToolsAsync produces for
     // that path (LocalLlm.cs), used below to detect a failed turn without brittle full-string matching.
@@ -89,7 +95,15 @@ internal static class Program
             working = FreshWorking(orientation);
             sessionId = CodeSessions.NewSessionId();
         }
+        // Permission rules (1.5): REPLACES the old flat in-memory per-tool "always allowed" HashSet, which
+        // approved EVERY future call to that tool for the rest of the process the instant 'a' was pressed once,
+        // and forgot everything on exit. `always` below is now an inert, permanently-empty set — it still has to
+        // be threaded through CodeAgent.RunTurnAsync's signature (unchanged, see ApproveGated's doc comment for
+        // why), but CodeAgent's OWN alwaysAllowed.Contains(tool) short-circuit never fires against it, so every
+        // gated call reaches ApproveGated below, which is where all "always" persistence now actually lives.
         var always = new HashSet<string>();
+        _permRoot = root;
+        _rules = CodePermissions.Load(root);
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; _turnCts?.Cancel(); };
 
         // One-shot mode (doki code -p "task") — run a single turn and exit, for scripting.
@@ -257,7 +271,7 @@ internal static class Program
 
         try
         {
-            var text = await CodeAgent.RunTurnAsync(root, working, model, Approve, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token);
+            var text = await CodeAgent.RunTurnAsync(root, working, model, ApproveGated, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token);
             var ok = !(text.StartsWith(ErrLlmReturned, StringComparison.Ordinal) || text.StartsWith(ErrLlmUnreachable, StringComparison.Ordinal));
             if (!quiet)
             {
@@ -315,6 +329,82 @@ internal static class Program
             'y' => CodeAgent.ApprovalDecision.Once,
             _ => CodeAgent.ApprovalDecision.Deny,
         };
+    }
+
+    // 1.5 wiring choice: CodeAgent.Gate/RunEdit/RunWrite/RunBash are UNCHANGED — this wrapper is the ENTIRE
+    // permission-rules integration, and it is the `approve` callback CodeAgent.RunTurnAsync is given instead of
+    // Approve directly. It is passed `PendingAction(Tool, Title, Preview)` — Title IS the specifier the rules
+    // spec calls for (RunEdit/RunWrite pass `plan.RelPath`; RunBash passes the raw command `cmd` — verified by
+    // reading each call site). This was the smallest change that satisfies all three requirements: (a) deny
+    // short-circuits WITHOUT ever calling the real Approve() prompt — CodeAgent.Gate only sees this wrapper's
+    // return value, never knows a rule fired; (b) a matching allow rule also skips the prompt (returns Once
+    // straight away); (c) every existing CodeAgent test keeps passing explicit HashSets/approve lambdas of the
+    // exact `Func<PendingAction, ApprovalDecision>` shape, because that delegate's signature never changed.
+    // NOTE: because `ApprovalDecision` carries no accompanying text, the "denied by permission rule <rule>" detail
+    // is necessarily surfaced by THIS wrapper printing it directly to the console (immediately, in place of the
+    // old y/a/n prompt) rather than by changing CodeAgent's generic "User denied the edit."/"...command." tool-
+    // result strings — there is no channel through the unchanged `approve` delegate to carry rule text back into
+    // those strings without widening it, which would ripple into every test that constructs one.
+    private static CodeAgent.ApprovalDecision ApproveGated(CodeAgent.PendingAction a)
+    {
+        var specifier = a.Title;
+        var decision = CodePermissions.Decide(_rules, a.Tool, specifier);
+
+        if (decision == CodePermissions.Decision.Deny)
+        {
+            var denyRule = CodePermissions.FindMatchingRule(_rules.Deny, a.Tool, specifier) ?? "?";
+            Console.WriteLine();
+            Paint(ConsoleColor.Red, $"  ✗ denied by permission rule {denyRule}\n");
+            return CodeAgent.ApprovalDecision.Deny;
+        }
+        if (decision == CodePermissions.Decision.Allow) return CodeAgent.ApprovalDecision.Once;
+
+        // Ask: fall back to the normal interactive y/a/n prompt (diff or command echoed as always).
+        var result = Approve(a);
+        if (result != CodeAgent.ApprovalDecision.Always) return result;
+
+        // 'a' (always): persist a RULE instead of CodeAgent's own ephemeral, session-only tool-wide bypass — so
+        // this choice survives the process exiting. Bash gets the CC-style follow-up choice (exact / prefix /
+        // tool-wide); Edit/Write keep it simple and go straight to a tool-wide rule (path-glob rules are a
+        // future refinement — see the plan's F2 note).
+        var rule = string.Equals(a.Tool, "Bash", StringComparison.OrdinalIgnoreCase)
+            ? PromptBashRuleChoice(specifier)
+            : a.Tool;
+        _rules = CodePermissions.AddAllow(_rules, rule);
+        Paint(ConsoleColor.DarkGray, CodePermissions.Save(_permRoot, _rules)
+            ? $"  allow rule saved: {rule}\n"
+            : $"  (permission rule save failed — allowed for this session only: {rule})\n");
+        return CodeAgent.ApprovalDecision.Once;   // apply now too — CodeAgent's OWN hashset bypass stays unused
+    }
+
+    // The CC-style follow-up for a Bash "always": [c]ommand exact / [p]refix "<first two words> *" / [t]ool-wide.
+    // Any other key (including a failed/redirected ReadKey) degrades to the exact-command rule — the narrowest,
+    // safest choice.
+    private static string PromptBashRuleChoice(string command)
+    {
+        var firstTwo = FirstTwoWords(command);
+        var prefixLabel = firstTwo.Length > 0 ? $"{firstTwo} *" : "*";
+        Paint(ConsoleColor.Cyan, $"  always allow: [c]ommand exact / [p]refix \"{prefixLabel}\" / [t]ool-wide: ");
+        ConsoleKeyInfo key;
+        _approvalActive = true;
+        try { key = Console.ReadKey(); }
+        catch { Console.WriteLine(); return $"Bash({command})"; }
+        finally { _approvalActive = false; }
+        Console.WriteLine();
+        return char.ToLowerInvariant(key.KeyChar) switch
+        {
+            'p' when firstTwo.Length > 0 => $"Bash({firstTwo} *)",
+            't' => "Bash",
+            _ => $"Bash({command})",
+        };
+    }
+
+    // The first two whitespace-separated words of a command, or the whole command when it has fewer than two
+    // (there's nothing sensible to offer as a prefix rule then — PromptBashRuleChoice degrades the 'p' choice).
+    private static string FirstTwoWords(string command)
+    {
+        var parts = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $"{parts[0]} {parts[1]}" : "";
     }
 
     private static void ShowTool(string line) => Paint(ConsoleColor.Cyan, "\n" + line + "\n");
@@ -436,7 +526,7 @@ internal static class Program
             case "/help":
                 Paint(ConsoleColor.Gray,
                     "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
-                    "            /context  /resume [index]  /sessions  /export [file]  /exit\n" +
+                    "            /context  /resume [index]  /sessions  /export [file]  /permissions  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
                     "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
                     "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n" +
@@ -446,7 +536,12 @@ internal static class Program
                     "  131k hard window); a dim \"~Nk / 32k ctx\" meter prints after every turn too.\n" +
                     "  Sessions persist automatically (outside the repo) after every turn: `doki code --continue`\n" +
                     "  resumes the workspace's most recent one; /resume (alias /sessions) lists them newest-first\n" +
-                    "  and /resume <index> loads one; /export [file] writes the transcript as markdown.\n");
+                    "  and /resume <index> loads one; /export [file] writes the transcript as markdown.\n" +
+                    "  /permissions (alias /allow) lists saved allow/deny rules; \"a\" on an approval prompt now\n" +
+                    "  saves a persisted rule instead of a session-only bypass (Bash offers exact/prefix/tool-wide).\n" +
+                    "  /permissions allow|deny <rule> adds a rule; /permissions remove <n> removes one — rules look\n" +
+                    "  like `Read`, `Edit`, `Bash(git status)`, or `Bash(dotnet test *)`; a deny rule always wins and\n" +
+                    "  is checked before you'd even be asked.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -478,6 +573,10 @@ internal static class Program
                 return true;
             case "/export":
                 HandleExport(parts, working, root);
+                return true;
+            case "/permissions":
+            case "/allow":
+                HandlePermissions(parts, root);
                 return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");
@@ -537,6 +636,58 @@ internal static class Program
             Paint(ConsoleColor.Gray, $"  {(existed ? "replaced" : "wrote")} {rel}\n");
         }
         catch (Exception ex) { Paint(ConsoleColor.Red, $"  /export failed: {ex.Message}\n"); }
+    }
+
+    // `/permissions` (alias `/allow`): bare => list saved allow/deny rules, numbered together (allow first, then
+    // deny — CodePermissions.List's order); `/permissions allow|deny <rule>` adds and persists a rule (rejecting
+    // a syntactically-invalid one before it's ever written, so a typo can't become a permanently-inert rule);
+    // `/permissions remove <n>` removes by the printed index. Every add/remove persists immediately.
+    private static void HandlePermissions(string[] parts, string root)
+    {
+        var argLine = parts.Length > 1 ? parts[1].Trim() : "";
+        var argParts = argLine.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var sub = argParts.Length > 0 ? argParts[0].ToLowerInvariant() : "";
+
+        if (sub is "allow" or "deny")
+        {
+            var rule = argParts.Length > 1 ? argParts[1].Trim() : "";
+            if (rule.Length == 0 || !CodePermissions.IsValidRule(rule))
+            {
+                Paint(ConsoleColor.Gray,
+                    "  usage: /permissions allow|deny <rule>  (e.g. Read, Edit, Bash(git status), Bash(dotnet test *))\n");
+                return;
+            }
+            _rules = sub == "deny" ? CodePermissions.AddDeny(_rules, rule) : CodePermissions.AddAllow(_rules, rule);
+            var saved = CodePermissions.Save(root, _rules);
+            Paint(ConsoleColor.Gray, $"  {sub} rule added: {rule}" + (saved ? "\n" : "  (save failed — session only)\n"));
+            return;
+        }
+
+        if (sub == "remove")
+        {
+            if (argParts.Length < 2 || !int.TryParse(argParts[1].Trim(), out var n))
+            {
+                Paint(ConsoleColor.Gray, "  usage: /permissions remove <n>  (see /permissions for the numbers)\n");
+                return;
+            }
+            var (ok, updated) = CodePermissions.RemoveAt(_rules, n);
+            if (!ok) { Paint(ConsoleColor.Gray, $"  no rule #{n} — see /permissions for the current list.\n"); return; }
+            _rules = updated;
+            CodePermissions.Save(root, _rules);
+            Paint(ConsoleColor.Gray, $"  removed rule #{n}.\n");
+            return;
+        }
+
+        var numbered = CodePermissions.List(_rules);
+        if (numbered.Count == 0)
+        {
+            Paint(ConsoleColor.Gray, "  no permission rules yet. /permissions allow|deny <rule> to add one.\n");
+            return;
+        }
+        Paint(ConsoleColor.Gray, "  permission rules:\n");
+        foreach (var r in numbered)
+            Paint(ConsoleColor.Gray, $"  [{r.Index}] {(r.IsDeny ? "deny " : "allow")}  {r.Rule}\n");
+        Paint(ConsoleColor.DarkGray, "  /permissions remove <n> to remove one.\n");
     }
 
     private static void Banner(string root, string model, string? instructionsFile)
