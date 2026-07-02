@@ -1,5 +1,13 @@
 # CC-experience plan — v2 (2026-07-01, verification-hardened)
 
+> **EXECUTION STATUS (2026-07-01): COMPLETE.** All 25 leaves executed on `feat/doki-code-cli` (23 dispatches;
+> 2.8/3.1/3.4 batched), each parent-verified (diff + full suite + build) and committed individually. Suite grew
+> 890 → **1199/1199 green**. Bonus finds fixed en route: the GPU-pill sidecar-model misattribution (2.6), the
+> `/clear`-nukes-orientation bug (1.2), the JsonElement dual-shape gap on resumed sessions (1.4), and the
+> docs-missing-from-installer-payload packaging gap (3.2). **Open: the G2 GPU-live gate** (three-way coder
+> bake-off — both candidates now installable from the Models view; streaming feel-check; warm-load smoke;
+> investigate coder-fast's 5/11 latest-per-task eval badge) and the §Deferred/G3 design items.
+
 > **Goal (user):** a coding experience as close to the Claude Code CLI as possible; the app accurately manages
 > all models & services (especially the claude-code-style/coder ones); the app serves as a discovery surface for
 > what features exist and how they work.
