@@ -281,6 +281,7 @@ Everything the panel does, plus a text→media one-liner. Run from the DokiDex f
 | `doki start\|stop <service>` | Per-service control (group-guarded) |
 | `doki logs <service> [-Clear]` | Tail a service's logs |
 | `doki gen "<idea>" […]` | **Text→media** (see below) — needs `up media` |
+| `doki code ["<task>"]` | **Local coding agent** in the current directory (see below) — needs `up agent` |
 | `doki verify [-Gated]` | Full-stack smoke test across modes |
 | `doki doctor` | Environment + install diagnostics |
 | `doki index` | Rebuild the codebase RAG index for `code_search` |
@@ -323,6 +324,56 @@ The CLI is the **power surface** — it exposes kinds the studio doesn't yet, no
 ```
 
 > Full per-kind recipes (models, steps, cfg): [wiki/9-features.md](wiki/9-features.md) and [wiki/11-media-recipes.md](wiki/11-media-recipes.md).
+
+### `doki code` — local coding agent
+
+A terminal coding agent that mirrors the Claude Code CLI, running the local coder model via llama-swap. The workspace is your **current directory** — `cd` into any project and run it.
+
+```powershell
+.\doki.ps1 up agent         # 1. load the coder model (:8080)
+cd path\to\your\project     # 2. go to the workspace
+.\doki.ps1 code             # interactive REPL (type a task at the › prompt)
+.\doki.ps1 code "<task>"    # one-shot: run the task and exit
+```
+
+The agent builds itself on first run (`DokiDex.Cli`). A warning appears if the coder model isn't serving yet.
+
+**Tools the agent can use:**
+
+| Tool | What it does | Approval? |
+|---|---|---|
+| **Read** | Read a file by workspace-relative path, with optional offset + line limit for large files | No |
+| **Grep** | Regex search over files, with optional sub-directory scope and file-glob filter | No |
+| **Edit** | Replace an exact block of lines in an existing file (SEARCH/REPLACE blocks) | Yes — shows colored diff |
+| **Write** | Create a new file (or fully overwrite an existing one) | Yes — shows colored diff |
+| **Bash** | Run a PowerShell command in the workspace | Yes — shows the command |
+
+**Per-action approval:** every Edit, Write, and Bash call shows a preview and waits:
+
+```
+Allow Edit? [y]es / [a]lways / [n]o:
+```
+
+Default (Enter or any other key) is **no** — always the safe choice. `[a]lways` skips the prompt for that tool for the rest of the session.
+
+**Edit protocol:** the model emits `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` blocks. A two-stage fuzzy applier tries (1) exact whole-line match, then (2) whitespace-flexible match. On a miss it shows the actual nearby lines from the file so the model can self-correct and retry.
+
+**Slash commands in the REPL:**
+
+| Command | Does |
+|---|---|
+| `/help` | Show available commands |
+| `/model [<name>]` | Switch or show the active model (`coder-fast` \| `coder-big` \| `fast-candidate-gptoss20b`) |
+| `/undo` | Revert the last file change this session |
+| `/clear` | Clear the conversation context (the workspace stays the same) |
+| `/cwd` | Show the workspace root |
+| `/exit` | Exit the REPL |
+
+Ctrl+C interrupts the current turn without exiting.
+
+**Working with edits:** changes land as plain working-tree modifications. Review them with `git diff` at any time. `/undo` restores the most recent change from this session (or deletes a file that Write created); your own git history is the durable backstop.
+
+**Default model:** `coder-fast` (Qwen3-Coder-30B-A3B). Switch with `/model coder-big` for the 120B heavy-hitter, or `/model fast-candidate-gptoss20b` to try the Devstral eval candidate (see [docs/mistral-2026-06.md](mistral-2026-06.md)).
 
 ---
 

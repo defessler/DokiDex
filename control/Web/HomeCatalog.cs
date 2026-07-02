@@ -64,9 +64,12 @@ public static class HomeCatalog
 
     // Build the readiness snapshot from the live StatusDoc: the GPU's ActiveGroup -> the user-facing mode term (the
     // 'llm' group is "agent" mode; 'media' stays 'media'; else idle 'none'), and every HEALTHY service -> "up". Pure
-    // + null-safe (a null doc -> idle, nothing up). Models-present is left empty (no catalog entry gates on a model
-    // today; add ModelManager wiring here if one ever does).
-    public static HomeStatusSnapshot SnapshotFrom(StatusDoc? doc)
+    // + null-safe (a null doc -> idle, nothing up). ModelsPresent (2.8) is the UNION of media (ModelManager) and LLM
+    // (LlmModelManager) presence tags, passed in as plain string collections so this stays a pure, no-I/O seam --
+    // GET /api/home does the (impure) `mm.PresentTags()` / `lm.PresentTags()` disk reads and hands the plain lists
+    // in. Each tag set carries BOTH the catalog id (e.g. "vision") and, for media, the broader capability (e.g.
+    // "image") so a future card can gate on either a specific model or "any model of this capability".
+    public static HomeStatusSnapshot SnapshotFrom(StatusDoc? doc, IEnumerable<string>? mediaModelsPresent = null, IEnumerable<string>? llmModelsPresent = null)
     {
         var group = doc?.Gpu?.ActiveGroup ?? "none";
         var mode = string.Equals(group, "llm", StringComparison.OrdinalIgnoreCase) ? "agent" : group;
@@ -75,7 +78,10 @@ public static class HomeCatalog
                 .Where(s => s is { Healthy: true } && !string.IsNullOrWhiteSpace(s.Name))
                 .Select(s => s.Name),
             StringComparer.OrdinalIgnoreCase);
-        return new HomeStatusSnapshot(mode, up, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var models = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in (mediaModelsPresent ?? Enumerable.Empty<string>()).Concat(llmModelsPresent ?? Enumerable.Empty<string>()))
+            if (!string.IsNullOrWhiteSpace(m)) models.Add(m);
+        return new HomeStatusSnapshot(mode, up, models);
     }
 
     // PURE: route the Home quick-start box. A question -> Chat (carry the text); otherwise -> Create, with the gen
@@ -101,7 +107,8 @@ public static class HomeCatalog
     private static CapabilityRequires Need(string? mode = null, string? service = null, string? model = null) => new(mode, service, model);
     private static CapabilityStarter S(string label, string view, string? prompt = null, string? kind = null) => new(label, view, prompt, kind);
 
-    // The catalog — the 10 Studio areas, grouped Make / Talk / Manage. Content is data; edit here to add/refine an area.
+    // The catalog — the 10 core Studio areas (Make / Talk / Manage) plus the Code area (3.1) and the dark-feature
+    // cards (3.4) that surface real, shipped-but-hidden features. Content is data; edit here to add/refine an area.
     public static readonly IReadOnlyList<HomeCapability> Capabilities = new List<HomeCapability>
     {
         // ---- Make ----
@@ -143,5 +150,47 @@ public static class HomeCatalog
             Need(), new[] { S("check what's running", "status") }) { Guide = new[] { "See each service's health + the GPU meter.", "Switch between Agent and Media mode.", "Start or stop individual services." } },
         new("memory", "manage", "Memory", "\U0001F9E0", "Review and curate the long-term facts your assistant remembers.",
             Need(), new[] { S("manage what the assistant remembers", "memory") }) { Guide = new[] { "See every fact the assistant has saved.", "Add a fact, or delete ones that are wrong.", "Chat recalls these automatically in every conversation." } },
+
+        // ---- Code (Phase 3.1) ----
+        // Readiness is deliberately mode:"agent" + service:"llama-swap" (agent GPU group up + the model server
+        // healthy) -- NOT a model presence check. doki code picks whatever tier is loaded at chat time, so gating
+        // on one specific model would be wrong (F3 correction).
+        new("code", "code", "doki code", "⌨️",
+            "A local terminal coding agent that mirrors the Claude Code CLI -- Read, Grep, Edit, Write, and Bash tools with per-action approval, working directly in your own repos.",
+            Need(mode: "agent", service: "llama-swap"), new[]
+            {
+                // Copy-command starter: the smallest mechanism that fits -- Starters normally route in-app via
+                // setView(view), which doesn't apply to a terminal command. View "copy" is a pseudo-view the SPA
+                // special-cases (applyStarter) to copy Prompt to the clipboard instead of switching views.
+                S("copy: doki code", "copy", "doki code"),
+                // Open-the-docs starter (3.2 follow-through): view "help" is the Help view added in 3.2; Prompt
+                // here is reused as the doc id to open (applyStarter's help branch), landing straight on the
+                // full user-guide tutorial rather than the bare Help list.
+                S("open the docs", "help", "tutorial"),
+            })
+            { Guide = new[] { "Run `doki up agent` to bring up the agent GPU group.", "cd into your project directory.", "Run `doki code` (or `doki code \"<task>\"` for a one-shot)." } },
+
+        // ---- Dark-feature cards (Phase 3.4) — real, shipped features with no discovery surface until now.
+        // Readiness reuses whatever real signal already exists (mode:"media" for the Create-view generation
+        // features); LoRA Training and Pitch-deck don't gate on GPU mode (their code has no such check), so they
+        // degrade to always-ready with the true prerequisite spelled out in the guide instead. ----
+        new("training", "manage", "LoRA Training", "\U0001F9EA", "Train a custom LoRA from images already in your Library -- no external tools.",
+            Need(), new[] { S("train a LoRA from your library", "library") })
+            { Guide = new[] { "In Library, filter down to the images you want to train on.", "Open \"Train a LoRA\", name it, and pick a base model.", "Train -- needs `.\\setup.ps1 -Train` (kohya sd-scripts); runs on the GPU and can take a while." } },
+        new("compare", "make", "Compare bases", "⚖️", "Generate the same prompt across every installed image base, side by side.",
+            Need(mode: "media"), new[] { S("compare a prompt across your bases", "create", "a lighthouse at dawn, painterly", "image") })
+            { Guide = new[] { "Type a prompt in Create.", "Install 2+ image base models (Models view) -- the button needs at least two.", "Click \"Compare bases\" to render it on every installed base at once." } },
+        new("batch", "make", "Batch (CSV)", "\U0001F4CB", "Queue a whole batch of generations from a pasted CSV -- one row, one job.",
+            Need(mode: "media"), new[] { S("see the batch CSV format", "create") })
+            { Guide = new[] { "Open Create -> \"Batch (CSV)\".", "Paste a header row + one line per generation (prompt, kind, seed, ...).", "Queue batch -- each row becomes its own job in the grid." } },
+        new("series", "make", "Image Set", "\U0001F39E️", "Generate a matching set of images that share one locked style and aspect.",
+            Need(mode: "media"), new[] { S("generate a matching set of faces", "create") })
+            { Guide = new[] { "Open Create -> \"Image Set\".", "Set a locked style, then list one prompt per line (one cell each).", "Generate series -- every cell shares the style; rerun a single cell anytime." } },
+        new("pitchdeck", "manage", "Pitch-deck export", "\U0001F4FD️", "Export a self-contained HTML story bible from your Library -- loglines, synopsis, and stills.",
+            Need(), new[] { S("export a story bible from your library", "library") })
+            { Guide = new[] { "In Library, filter to the images/edits for your project.", "Click \"story bible\" and give it a title.", "Downloads one HTML file -- logline/synopsis use the local LLM if agent mode is up." } },
+        new("inpaint", "make", "Inpaint / SAM click-to-mask", "✂️", "Click a subject to auto-mask it (SAM), or paint by hand, then regenerate just that region.",
+            Need(mode: "media"), new[] { S("try click-to-mask editing", "create", null, "edit") })
+            { Guide = new[] { "In Create, pick Edit kind and add an init image.", "Turn on \"SAM click\" and click the subject -- needs `.\\setup.ps1 -Sam` installed.", "Refine the mask, then Generate to change just that region." } },
     };
 }

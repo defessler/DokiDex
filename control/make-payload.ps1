@@ -16,6 +16,24 @@ try {
         $src = Join-Path $root $f
         if (Test-Path $src) { Copy-Item $src (Join-Path $staging $f) -Force }
     }
+    # Help view (3.2) docs -- the EXACT whitelist DocsCatalog.cs serves (README + the 4 core guides + docs/wiki/
+    # *.md), never the whole docs/ tree (which also holds internal audit/research notes not meant for end users).
+    # Without this, an installed app's home (RepoPaths.Root) never gets a docs/ folder and the Help view is empty.
+    $readme = Join-Path $root 'README.md'
+    if (Test-Path $readme) { Copy-Item $readme (Join-Path $staging 'README.md') -Force }
+    foreach ($f in 'quickstart.md', 'tutorial.md', 'CAPABILITIES.md') {
+        $src = Join-Path $root "docs\$f"
+        if (Test-Path $src) {
+            New-Item -ItemType Directory -Force (Join-Path $staging 'docs') | Out-Null
+            Copy-Item $src (Join-Path $staging "docs\$f") -Force
+        }
+    }
+    $wikiSrc = Join-Path $root 'docs\wiki'
+    if (Test-Path $wikiSrc) {
+        $wikiDest = Join-Path $staging 'docs\wiki'
+        New-Item -ItemType Directory -Force $wikiDest | Out-Null
+        Get-ChildItem $wikiSrc -Filter '*.md' -File | ForEach-Object { Copy-Item $_.FullName (Join-Path $wikiDest $_.Name) -Force }
+    }
     # runtime directories, minus binaries / weights / caches / DBs (heavy or machine-specific)
     $excludeExt = @('.exe', '.dll', '.gguf', '.safetensors', '.bin', '.pyc', '.db', '.log')
     foreach ($d in 'serving', 'harness', 'media-assets') {

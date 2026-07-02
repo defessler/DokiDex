@@ -48,6 +48,7 @@ public static class StudioHost
         builder.Services.AddSingleton<GenerationJobs>();
         builder.Services.AddSingleton<GalleryService>();
         builder.Services.AddSingleton<ModelManager>();
+        builder.Services.AddSingleton<LlmModelManager>();
         builder.Services.AddSingleton<ChatGenCoordinator>(sp => new ChatGenCoordinator(sp.GetRequiredService<DokiService>()));
 
         var app = builder.Build();
@@ -89,16 +90,40 @@ public static class StudioHost
         // ---- the guided Home command center: the capability catalog, each entry annotated with live readiness
         // (ready / needs-mode / needs-setup + a next-step) from the SAME status the dashboard uses, plus the GPU
         // snapshot for the meter. The SPA Home view renders this; all the logic is in the pure HomeCatalog. ----
-        api.MapGet("/home", async (DokiService doki, CancellationToken ct) =>
+        api.MapGet("/home", async (DokiService doki, ModelManager mm, LlmModelManager lm, CancellationToken ct) =>
         {
             var doc = await doki.GetStatusAsync(ct);
-            return Results.Json(new { gpu = doc?.Gpu, cards = HomeCatalog.Annotate(HomeCatalog.SnapshotFrom(doc)) });
+            var snap = HomeCatalog.SnapshotFrom(doc, mm.PresentTags(), lm.PresentTags());
+            return Results.Json(new { gpu = doc?.Gpu, cards = HomeCatalog.Annotate(snap) });
         });
         // Instant catalog (no status wait) — the SPA renders these cards + starters immediately, then fills in
         // readiness from /home (which blocks on the live status probe). Keeps the default Home view from waiting.
         api.MapGet("/home/catalog", () => Results.Json(HomeCatalog.Capabilities));
         // Quick-start router: the Home "just start typing" box calls this on submit -> { view, prompt, kind }.
         api.MapGet("/home/route", (string? q) => Results.Json(HomeCatalog.RouteQuickStart(q)));
+
+        // ---- in-app Help view (3.2): the docs corpus (README/quickstart/tutorial/CAPABILITIES + docs/wiki/*.md),
+        // read-only, through DocsCatalog's whitelist. /docs/{id} maps id -> file ONLY through the server-built
+        // map -- a client can never turn an id into an arbitrary path (unknown ids 404). ----
+        api.MapGet("/docs", () =>
+        {
+            var map = DocsCatalog.DiscoverAll(RepoPaths.Root);
+            var entries = map
+                .Select(kv => DocsCatalog.ToListEntry(RepoPaths.Root, kv.Key, kv.Value))
+                .OrderBy(e => e.Group == "guides" ? 0 : 1)
+                .ToList();
+            return Results.Json(new { docs = entries });
+        });
+        api.MapGet("/docs/{id}", (string id) =>
+        {
+            var map = DocsCatalog.DiscoverAll(RepoPaths.Root);
+            if (!map.TryGetValue(id, out var mapping)) return Results.NotFound();
+            var full = DocsCatalog.ResolveSafe(RepoPaths.Root, mapping.RelPath);
+            if (full is null || !File.Exists(full)) return Results.NotFound();
+            var markdown = DocsCatalog.ReadCapped(full, DocsCatalog.MaxMarkdownChars);
+            var title = DocsCatalog.ResolveTitle(mapping, markdown);
+            return Results.Json(new { id, title, markdown });
+        });
 
         // Explicit mode switch from the dashboard = user intent, so it switches directly (the eviction-confirm
         // applies to the implicit auto-switch-on-generate path).
@@ -308,8 +333,12 @@ public static class StudioHost
                 .Where(s => s.ConfiguredModels is { Count: > 0 })
                 .SelectMany(s => s.ConfiguredModels!)
                 .ToList() ?? new System.Collections.Generic.List<string>();
+            // model is included so the SPA can title-tooltip each tier <option> ("backed by <model>") without a
+            // second fetch to /api/llm/tiers (2.4) -- Available() itself only returns (Id, Label), so re-derive
+            // the model from AllRoles by id (small, pure lookup; no new probe).
+            var modelByTier = LlmTiers.AllRoles.ToDictionary(r => r.Id, r => r.Model);
             var tiers = LlmTiers.Available(configuredModels)
-                .Select(t => new { id = t.Id, label = t.Label })
+                .Select(t => new { id = t.Id, label = t.Label, model = modelByTier.GetValueOrDefault(t.Id) })
                 .ToList();
             return Results.Json(new { kinds = readyKinds, tiers });
         });
@@ -321,6 +350,65 @@ public static class StudioHost
         api.MapGet("/controlnet-models", () => Results.Json(Loras.ControlNets()));   // for the ControlNet model picker
         api.MapPost("/models/{id}/install", (string id, ModelManager mm) => Results.Json(new { status = mm.Install(id) }));
         api.MapDelete("/models/{id}", (string id, ModelManager mm) => mm.Delete(id) ? Results.Ok() : Results.NotFound());
+
+        // ---- LLM/GGUF model manager (coder-fast/coder-big/reasoning/vision/fim/embed tiers + bake-off ----
+        // candidates; multi-part-aware -- see LlmModelManager for the per-part G1 hash-verify discipline).
+        // eval (2.5): "passed/total" golden-run badge from evals/results.jsonl, joined by llamaSwapModel; null
+        // when that model has no eval rows (never run, or a fim/embed entry with no llamaSwapModel at all).
+        // Loaded fresh per request -- EvalResults.LoadSummaries reads one small jsonl file, no caching needed.
+        api.MapGet("/llm-models", (LlmModelManager lm) =>
+        {
+            var result = lm.List();
+            var evalSummaries = EvalResults.LoadSummaries();
+            var models = result.Models.Select(m => new
+            {
+                m.Id, m.Role, m.Label, m.SizeGb, m.LlamaSwapModel, m.Notes, m.Status, m.Files, m.Downloading, m.Progress, m.Error,
+                eval = EvalResults.Badge(m.LlamaSwapModel, evalSummaries),
+            });
+            return Results.Json(new { models, message = result.Message });
+        });
+        api.MapPost("/llm-models/{id}/install", (string id, LlmModelManager lm) => Results.Json(new { status = lm.Install(id) }));
+        api.MapDelete("/llm-models/{id}", (string id, LlmModelManager lm) => lm.Delete(id) ? Results.Ok() : Results.NotFound());
+
+        // ---- Tier visibility + warm-load (2.4): joins LlmTiers' role table with the live probe's configured/
+        // loaded models (reused via GetStatusAsync -- no second llama-swap HTTP call, per F3) and
+        // LlmModelManager's on-disk catalog presence, so the SPA can show tier readiness + a warm button without
+        // polling llama-swap directly. onDisk is null when no catalog entry references that tier's model
+        // (unknown, not "missing") -- true/false only when a catalog entry actually names it. eval (2.5): same
+        // results.jsonl-derived badge as /api/llm-models, joined by tier model name.
+        api.MapGet("/llm/tiers", async (DokiService doki, LlmModelManager lm, CancellationToken ct) =>
+        {
+            var doc = await doki.GetStatusAsync(ct).ConfigureAwait(false);
+            var llamaSwap = doc?.Services.FirstOrDefault(s => s.Name == "llama-swap");
+            var configured = new HashSet<string>(llamaSwap?.ConfiguredModels ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            var onDiskByModel = lm.List().Models
+                .Where(m => !string.IsNullOrWhiteSpace(m.LlamaSwapModel))
+                .GroupBy(m => m.LlamaSwapModel!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().Status == "present", StringComparer.OrdinalIgnoreCase);
+            var evalSummaries = EvalResults.LoadSummaries();
+            var tiers = LlmTiers.AllRoles.Select(r => new
+            {
+                tier = r.Id,
+                label = r.Label,
+                model = r.Model,
+                configured = configured.Contains(r.Model),
+                onDisk = onDiskByModel.TryGetValue(r.Model, out var present) ? (bool?)present : null,
+                loaded = llamaSwap?.Model is string loadedModel && string.Equals(loadedModel, r.Model, StringComparison.OrdinalIgnoreCase),
+                eval = EvalResults.Badge(r.Model, evalSummaries),
+            }).ToList();
+            return Results.Json(new { tiers, reachable = llamaSwap?.Healthy ?? false });
+        });
+        // Fire-and-forget by design: DokiService.WarmLoadModel is void (it POSTs a 1-token warm request to
+        // llama-swap on a background Task and never awaits it here) -- there is nothing to await, so 202
+        // Accepted is the honest response. The existing 2s status poll (and the SPA's own re-fetch of
+        // /api/llm/tiers) surfaces the swap once llama-swap finishes hot-loading it.
+        api.MapPost("/llm/warm", (WarmModelRequest body, LlmModelManager lm, DokiService doki) =>
+        {
+            var catalogModels = lm.List().Models.Select(m => m.LlamaSwapModel);
+            if (!LlmTiers.IsWarmable(body.Model, catalogModels)) return Results.BadRequest(new { error = "unknown model" });
+            doki.WarmLoadModel(body.Model!);
+            return Results.Accepted();
+        });
 
         // ---- script-to-shotlist director (local instruct model on :8080 -> ordered shot prompts) ----
         // Storyboarding is text-only and runs in agent/coexist mode; the user then generates the shots as images
@@ -1054,10 +1142,18 @@ public static class StudioHost
                 File.WriteAllBytes(imgPath, Convert.FromBase64String(body.Image[(comma + 1)..]));
             }
             catch { return Results.BadRequest(new { error = "bad image" }); }
-            var r = await Sam.SegmentAsync(imgPath, body.X, body.Y, ct);
-            if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
-            var b64 = Convert.ToBase64String(await File.ReadAllBytesAsync(r.MaskPath!, ct));
-            return Results.Json(new { mask = $"data:image/png;base64,{b64}" });
+            try
+            {
+                var r = await Sam.SegmentAsync(imgPath, body.X, body.Y, ct);
+                if (!r.Ok) return Results.Json(new { error = r.Message }, statusCode: 503);
+                var b64 = Convert.ToBase64String(await File.ReadAllBytesAsync(r.MaskPath!, ct));
+                TryDeleteSamTemp(r.MaskPath);   // mask bytes are now in b64; file no longer referenced by response
+                return Results.Json(new { mask = $"data:image/png;base64,{b64}" });
+            }
+            finally
+            {
+                TryDeleteSamTemp(imgPath);      // input PNG consumed by SAM; never referenced in the response
+            }
         });
 
         // ---- 3D blockout: a software depth rasterizer (primitives -> perspective+occluded depth map), no GPU ----
@@ -1280,6 +1376,24 @@ public static class StudioHost
         => int.TryParse(Cell(row, key), out var n) ? n : dflt;
     private static double DblCell(Dictionary<string, string> row, string key, double dflt)
         => double.TryParse(Cell(row, key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : dflt;
+
+    // Best-effort delete for a SAM temp file (the decoded input PNG or the mask sidecar). Guards: the path
+    // must be inside the system temp directory AND carry the dokidex- prefix so an unexpected path can never
+    // delete a user file — mirrors TryDeleteLiveTemp in GenerationJobs.
+    private static void TryDeleteSamTemp(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            var name = Path.GetFileName(path);
+            if (dir is null || !string.Equals(Path.TrimEndingDirectorySeparator(dir),
+                    Path.TrimEndingDirectorySeparator(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)) return;
+            if (!name.StartsWith("dokidex-", StringComparison.OrdinalIgnoreCase)) return;
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { /* best-effort; a stranded temp file is harmless next to a hang */ }
+    }
 
     // The SPA is embedded (LogicalName DokiDex.studio.index.html) so the single-file exe carries it with no
     // wwwroot on disk. Loaded once, lazily, from THIS assembly (Control) — the same bytes whether hosted

@@ -408,7 +408,10 @@ public static class ChatTools
     // Ok-but-empty search yields the formatter's clean "no web results" line (NOT the "done" sentinel) and only a
     // genuine !Ok surfaces the degrade message. Any unexpected throw is caught — the agent loop must never crash
     // on a tool. Result text is bounded so it can't bloat context across the loop's hops.
-    private static string RunWebSearch(string query, int k)
+    // internal (not private): CodeAgent's opt-in WebSearch tool (1.10) reuses this SAME executor directly rather
+    // than duplicating the sidecar exec — both live in this assembly (DokiDex.Control), so `internal` is the
+    // minimal visibility bump that makes the reuse possible.
+    internal static string RunWebSearch(string query, int k)
     {
         try
         {

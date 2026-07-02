@@ -91,7 +91,7 @@ Served via **llama.cpp (b9616, CUDA 13.3) + llama-swap** on `:8080`, **OpenAI- a
 - **WPF control panel** (`doki panel` / `DokiDex.lnk`): native .NET 9 cockpit — service cards, GPU trust-meter, mode switcher (with 32 GB-headroom eviction confirm), live per-service log tails, per-modality ⚡ smoke tests, coder model-swap chips, update badges + **in-app auto-updater** (self-contained single-file exe).
 - **Web app** (DokiGen Studio, `:5111`): the Studio in §1 — also hosted in-process by the panel.
 - **Installer:** self-contained single-file `.exe` (GitHub releases) with a setup wizard; `control.bat` (builds the panel + shortcut); `setup.ps1` (headless bootstrap with `-Media`/`-Tts`/`-Stt`/feature flags).
-- **CLI** (`doki.ps1`): `up [agent|coexist|media]`, `down`, `status`, `gen "<idea>"`, `panel`, `verify`, `doctor`, `test`.
+- **CLI** (`doki.ps1`): `up [agent|coexist|media]`, `down`, `status`, `gen "<idea>"`, `code ["<task>"]` (local coding agent — REPL or one-shot, cwd = workspace, needs `up agent`), `panel`, `verify`, `doctor`, `test`.
 
 ---
 

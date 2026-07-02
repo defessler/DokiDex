@@ -109,4 +109,52 @@ public class LlmTiersTests
         Assert.Equal("fast", tiers[0].Id);
         Assert.False(string.IsNullOrWhiteSpace(tiers[0].Label));
     }
+
+    // ---- AllRoles (2.4): the full role table incl. vision, used by GET /api/llm/tiers ----
+
+    [Fact]
+    public void AllRoles_includes_vision_unlike_Available()
+    {
+        var ids = LlmTiers.AllRoles.Select(r => r.Id).ToList();
+        Assert.Contains("vision", ids);
+        Assert.Equal(4, ids.Count);
+    }
+
+    [Fact]
+    public void AllRoles_carries_the_same_model_names_as_the_constants()
+    {
+        var byId = LlmTiers.AllRoles.ToDictionary(r => r.Id, r => r.Model);
+        Assert.Equal(LlmTiers.Fast, byId["fast"]);
+        Assert.Equal(LlmTiers.Quality, byId["quality"]);
+        Assert.Equal(LlmTiers.Reasoning, byId["reasoning"]);
+        Assert.Equal(LlmTiers.Vision, byId["vision"]);
+    }
+
+    // ---- IsWarmable (2.4): POST /api/llm/warm's validation seam -- reject arbitrary strings ----
+
+    [Theory]
+    [InlineData("coder-fast")]
+    [InlineData("coder-big")]
+    [InlineData("fast-candidate-gptoss20b")]
+    [InlineData("vision")]
+    [InlineData("CODER-FAST")]
+    public void IsWarmable_accepts_known_tier_models_case_insensitively(string model)
+        => Assert.True(LlmTiers.IsWarmable(model, Array.Empty<string?>()));
+
+    [Fact]
+    public void IsWarmable_accepts_a_catalog_llamaSwapModel_not_in_the_tier_table()
+        => Assert.True(LlmTiers.IsWarmable("coder-candidate-a3b", new[] { "coder-candidate-a3b" }));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("rm -rf /")]
+    [InlineData("some-random-string")]
+    public void IsWarmable_rejects_unknown_or_empty_model_names(string? model)
+        => Assert.False(LlmTiers.IsWarmable(model, new[] { "coder-candidate-a3b" }));
+
+    [Fact]
+    public void IsWarmable_ignores_null_or_blank_entries_in_the_catalog_list()
+        => Assert.False(LlmTiers.IsWarmable("not-a-real-model", new[] { null, "", "   " }));
 }

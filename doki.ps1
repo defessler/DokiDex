@@ -7,11 +7,13 @@
 #   .\doki.ps1 logs <llama-swap|fim|media> tail a service log
 #   .\doki.ps1 gen "<idea>" [-Video|-Music|-Edit|-Ltx]  text->image/video/music/AV (SwarmUI; needs `up media`)
 #   .\doki.ps1 index                       (re)build the codebase RAG index for the code_search MCP tool
+#   .\doki.ps1 help                        list every command with a one-liner description
 #
 # GPU modes are mutually exclusive on 32GB: agent/coexist (LLM) vs media (image/
 # video). 'up media' stops the LLM servers first; 'up agent|coexist' stops media.
 param(
-    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen", "index")][string]$Command = "status",
+    # unknown command? PowerShell's own ValidateSet error lists the valid names — run `.\doki.ps1 help` for what each one does.
+    [Parameter(Position = 0)][ValidateSet("up", "down", "status", "restart", "logs", "verify", "start", "stop", "panel", "test", "doctor", "gen", "index", "code", "help")][string]$Command = "status",
     [Parameter(Position = 1)][string]$Arg,
     [switch]$Clear,  # `doki logs <svc> -Clear` — wipe that service's .log/.log.err (+ rotated .1) instead of tailing
     [switch]$Gated,  # `doki verify -Gated` — also report the gated sidecars' on-disk presence + their on-GPU TODO (default verify runs unchanged)
@@ -40,6 +42,8 @@ param(
     [string]$Engine   # -Speak engine selector (IndexTTS2 / Higgs / RVC / ...) -> the TtsSuite-<engine> custom workflow
 )
 $ErrorActionPreference = "Stop"
+# bare `doki` (no Command arg at all) defaults to "status" for muscle memory — just nudge toward `help` once, don't change the default.
+if (-not $PSBoundParameters.ContainsKey('Command')) { Write-Host "doki help - list all commands" -ForegroundColor Gray }
 $root = $PSScriptRoot
 $serving = Join-Path $root "serving"
 $runDir = Join-Path $root ".run"
@@ -364,6 +368,36 @@ function LaunchPanel {
         Start-Process $exe
     } else { Write-Host "control panel project not found at $proj" }
 }
+function ShowHelp {
+    Write-Host ""
+    Write-Host "DokiDex control plane — commands"
+    Write-Host "-----------------------------------"
+    $rows = [ordered]@{
+        'up [profile]'            = 'start a profile detached (agent|coexist|media; default agent)'
+        'down'                    = 'stop all managed services'
+        'status [json]'           = 'show services + health (add json for machine-readable)'
+        'restart [profile|svc]'   = 'restart a single service, or down+up the whole profile'
+        'start <service>'        = 'start one service (stops the opposite GPU group first)'
+        'stop <service>'          = 'stop one service'
+        'logs <service> [-Clear]' = "tail a service's live log, or wipe it with -Clear"
+        'verify [-Gated]'         = 'run capability smoke checks (verify.ps1); -Gated adds the sidecar report'
+        'doctor'                  = 'environment + install diagnostics'
+        'panel'                   = 'launch the control panel (builds it on first run)'
+        'test'                    = 'run the unit test suite (PS/py/xUnit; no GPU compute)'
+        'gen "<idea>" [flags]'    = "text->image/video/music/AV via SwarmUI (needs 'up media')"
+        'index'                   = '(re)build the codebase RAG index for the code_search MCP tool'
+        'code / code "<task>"'    = 'local coding agent: REPL, or one-shot with a task string'
+        'help'                    = 'this screen'
+    }
+    foreach ($k in $rows.Keys) { "{0,-24} {1}" -f $k, $rows[$k] | Write-Host }
+    Write-Host ""
+    Write-Host "gen: kind flags -Video -Music -Edit -I2v -Foley -Ltx -FaceId -Pulid -InfiniteTalk -LatentSync -Speak;" -ForegroundColor DarkGray
+    Write-Host "     modifiers -Fast -Upscale -Refine -Face -Realism -Aspect -Seed ...  (doki gen -ListKinds for the full catalog)" -ForegroundColor DarkGray
+    Write-Host "power-user alternative: Crush (harness/crush.json) is wired to the same local stack" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "full docs: README.md, docs/quickstart.md, docs/tutorial.md" -ForegroundColor DarkGray
+    Write-Host ""
+}
 
 switch ($Command) {
     "up"      { DoUp $Arg }
@@ -438,4 +472,25 @@ switch ($Command) {
         } else { Write-Host "panel test project not present" }
         exit $failed
     }
+    "code" {
+        # doki code — the local terminal coding agent (mirrors the Claude Code CLI), run in the CURRENT directory
+        # as the workspace. Needs the coder model serving on :8080 (agent or coexist mode): .\doki.ps1 up agent.
+        # `doki code` opens the interactive REPL; `doki code "<task>"` runs one turn and exits.
+        $proj = Join-Path $root "control\DokiDex.Cli\DokiDex.Cli.csproj"
+        $exe = Join-Path $root "control\DokiDex.Cli\bin\Release\net9.0-windows\doki-code.exe"
+        if (-not (Test-Path $exe) -and (Test-Path $proj)) {
+            if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+                Write-Host "building doki code (first run) ..."
+                & dotnet build $proj -c Release
+                if ($LASTEXITCODE -ne 0) { Write-Host "doki code build failed — run: dotnet build `"$proj`""; break }
+            } else { Write-Host "dotnet not found — run setup.ps1 (installs the .NET 9 SDK)"; break }
+        }
+        if (-not (Test-Path $exe)) { Write-Host "doki code not found at $exe"; break }
+        if (-not (Probe "http://127.0.0.1:8080/v1/models")) {
+            Write-Host "note: the coder model isn't serving on :8080 yet — start it with  .\doki.ps1 up agent" -ForegroundColor Yellow
+        }
+        $here = (Get-Location).ProviderPath
+        if ($Arg) { & $exe --cwd $here -p $Arg } else { & $exe --cwd $here }
+    }
+    "help"    { ShowHelp }
 }

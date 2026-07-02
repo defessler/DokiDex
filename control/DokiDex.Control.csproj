@@ -38,6 +38,9 @@
   <ItemGroup>
     <!-- let the test project exercise the updater's internal swap/rollback path -->
     <InternalsVisibleTo Include="DokiDex.Control.Tests" />
+    <!-- doki code (DokiDex.Cli/Program.cs, AssemblyName "doki-code") constructs CodeAgent's internal
+         StreamDisplayFilter directly (1.1) — InternalsVisibleTo keys off the ASSEMBLY name, not the project name -->
+    <InternalsVisibleTo Include="doki-code" />
   </ItemGroup>
 
   <ItemGroup>
@@ -57,6 +60,14 @@
     <ApplicationDefinition Remove="DokiDex.Control.Tests\**" />
   </ItemGroup>
 
+  <!-- the doki code CLI project lives under this folder too; don't glob its sources into the WPF app -->
+  <ItemGroup>
+    <Compile Remove="DokiDex.Cli\**" />
+    <Page Remove="DokiDex.Cli\**" />
+    <None Remove="DokiDex.Cli\**" />
+    <ApplicationDefinition Remove="DokiDex.Cli\**" />
+  </ItemGroup>
+
   <!-- the web host project also lives under this folder; keep its sources/content out of the WPF app -->
   <ItemGroup>
     <Compile Remove="DokiDex.Web\**" />
@@ -74,7 +85,7 @@
     <EmbeddedResource Include="$(IntermediateOutputPath)payload.zip" LogicalName="DokiDex.payload.zip" Visible="false" />
   </ItemGroup>
   <Target Name="StagePayload" BeforeTargets="CoreCompile"
-          Inputs="$(MSBuildProjectDirectory)\..\doki.ps1;$(MSBuildProjectDirectory)\..\verify.ps1;$(MSBuildProjectDirectory)\..\setup.ps1;$(MSBuildProjectDirectory)\..\serving\**\*;$(MSBuildProjectDirectory)\..\harness\**\*;$(MSBuildProjectDirectory)\..\media-assets\**\*"
+          Inputs="$(MSBuildProjectDirectory)\..\doki.ps1;$(MSBuildProjectDirectory)\..\verify.ps1;$(MSBuildProjectDirectory)\..\setup.ps1;$(MSBuildProjectDirectory)\..\README.md;$(MSBuildProjectDirectory)\..\docs\quickstart.md;$(MSBuildProjectDirectory)\..\docs\tutorial.md;$(MSBuildProjectDirectory)\..\docs\CAPABILITIES.md;$(MSBuildProjectDirectory)\..\docs\wiki\**\*;$(MSBuildProjectDirectory)\..\serving\**\*;$(MSBuildProjectDirectory)\..\harness\**\*;$(MSBuildProjectDirectory)\..\media-assets\**\*"
           Outputs="$(IntermediateOutputPath)payload.zip">
     <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\make-payload.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Out &quot;$(IntermediateOutputPath)payload.zip&quot;" />
     <ItemGroup>

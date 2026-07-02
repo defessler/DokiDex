@@ -114,12 +114,32 @@ public sealed class GenerationJobs
                 var outPath = req.Ephemeral
                     ? Path.Combine(Path.GetTempPath(), $"dokidex-live-{job.Id}{GenRequest.OutExtensionFor(req.Kind)}")
                     : _doki.NewGenOutPath(req.Kind);
-                var outcome = await SwarmGen.RunAsync(body!, outPath, p =>
+                // P2-1 fix: wrap the render in try/finally so ALL decoded data-URL temp files are cleaned up
+                // after SwarmGen.RunAsync returns, regardless of success, failure, or exception.
+                // TryDeleteLiveTemp's dokidex-prefix + TEMP-dir guard makes every call safe on ANY path.
+                SwarmGen.Outcome outcome;
+                try
                 {
-                    job.Progress = p.Overall > 1.0 ? p.Overall / 100.0 : p.Overall;
-                    if (!string.IsNullOrEmpty(p.PreviewDataUrl)) job.Preview = p.PreviewDataUrl;
-                    _ = Push(job);
-                }, ct).ConfigureAwait(false);
+                    outcome = await SwarmGen.RunAsync(body!, outPath, p =>
+                    {
+                        job.Progress = p.Overall > 1.0 ? p.Overall / 100.0 : p.Overall;
+                        if (!string.IsNullOrEmpty(p.PreviewDataUrl)) job.Preview = p.PreviewDataUrl;
+                        _ = Push(job);
+                    }, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Clean up ALL decoded temp images (init/mask/end + each controlnet) for every job type.
+                    // Folds the old ephemeral-only InitImage delete: TryDeleteLiveTemp silently skips any path
+                    // that is not in %TEMP% or does not carry the dokidex- prefix, so a server-side path passed
+                    // through is always a no-op here.
+                    TryDeleteLiveTemp(req.InitImage);
+                    TryDeleteLiveTemp(req.MaskImage);
+                    TryDeleteLiveTemp(req.EndImage);
+                    if (req.ControlNets is not null)
+                        foreach (var u in req.ControlNets)
+                            TryDeleteLiveTemp(u.Image);
+                }
 
                 if (outcome.Ok)
                 {
@@ -132,15 +152,11 @@ public sealed class GenerationJobs
                 }
                 else { job.Status = "failed"; job.Message = StripAnsi(outcome.Message); }
 
-                // Live-canvas cleanup: a live session must not leak %TEMP% files. The per-render init PNG that
-                // /api/generate decoded from the canvas data-URL is consumed by the run, so delete it now (one
-                // per debounced stroke-batch). The throwaway output still has to outlive the live pane's
+                // Ephemeral output artifact cleanup: the throwaway output must outlive the live pane's
                 // /api/media/{id} fetch, so it's deleted on a short TTL. Real gens keep their Library artifact.
+                // Input temp files (init/mask/end/controlnet) are cleaned in the finally block above.
                 if (req.Ephemeral)
-                {
-                    TryDeleteLiveTemp(req.InitImage);                  // the dokidex-init-*.png for THIS render
-                    ScheduleEphemeralArtifactCleanup(outPath);         // the dokidex-live-{id} output, on a TTL
-                }
+                    ScheduleEphemeralArtifactCleanup(outPath);
             }
             finally { _gpu.Release(); }
         }

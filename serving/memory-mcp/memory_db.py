@@ -9,6 +9,14 @@ DB_PATH = os.environ.get("MEMORY_DB", os.path.join(os.path.dirname(os.path.abspa
 _HAS_FTS = None
 
 
+def _like_escape(term: str) -> str:
+    """Escape backslash, percent, and underscore so a user-supplied search term is
+    treated as a literal substring in a SQL LIKE clause (use with ESCAPE '\\').
+    Order matters: escape '\\' first so the newly inserted '\\' chars are not
+    re-escaped by the subsequent replacements."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _conn():
     global _HAS_FTS
     c = sqlite3.connect(DB_PATH)
@@ -49,9 +57,10 @@ def search(query, limit=5):
         except sqlite3.OperationalError:
             rows = []  # bad FTS query syntax -> fall through to LIKE
     if not rows:
+        esc = _like_escape(query)
         rows = c.execute(
-            "SELECT id, content, tags, ts FROM memories WHERE content LIKE ? OR tags LIKE ? "
-            "ORDER BY ts DESC LIMIT ?", (f"%{query}%", f"%{query}%", int(limit))).fetchall()
+            "SELECT id, content, tags, ts FROM memories WHERE content LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' "
+            "ORDER BY ts DESC LIMIT ?", (f"%{esc}%", f"%{esc}%", int(limit))).fetchall()
     c.close()
     return [{"id": r[0], "content": r[1], "tags": r[2], "ts": r[3]} for r in rows]
 

@@ -57,8 +57,23 @@ Switch modes from the panel's **mode switcher** (or the studio's **Status** view
 
 Everything you generate — images, video, music, speech — lands in the **Library** view: search it, favorite/trash with the **F**/**X** keys, and **remix** any card back into Create.
 
+## 6 · Code with doki code
+
+`doki code` is a terminal coding agent (mirrors Claude Code) running Qwen3-Coder-30B locally — no cloud. Use it from any project directory.
+
+1. Make sure you're in **agent** mode (`.\doki.ps1 up agent`).
+2. `cd` into the project you want to work on.
+3. Run `.\doki.ps1 code` (interactive REPL) or `.\doki.ps1 code "<task>"` (one-shot, then exit).
+4. The agent proposes file edits and shell commands; each one shows a colored diff or the command text and waits for **[y]es / [a]lways / [n]o** (default: **no**).
+5. Review changes with `git diff` at any time; `/undo` reverts the last change in-session.
+
+Type `/help` for slash commands (model-swap, clear, cwd, undo, exit). Ctrl+C interrupts the current turn.
+
+---
+
 ## Next steps
 
 - The full walkthrough of every view and control → **[tutorial.md](tutorial.md)**
-- The coding agent (local Copilot/Claude-Code) → [wiki/7-quick-start.md](wiki/7-quick-start.md)
+- Full `doki code` walkthrough → [tutorial.md — §14](tutorial.md#doki-code--local-coding-agent)
+- The Crush coding CLI (harness-based) → [wiki/7-quick-start.md](wiki/7-quick-start.md)
 - Exact API call for every capability → [wiki/11-media-recipes.md](wiki/11-media-recipes.md)
