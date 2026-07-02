@@ -1201,7 +1201,7 @@
       if(!state.mediaActive){
         if(!confirm("The GPU isn't in MEDIA mode. Switch now (this stops the running LLM) and generate?")) return;
         hint.textContent='switching to MEDIA…';
-        try{ await fetch('/api/mode/media',{method:'POST'}); }catch{}
+        try{ await switchMode('media'); }catch{}
         if(!await waitForMedia(90)){ hint.textContent='still switching to MEDIA — click Generate again in a moment'; return; }
       }
       hint.textContent='submitting…';
@@ -1723,7 +1723,7 @@
     async function ensureMedia(){
       if(state.mediaActive) return true;
       if(!confirm("The GPU isn't in MEDIA mode. Switch now (this stops the running LLM) and generate?")) return false;
-      try{ await fetch('/api/mode/media',{method:'POST'}); }catch{}
+      try{ await switchMode('media'); }catch{}
       return await waitForMedia(90);
     }
     async function storyboard(){
@@ -1864,7 +1864,7 @@
       if(state.mediaActive){ el.innerHTML=''; return; }
       el.innerHTML='';
       const b = $(`<div class="banner"><span>The GPU isn't in MEDIA mode — generation needs it.</span><button class="ghost">Switch to MEDIA</button></div>`);
-      b.querySelector('button').onclick = async()=>{ await fetch('/api/mode/media',{method:'POST'}); };
+      b.querySelector('button').onclick = async()=>{ await switchMode('media'); };
       el.appendChild(b);
     }
     // ---- Pending image-gens queued FROM CHAT (generate_image tool). Chat runs the LLM resident on the single GPU,
@@ -2616,14 +2616,14 @@
       if(state.llmActive){ el.innerHTML=''; return; }
       el.innerHTML='';
       const b=$(`<div class="banner"><span>The GPU is in MEDIA mode — chat needs AGENT.</span><button class="ghost">Switch to AGENT</button></div>`);
-      b.querySelector('button').onclick=async()=>{ await fetch('/api/mode/agent',{method:'POST'}); };
+      b.querySelector('button').onclick=async()=>{ await switchMode('agent'); };
       el.appendChild(b);
     }
     function waitForLlm(maxSec){ return new Promise(res=>{ let n=0; const t=setInterval(()=>{ if(state.llmActive){clearInterval(t);res(true);} else if(++n>=maxSec){clearInterval(t);res(false);} },1000); }); }
     async function ensureLlm(){
       if(state.llmActive) return true;
       if(!confirm("The GPU is in MEDIA mode. Switch to AGENT now (this stops SwarmUI / image+video) and chat?")) return false;
-      try{ await fetch('/api/mode/agent',{method:'POST'}); }catch{}
+      try{ await switchMode('agent'); }catch{}
       const ok=await waitForLlm(90);
       renderChatGuard();   // clear the stale MEDIA banner immediately, don't wait for the next pollStatus tick
       return ok;
@@ -2796,6 +2796,18 @@
       const meta=[s.port?':'+s.port:null, s.vramGb?s.vramGb+' GB':null, s.model].filter(Boolean).join(' · ');
       return `<div class="scard"><div class="row" style="justify-content:space-between"><span><span class="dot ${cls}"></span>${esc(s.name)}</span><span class="hint">${st}</span></div><div class="hint" style="margin-top:5px;font-family:monospace">${esc(meta||s.desc||'')}</div></div>`;
     }
+    // 1.1 optimistic "switching…" (ux-redesign plan): a GPU flip takes seconds-to-minutes (model load), during
+    // which the truthful poll often shows NEITHER group healthy — the pill would flicker "GPU NONE" mid-switch.
+    // Track the user's declared intent so the pill says "switching to Image & Video…" until the target group
+    // actually turns active (or 90s passes — then truth wins unconditionally). Human mode names on purpose.
+    const MODE_HUMAN={agent:'Chat & Code',coexist:'Chat & Code + Autocomplete',media:'Image & Video'};
+    const MODE_GROUP={agent:'llm',coexist:'llm',media:'media'};
+    function switchMode(m){
+      state.switchingTo=m; state.switchingSince=Date.now();
+      const pill=document.getElementById('gpuPill');
+      if(pill) pill.innerHTML=`switching to <b>${esc(MODE_HUMAN[m]||m)}</b>…`;
+      return fetch('/api/mode/'+m,{method:'POST'}).catch(()=>{});
+    }
     async function pollStatus(){
       try {
         const r = await fetch('/api/status');
@@ -2815,13 +2827,18 @@
             ? svcs.find(s => s.group==='media' && s.running && s.healthy && s.model)
             : null;
         const modelLabel = activeSvc ? ` · ${esc(activeSvc.model)}` : '';
-        pill.innerHTML = `GPU <b>${active.toUpperCase()}</b>${modelLabel} · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
+        // Optimistic switching state: cleared the moment the target group is live, or after 90s of no arrival.
+        if(state.switchingTo && (active===MODE_GROUP[state.switchingTo] || Date.now()-state.switchingSince>90000))
+          state.switchingTo=null;
+        pill.innerHTML = state.switchingTo
+          ? `switching to <b>${esc(MODE_HUMAN[state.switchingTo]||state.switchingTo)}</b>…`
+          : `GPU <b>${active.toUpperCase()}</b>${modelLabel} · ${Math.round((gpu.usedMB||0)/1024)}/${Math.round((gpu.totalMB||0)/1024)} GB`;
         // status view
         const modes=document.getElementById('modes'); modes.innerHTML='';
         [['agent','chat + code'],['coexist','+ autocomplete'],['media','image + video']].forEach(([m,sub])=>{
           const on = active===m || (m==='agent'&&active==='llm');
           const b=$(`<button class="mode ${on?'active':''}"><span>${m.toUpperCase()}</span><small>${sub}</small></button>`);
-          b.onclick=()=>fetch('/api/mode/'+m,{method:'POST'}); modes.appendChild(b);
+          b.onclick=()=>switchMode(m); modes.appendChild(b);
         });
         const body=document.getElementById('statusBody'); body.innerHTML='';
         const llm=(doc.services||[]).filter(s=>s.group!=='media'), media=(doc.services||[]).filter(s=>s.group==='media');
@@ -2873,9 +2890,9 @@
       { name:'Go to Help', synonyms:['docs','manual','tutorial','quickstart'], run:()=>setView('help') },
       // -- mode switches: reuse the exact call the Status view's mode buttons make (a bare POST, no confirm --
       //    see the input-guard note above appKeys for why the palette mirrors that rather than adding a confirm) --
-      { name:'Switch to Agent mode', synonyms:['llm mode','chat mode','coder mode'], run:()=>fetch('/api/mode/agent',{method:'POST'}) },
-      { name:'Switch to Coexist mode', synonyms:['autocomplete mode'], run:()=>fetch('/api/mode/coexist',{method:'POST'}) },
-      { name:'Switch to Media mode', synonyms:['image mode','video mode'], run:()=>fetch('/api/mode/media',{method:'POST'}) },
+      { name:'Switch to Chat & Code mode', synonyms:['llm mode','chat mode','coder mode','agent mode'], run:()=>switchMode('agent') },
+      { name:'Switch to Chat & Code + Autocomplete', synonyms:['autocomplete mode','coexist mode'], run:()=>switchMode('coexist') },
+      { name:'Switch to Image & Video mode', synonyms:['image mode','video mode','media mode'], run:()=>switchMode('media') },
       // -- key actions --
       { name:'New chat', synonyms:['start chat','clear chat'], run:()=>{ setView('chat'); newChat(); } },
       { name:'Generate', synonyms:['focus prompt','create image'], run:()=>{ setView('create'); document.getElementById('prompt')?.focus(); } },

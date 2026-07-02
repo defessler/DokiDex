@@ -21,7 +21,7 @@ public static class StatusProbe
         {
             var healthy = await ProbeAsync(def.Health, ct).ConfigureAwait(false);
             var pid = ReadPid(def.Name);
-            var running = pid is int p && IsAlive(p);
+            var running = EffectiveRunning(pid is int p && IsAlive(p), healthy);
             var installed = def.RequiresRel == null || File.Exists(Path.Combine(RepoPaths.Root, def.RequiresRel));
             string? model = null, modelState = null; var configured = new List<string>();
             if (def.Name == "llama-swap" && healthy)
@@ -42,12 +42,45 @@ public static class StatusProbe
         return new StatusDoc { Services = services, Profiles = profiles, Gpu = ParseGpu(NvidiaSmiLine(), ActiveGroup(services)) };
     }
 
-    // active group = the group of the first running service (registry order), else "none". Mirrors doki.ps1.
-    internal static string ActiveGroup(IEnumerable<ServiceStatus> services)
+    // 1.1 truthful status: a service whose health endpoint ANSWERS is up, whatever the pidfile says — stale or
+    // missing pidfiles (launcher restarts, untracked starts) made Running=false over a live, loaded server, which
+    // fed the audit's live-caught "GPU NONE · 16/32 GB" pill. The raw pidfile fact only ADDS (a tracked-but-
+    // unhealthy process still shows running so the user can see it's wedged rather than absent).
+    internal static bool EffectiveRunning(bool rawRunning, bool healthy) => rawRunning || healthy;
+
+    // One group's aggregated evidence for the ActiveGroup decision. HasLoadedModel means a LIVE probed model
+    // (llama-swap's /running state) — never a sidecar's static ServiceDef.Model fallback (2.6), which exists
+    // even when everything is stopped.
+    internal readonly record struct GroupSignal(string Group, bool Healthy, bool HasLoadedModel);
+
+    // active group, derived from HEALTH (which endpoints answer) rather than pidfile order — the pidfile-based
+    // "first running service" rule reported "none" over a healthy llama-swap with a resident model (the audit's
+    // #5). Rules: no healthy group -> "none"; one healthy group -> that group; BOTH healthy (a transition, or
+    // coexist experiments) -> the group with a live loaded model wins, and when neither/both have one, prefer
+    // "llm" (documented arbitrary tie-break: the LLM group is the daily-driver default). NOTE: intentionally
+    // diverges from doki.ps1's pidfile-order rule — the panel/web pill now reports what is actually reachable.
+    internal static string ActiveGroup(IEnumerable<GroupSignal> signals)
     {
-        foreach (var s in services) if (s.Running) return s.Group;
-        return "none";
+        var byGroup = signals
+            .GroupBy(s => s.Group, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new GroupSignal(g.Key, g.Any(s => s.Healthy), g.Any(s => s.Healthy && s.HasLoadedModel)))
+            .Where(g => g.Healthy)
+            .ToList();
+        if (byGroup.Count == 0) return "none";
+        if (byGroup.Count == 1) return byGroup[0].Group;
+        var withModel = byGroup.Where(g => g.HasLoadedModel).ToList();
+        if (withModel.Count == 1) return withModel[0].Group;
+        var pool = withModel.Count > 0 ? withModel : byGroup;
+        return pool.FirstOrDefault(g => string.Equals(g.Group, "llm", StringComparison.OrdinalIgnoreCase)) is { Healthy: true } llm
+            ? llm.Group
+            : pool[0].Group;
     }
+
+    // ServiceStatus adapter: HasLoadedModel = a healthy service with a LIVE ModelState (set only by the
+    // llama-swap /running probe) — a sidecar's static Model string (ModelState null) never counts.
+    internal static string ActiveGroup(IEnumerable<ServiceStatus> services)
+        => ActiveGroup(services.Select(s => new GroupSignal(
+            s.Group ?? "", s.Healthy, s.Healthy && !string.IsNullOrEmpty(s.ModelState))));
 
     private static async Task<bool> ProbeAsync(string url, CancellationToken ct)
     {

@@ -69,16 +69,87 @@ public class ControlPlaneTests
         Assert.Null(StatusProbe.ParseGpu(null, "none"));
     }
 
+    // ---- 1.1 truthful status: the audit caught llama-swap healthy=true, model="coder-fast-lite" loaded,
+    //      16.6GB VRAM in use — yet Running=false (stale/missing pidfile) made ActiveGroup return "none", so
+    //      the pill rendered "GPU NONE · 16/32 GB" over a resident model. ActiveGroup now derives from HEALTH
+    //      (+ a live loaded model), never from the pidfile-tracked Running. ----
+
     [Fact]
-    public void ActiveGroup_is_first_running_services_group_else_none()
+    public void EffectiveRunning_is_true_when_healthy_even_if_pidfile_is_stale_or_missing()
     {
-        Assert.Equal("none", StatusProbe.ActiveGroup(new List<ServiceStatus>()));
+        // the audit's exact case: no/stale pidfile (rawRunning=false) but the service answers its health check.
+        Assert.True(StatusProbe.EffectiveRunning(rawRunning: false, healthy: true));
+        Assert.True(StatusProbe.EffectiveRunning(rawRunning: true, healthy: true));
+        Assert.True(StatusProbe.EffectiveRunning(rawRunning: true, healthy: false));   // raw pidfile fact still honored
+        Assert.False(StatusProbe.EffectiveRunning(rawRunning: false, healthy: false));
+    }
+
+    [Fact]
+    public void ActiveGroup_empty_is_none()
+    {
+        Assert.Equal("none", StatusProbe.ActiveGroup(Array.Empty<StatusProbe.GroupSignal>()));
+    }
+
+    [Fact]
+    public void ActiveGroup_audit_case_healthy_llm_with_model_and_stale_pidfile_is_llm()
+    {
+        // ServiceStatus overload: llama-swap Healthy=true + Model set, Running=false (the pidfile lied) — must
+        // NOT read as "none". This is the live-caught payload verbatim.
         var svcs = new List<ServiceStatus>
         {
-            new() { Name = "llama-swap", Group = "llm", Running = false },
-            new() { Name = "media", Group = "media", Running = true },
+            new() { Name = "llama-swap", Group = "llm", Healthy = true, Running = false, Model = "coder-fast-lite" },
+            new() { Name = "fim", Group = "llm", Healthy = false, Running = false },
+        };
+        Assert.Equal("llm", StatusProbe.ActiveGroup(svcs));
+    }
+
+    [Fact]
+    public void ActiveGroup_healthy_media_service_is_media()
+    {
+        var svcs = new List<ServiceStatus>
+        {
+            new() { Name = "llama-swap", Group = "llm", Healthy = false, Running = false },
+            new() { Name = "media", Group = "media", Healthy = true, Running = false },
         };
         Assert.Equal("media", StatusProbe.ActiveGroup(svcs));
+    }
+
+    [Fact]
+    public void ActiveGroup_nothing_healthy_and_no_loaded_model_is_none()
+    {
+        var svcs = new List<ServiceStatus>
+        {
+            new() { Name = "llama-swap", Group = "llm", Healthy = false, Running = false },
+            new() { Name = "media", Group = "media", Healthy = false, Running = false },
+        };
+        Assert.Equal("none", StatusProbe.ActiveGroup(svcs));
+    }
+
+    [Fact]
+    public void ActiveGroup_a_stopped_sidecars_static_model_never_counts_as_a_loaded_model()
+    {
+        // fim/embed/tts/stt carry a static ServiceDef.Model fallback even when unhealthy (2.6) — that must
+        // never be mistaken for a LIVE loaded model, or a fully-stopped registry would still read "llm".
+        var svcs = new List<ServiceStatus>
+        {
+            new() { Name = "fim", Group = "llm", Healthy = false, Running = false, Model = "qwen2.5-coder-3b (Q8_0)" },
+        };
+        Assert.Equal("none", StatusProbe.ActiveGroup(svcs));
+    }
+
+    [Theory]
+    [InlineData(false, false, "llm")]   // tie, neither has a loaded model -> prefer llm (documented, arbitrary)
+    [InlineData(true, false, "llm")]    // tie, llm has the loaded model
+    [InlineData(true, true, "llm")]     // tie, both have a loaded model -> still prefer llm
+    [InlineData(false, true, "media")]  // tie, only media has the loaded model -> media wins
+    public void ActiveGroup_tie_prefers_the_loaded_model_else_llm(bool llmModel, bool mediaModel, string expected)
+    {
+        var signals = new[]
+        {
+            new StatusProbe.GroupSignal("llm", true, llmModel),
+            new StatusProbe.GroupSignal("media", true, mediaModel),
+        };
+        Assert.Equal(expected, StatusProbe.ActiveGroup(signals));
     }
 
     [Fact]
