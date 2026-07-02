@@ -16,7 +16,9 @@ namespace DokiDex.Cli;
 // extended (1.6) with wall-clock seconds and tok/s; past ~40k estimated tokens the session auto-compacts before the
 // next turn runs (never in one-shot mode). Sessions persist automatically (1.4) to
 // %USERPROFILE%\.doki\sessions\<workspace-hash>\<timestamp>.json — OUTSIDE the repo, so there's nothing to
-// gitignore; `--continue` resumes the workspace's most recent one (composes with `-p`).
+// gitignore; `--continue` resumes the workspace's most recent one (composes with `-p`). Input ergonomics (1.7):
+// `@rel/path` inline in any message (interactive or `-p`) appends a bounded read of that file for the model (up to
+// 3 per message); a line starting `!` runs a shell command DIRECTLY, with no approval gate — the user typed it.
 internal static class Program
 {
     private static CancellationTokenSource? _turnCts;
@@ -127,6 +129,11 @@ internal static class Program
         // One-shot mode (doki code -p "task") — run a single turn and exit, for scripting.
         if (oneShot is not null)
         {
+            // @rel/path file mentions (1.7a) — applies here too (the plan covers one-shot, not just interactive):
+            // augment BEFORE the piped-stdin append below, so mentions reflect what the user actually TYPED, not
+            // whatever happens to be flowing through stdin.
+            oneShot += CodeMentions.Augment(root, oneShot);
+
             // Piped stdin — never read in interactive mode (that stdin is the prompt loop).
             if (Console.IsInputRedirected)
             {
@@ -158,6 +165,14 @@ internal static class Program
             if (line is null) { Console.WriteLine(); break; }   // EOF / Ctrl+Z
             line = line.Trim();
             if (line.Length == 0) continue;
+            if (line[0] == '!')
+            {
+                // `!command` shell passthrough (1.7b) — the user typed this themselves, so it runs DIRECTLY: no
+                // model round-trip, no approval gate (see HandleShellPassthrough's doc comment for the reasoning).
+                HandleShellPassthrough(root, working, line[1..].Trim());
+                SaveSession(root, sessionId, working, model);
+                continue;
+            }
             if (line[0] == '/')
             {
                 // /init and /compact both run ASYNC work (a normal turn / one LocalLlm.ChatAsync call) — neither
@@ -187,8 +202,11 @@ internal static class Program
                 if (!SlashCommand(line, ref model, working, root, ref sessionId)) break;
                 continue;
             }
+            // @rel/path file mentions (1.7a): augment BEFORE the turn runs — the original "@token" wording stays in
+            // the message exactly as typed; Augment only ever returns extra text to APPEND after it.
+            var augmented = line + CodeMentions.Augment(root, line);
             await MaybeAutoCompactAsync(root, working, model);
-            await RunTimedInteractiveTurnAsync(root, working, model, always, line, !noStream);
+            await RunTimedInteractiveTurnAsync(root, working, model, always, augmented, !noStream);
             SaveSession(root, sessionId, working, model);
         }
         return 0;
@@ -643,7 +661,11 @@ internal static class Program
                     "  /status probes llama-swap directly: reachable?, loaded model, configured tiers, and whether\n" +
                     "  the session's model is among them.\n" +
                     "  /usage (aliases /cost, /stats) shows this session's totals: turns, prompt/completion tokens,\n" +
-                    "  wall time, and average tok/s.\n");
+                    "  wall time, and average tok/s.\n" +
+                    "  @rel/path mentions a workspace file inline (up to 3 per message) — its first ~200 lines are\n" +
+                    "  appended for the model to see; an unresolved path is noted instead.\n" +
+                    "  !command runs a shell command DIRECTLY, no approval needed (you typed it yourself) — its\n" +
+                    "  output is shown and also given to the model as context for your next turn.\n");
                 return true;
             case "/model":
                 if (parts.Length > 1) { model = parts[1].Trim(); Paint(ConsoleColor.Gray, $"  model → {model}\n"); }
@@ -689,6 +711,30 @@ internal static class Program
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");
                 return true;
         }
+    }
+
+    // `!command` shell passthrough (1.7b, F2): a bang-prefixed REPL line runs DIRECTLY, with NO approval gate and
+    // NO model round-trip. Reasoning (why this is safe to skip the gate, unlike a model-originated Bash call): the
+    // approval gate exists to protect the user from a MODEL choosing to run something on their behalf without
+    // their say-so; here the USER is the one choosing — they typed the exact command themselves — so there's
+    // nothing left to approve. This mirrors Claude Code's own `!` semantics. Still reuses the SAME bounded
+    // executor as every model-driven Bash call (concurrent stdout/stderr drain, 120s cap, real cancellation — 0.1)
+    // via a trivially-allowing `approve` callback + an `alwaysAllowed` set pre-seeded with "Bash": RunBash's own
+    // Gate() short-circuits true the instant alwaysAllowed.Contains("Bash"), so that callback is never actually
+    // invoked — it exists only to satisfy the method's signature (RunBash is NOT weakened for model-originated
+    // calls; this is a wholly separate call site with its own always-true set, not a change to CodeAgent.Gate).
+    // The output is echoed to the console (the normal "[exit N]" block) AND appended to `working` as a role:"user"
+    // turn — NOT role:"tool", since there was no tool_call id to hang a tool-role result off of; this is modeled
+    // the same way piped stdin (0.2) is: extra user-authored context the model sees on its NEXT turn.
+    private static void HandleShellPassthrough(string root, List<object> working, string cmd)
+    {
+        if (cmd.Length == 0) { Paint(ConsoleColor.DarkGray, "  (empty command — try !git status)\n"); return; }
+        var json = JsonSerializer.Serialize(new { command = cmd });
+        var alwaysAllowed = new HashSet<string> { "Bash" };
+        var result = CodeAgent.RunBash(root, json, _ => CodeAgent.ApprovalDecision.Once, alwaysAllowed, CancellationToken.None);
+        Paint(ConsoleColor.Yellow, $"\n  $ {cmd}\n");
+        Paint(ConsoleColor.Gray, "  " + result.Replace("\n", "\n  ") + "\n");
+        working.Add(new { role = "user", content = $"[shell] $ {cmd}\n{result}" });
     }
 
     // `/resume` (alias `/sessions`): bare => list this workspace's saved sessions newest-first (index, timestamp,
