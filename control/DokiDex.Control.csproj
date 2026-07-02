@@ -85,7 +85,7 @@
     <EmbeddedResource Include="$(IntermediateOutputPath)payload.zip" LogicalName="DokiDex.payload.zip" Visible="false" />
   </ItemGroup>
   <Target Name="StagePayload" BeforeTargets="CoreCompile"
-          Inputs="$(MSBuildProjectDirectory)\..\doki.ps1;$(MSBuildProjectDirectory)\..\verify.ps1;$(MSBuildProjectDirectory)\..\setup.ps1;$(MSBuildProjectDirectory)\..\serving\**\*;$(MSBuildProjectDirectory)\..\harness\**\*;$(MSBuildProjectDirectory)\..\media-assets\**\*"
+          Inputs="$(MSBuildProjectDirectory)\..\doki.ps1;$(MSBuildProjectDirectory)\..\verify.ps1;$(MSBuildProjectDirectory)\..\setup.ps1;$(MSBuildProjectDirectory)\..\README.md;$(MSBuildProjectDirectory)\..\docs\quickstart.md;$(MSBuildProjectDirectory)\..\docs\tutorial.md;$(MSBuildProjectDirectory)\..\docs\CAPABILITIES.md;$(MSBuildProjectDirectory)\..\docs\wiki\**\*;$(MSBuildProjectDirectory)\..\serving\**\*;$(MSBuildProjectDirectory)\..\harness\**\*;$(MSBuildProjectDirectory)\..\media-assets\**\*"
           Outputs="$(IntermediateOutputPath)payload.zip">
     <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\make-payload.ps1&quot; -Root &quot;$(MSBuildProjectDirectory)\..&quot; -Out &quot;$(IntermediateOutputPath)payload.zip&quot;" />
     <ItemGroup>

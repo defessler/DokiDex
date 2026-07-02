@@ -161,9 +161,12 @@ public static class HomeCatalog
             {
                 // Copy-command starter: the smallest mechanism that fits -- Starters normally route in-app via
                 // setView(view), which doesn't apply to a terminal command. View "copy" is a pseudo-view the SPA
-                // special-cases (applyStarter) to copy Prompt to the clipboard instead of switching views. A
-                // second "open the docs" starter is skipped -- no in-app docs link exists yet (that's 3.2).
+                // special-cases (applyStarter) to copy Prompt to the clipboard instead of switching views.
                 S("copy: doki code", "copy", "doki code"),
+                // Open-the-docs starter (3.2 follow-through): view "help" is the Help view added in 3.2; Prompt
+                // here is reused as the doc id to open (applyStarter's help branch), landing straight on the
+                // full user-guide tutorial rather than the bare Help list.
+                S("open the docs", "help", "tutorial"),
             })
             { Guide = new[] { "Run `doki up agent` to bring up the agent GPU group.", "cd into your project directory.", "Run `doki code` (or `doki code \"<task>\"` for a one-shot)." } },
 

@@ -76,7 +76,8 @@ public class HomeCatalogTests
     {
         // "copy" is a pseudo-view (not a Studio section): the SPA's applyStarter special-cases it to copy the
         // starter's Prompt to the clipboard instead of switching views (used by the doki code starter, 3.1).
-        var views = new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status", "memory", "copy" }.ToHashSet();
+        // "help" is the in-app docs view added in 3.2 (the doki code card's "open the docs" starter).
+        var views = new[] { "create", "director", "chat", "cast", "voice", "flow", "scene", "library", "models", "status", "memory", "copy", "help" }.ToHashSet();
         foreach (var c in HomeCatalog.Capabilities)
         {
             Assert.False(string.IsNullOrWhiteSpace(c.Name));

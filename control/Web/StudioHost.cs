@@ -102,6 +102,29 @@ public static class StudioHost
         // Quick-start router: the Home "just start typing" box calls this on submit -> { view, prompt, kind }.
         api.MapGet("/home/route", (string? q) => Results.Json(HomeCatalog.RouteQuickStart(q)));
 
+        // ---- in-app Help view (3.2): the docs corpus (README/quickstart/tutorial/CAPABILITIES + docs/wiki/*.md),
+        // read-only, through DocsCatalog's whitelist. /docs/{id} maps id -> file ONLY through the server-built
+        // map -- a client can never turn an id into an arbitrary path (unknown ids 404). ----
+        api.MapGet("/docs", () =>
+        {
+            var map = DocsCatalog.DiscoverAll(RepoPaths.Root);
+            var entries = map
+                .Select(kv => DocsCatalog.ToListEntry(RepoPaths.Root, kv.Key, kv.Value))
+                .OrderBy(e => e.Group == "guides" ? 0 : 1)
+                .ToList();
+            return Results.Json(new { docs = entries });
+        });
+        api.MapGet("/docs/{id}", (string id) =>
+        {
+            var map = DocsCatalog.DiscoverAll(RepoPaths.Root);
+            if (!map.TryGetValue(id, out var mapping)) return Results.NotFound();
+            var full = DocsCatalog.ResolveSafe(RepoPaths.Root, mapping.RelPath);
+            if (full is null || !File.Exists(full)) return Results.NotFound();
+            var markdown = DocsCatalog.ReadCapped(full, DocsCatalog.MaxMarkdownChars);
+            var title = DocsCatalog.ResolveTitle(mapping, markdown);
+            return Results.Json(new { id, title, markdown });
+        });
+
         // Explicit mode switch from the dashboard = user intent, so it switches directly (the eviction-confirm
         // applies to the implicit auto-switch-on-generate path).
         api.MapPost("/mode/{profile}", (string profile, DokiService doki) =>
