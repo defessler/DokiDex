@@ -22,6 +22,7 @@ public static class EvalResults
     private sealed class Row
     {
         public string? Ts { get; set; }
+        public string? Harness { get; set; }
         public string? Model { get; set; }
         public string? Task { get; set; }
         public bool Pass { get; set; }
@@ -29,10 +30,19 @@ public static class EvalResults
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    // Pure: jsonl lines -> { model (case-insensitive) -> (passed, total) } over the latest-per-task rows.
+    // The promotion gate runs on ONE harness (crush -- docs/decisions.md's ">=91% golden" numbers are crush
+    // scorecards); results.jsonl also carries exploratory runs from other harnesses (claw, opencode).
+    public const string GateHarness = "crush";
+
+    // Pure: jsonl lines -> { model (case-insensitive) -> (passed, total) } over the latest-per-task rows,
+    // FILTERED to gateHarness. The filter exists because the badge answers "did this model pass the GATE?" --
+    // without it, a newer run from a different harness shadows the gate result per the latest-per-task rule
+    // (found 2026-07-01: a rapid claw run made coder-fast read 5/11 while its crush gate reads 10/11).
+    // gateHarness null/empty disables the filter (all harnesses mixed -- the old behavior, for diagnostics).
     // Malformed lines (bad JSON, or missing ts/model/task -- the fields the aggregation itself depends on) are
     // skipped rather than throwing: a single corrupt/truncated trailing line must never blank out every badge.
-    public static Dictionary<string, (int Passed, int Total)> Aggregate(IEnumerable<string> jsonlLines)
+    public static Dictionary<string, (int Passed, int Total)> Aggregate(
+        IEnumerable<string> jsonlLines, string? gateHarness = GateHarness)
     {
         // model -> task -> latest row seen so far for that task. ISO-8601 timestamps (as the harness writes
         // them) sort correctly under ordinal string comparison, so no DateTime parsing is needed.
@@ -47,6 +57,10 @@ public static class EvalResults
             catch (JsonException) { continue; }
             if (row is null) continue;
             if (string.IsNullOrWhiteSpace(row.Model) || string.IsNullOrWhiteSpace(row.Task) || string.IsNullOrWhiteSpace(row.Ts))
+                continue;
+            // Gate-harness filter: a row from another harness (or with no harness at all) is not gate evidence.
+            if (!string.IsNullOrWhiteSpace(gateHarness)
+                && !string.Equals(row.Harness, gateHarness, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             if (!latestByModelTask.TryGetValue(row.Model, out var tasks))

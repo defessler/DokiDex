@@ -16,12 +16,44 @@ namespace DokiDex.Control.Tests;
 // latest ts for that task; passed/total is counted over those latest-per-task rows only.
 public class EvalResultsTests
 {
-    private static string Row(string ts, string model, string task, bool pass)
-        => $$"""{"ts":"{{ts}}","harness":"crush","model":"{{model}}","task":"{{task}}","pass":{{(pass ? "true" : "false")}},"seconds":1.0,"note":"x"}""";
+    private static string Row(string ts, string model, string task, bool pass, string harness = "crush")
+        => $$"""{"ts":"{{ts}}","harness":"{{harness}}","model":"{{model}}","task":"{{task}}","pass":{{(pass ? "true" : "false")}},"seconds":1.0,"note":"x"}""";
 
     [Fact]
     public void Aggregate_of_empty_input_returns_an_empty_dictionary()
         => Assert.Empty(EvalResults.Aggregate(Array.Empty<string>()));
+
+    [Fact]
+    public void A_newer_run_from_a_NON_gate_harness_cannot_shadow_the_crush_gate_result()
+    {
+        // The 2026-07-01 field bug: a rapid claw-harness run wrote newer rows for the same tasks, and the
+        // harness-blind latest-per-task rule let them shadow the crush gate (coder-fast read 5/11 instead of
+        // its real 10/11 gate). Rows from other harnesses must be excluded from the gate badge entirely.
+        var lines = new[]
+        {
+            Row("2026-06-12T16:20:00", "coder-fast", "t1", pass: true),                     // the crush gate result
+            Row("2026-06-13T01:53:00", "coder-fast", "t1", pass: false, harness: "claw"),   // newer, wrong harness
+            Row("2026-06-13T01:54:00", "coder-fast", "t9", pass: false, harness: "claw"),   // claw-only task
+        };
+        var summary = EvalResults.Aggregate(lines);
+        var (passed, total) = summary["coder-fast"];
+        Assert.Equal(1, total);    // t9's claw-only row contributes nothing to the gate badge
+        Assert.Equal(1, passed);   // and t1 still reads as the crush pass
+    }
+
+    [Fact]
+    public void A_null_gate_harness_disables_the_filter_for_diagnostics()
+    {
+        var lines = new[]
+        {
+            Row("2026-06-12T16:20:00", "coder-fast", "t1", pass: true),
+            Row("2026-06-13T01:53:00", "coder-fast", "t1", pass: false, harness: "claw"),
+        };
+        var summary = EvalResults.Aggregate(lines, gateHarness: null);
+        var (passed, total) = summary["coder-fast"];
+        Assert.Equal(1, total);
+        Assert.Equal(0, passed);   // unfiltered: the newer claw fail wins latest-per-task (the old behavior)
+    }
 
     [Fact]
     public void Aggregate_keeps_only_the_most_recent_row_per_task_an_older_fail_then_newer_pass_counts_as_1_of_1()
