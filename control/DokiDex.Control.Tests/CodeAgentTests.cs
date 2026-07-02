@@ -200,4 +200,90 @@ public class CodeAgentTests
         Assert.True(finished, "RunBash did not respond to cancellation promptly.");
         Assert.Equal("(interrupted)", result);
     }
+
+    // ---- /plan mode (1.8): schema-level tool filtering + the text-edit safety net ----
+    // RunTurnAsync itself needs a live model, so these test the extracted PURE decision (SkipEditsForPlanMode),
+    // the notify-without-applying seam (NotifyEditsSkippedForPlanMode), and the mutating-tool guard (ExecuteTool)
+    // directly — the three pieces RunTurnAsync composes to make plan mode safe.
+
+    [Fact]
+    public void PlanToolsJson_is_exactly_read_and_grep()
+    {
+        Assert.Equal(2, CodeAgent.PlanToolsJson.Length);
+        Assert.Same(CodeAgent.ReadSchema, CodeAgent.PlanToolsJson[0]);
+        Assert.Same(CodeAgent.GrepSchema, CodeAgent.PlanToolsJson[1]);
+    }
+
+    [Fact]
+    public void SkipEditsForPlanMode_skips_only_when_in_plan_mode_with_blocks_present()
+    {
+        Assert.True(CodeAgent.SkipEditsForPlanMode(planMode: true, editBlockCount: 1));
+        Assert.False(CodeAgent.SkipEditsForPlanMode(planMode: true, editBlockCount: 0));
+        Assert.False(CodeAgent.SkipEditsForPlanMode(planMode: false, editBlockCount: 1));
+        Assert.False(CodeAgent.SkipEditsForPlanMode(planMode: false, editBlockCount: 0));
+    }
+
+    [Fact]
+    public void NotifyEditsSkippedForPlanMode_never_touches_disk_and_reports_the_plan_mode_note()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "doki-ca-plan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "x.txt");
+            File.WriteAllText(file, "a\nb\nc\n");
+            var blocks = CodeEdit.ParseSearchReplaceBlocks("x.txt\n<<<<<<< SEARCH\nb\n=======\nB\n>>>>>>> REPLACE\n");
+
+            var toolLines = new System.Collections.Generic.List<string>();
+            var resultLines = new System.Collections.Generic.List<(string name, string result)>();
+            var result = CodeAgent.NotifyEditsSkippedForPlanMode(blocks, toolLines.Add, (n, r) => resultLines.Add((n, r)));
+
+            Assert.Equal("a\nb\nc\n", File.ReadAllText(file));   // untouched — never applied
+            Assert.Equal(CodeAgent.PlanModeEditNote, result);
+            Assert.Single(toolLines);
+            Assert.Contains("Edit(x.txt)", toolLines[0]);
+            Assert.Single(resultLines);
+            Assert.Equal(("Edit", CodeAgent.PlanModeEditNote), resultLines[0]);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void ExecuteTool_blocks_mutating_tools_in_plan_mode_without_prompting_or_running()
+    {
+        var approveCalls = 0;
+        CodeAgent.ApprovalDecision Approve(CodeAgent.PendingAction a) { approveCalls++; return CodeAgent.ApprovalDecision.Once; }
+        var always = new System.Collections.Generic.HashSet<string>();
+
+        var editJson = JsonSerializer.Serialize(new { path = "nope.txt", search = "a", replace = "b" });
+        var editResult = CodeAgent.ExecuteTool(Directory.GetCurrentDirectory(), "Edit", editJson, Approve, always, CancellationToken.None, planMode: true);
+        Assert.Equal("plan mode: Edit is disabled — /act to enable", editResult);
+
+        var writeResult = CodeAgent.ExecuteTool(Directory.GetCurrentDirectory(), "Write",
+            JsonSerializer.Serialize(new { path = "nope.txt", content = "x" }), Approve, always, CancellationToken.None, planMode: true);
+        Assert.Equal("plan mode: Write is disabled — /act to enable", writeResult);
+
+        var bashResult = CodeAgent.ExecuteTool(Directory.GetCurrentDirectory(), "Bash",
+            JsonSerializer.Serialize(new { command = "echo hi" }), Approve, always, CancellationToken.None, planMode: true);
+        Assert.Equal("plan mode: Bash is disabled — /act to enable", bashResult);
+
+        Assert.Equal(0, approveCalls);   // never even asked
+        Assert.False(File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "nope.txt")));
+    }
+
+    [Fact]
+    public void ExecuteTool_still_runs_read_only_tools_in_plan_mode()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "doki-ca-plan-ro-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "x.txt");
+            File.WriteAllText(file, "hello\n");
+            var readResult = CodeAgent.ExecuteTool(dir, "Read", JsonSerializer.Serialize(new { path = "x.txt" }),
+                _ => CodeAgent.ApprovalDecision.Once, new System.Collections.Generic.HashSet<string>(), CancellationToken.None, planMode: true);
+            Assert.Contains("hello", readResult);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
 }

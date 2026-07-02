@@ -11,7 +11,7 @@ namespace DokiDex.Cli;
 // (coder-fast/coder-big via llama-swap) through CodeAgent's ReAct loop. The workspace is the current directory, so
 // you `cd` into any project and run it. Read/Grep run freely; Edit/Write/Bash show a diff or the command and wait
 // for your approval (y once / a always / n no). Slash commands: /help /model /clear /cwd /compact /context /resume
-// /sessions /export /status /usage /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old
+// /sessions /export /status /usage /plan /act /exit. Content tokens stream live by default (1.1; `--no-stream` forces the old
 // blocking-per-turn path). Esc or Ctrl+C interrupts. A dim context meter prints after each interactive turn (1.3),
 // extended (1.6) with wall-clock seconds and tok/s; past ~40k estimated tokens the session auto-compacts before the
 // next turn runs (never in one-shot mode). Sessions persist automatically (1.4) to
@@ -32,6 +32,12 @@ internal static class Program
     // persisted too, so the in-memory copy and the on-disk file never drift apart within a session).
     private static string _permRoot = "";
     private static CodePermissions.Rules _rules = CodePermissions.Rules.Empty;
+
+    // Plan mode (1.8): read-only exploration. While true, every turn is run with CodeAgent's PlanToolsJson
+    // (Read/Grep only) plus its extra request-layer instruction — Edit/Write/Bash are disabled until /act. Purely
+    // session-scoped (like `always`/permission rules being loaded once) — never persisted, reset by process
+    // restart. /plan turns it on; /act (or `/plan off`) turns it back off.
+    private static bool _planMode;
 
     // Usage accumulation (1.6): summed for the WHOLE interactive session — turns, prompt/completion tokens (from
     // LocalLlm.LastUsage right after each turn), and wall-clock seconds spent in RunOneTurnInteractive. Backs
@@ -160,7 +166,9 @@ internal static class Program
         if (resumedNote is not null) Paint(ConsoleColor.DarkGray, "  " + resumedNote + "\n");
         while (true)
         {
-            Paint(ConsoleColor.Cyan, "\n› ");
+            // Plan mode's prompt indicator (1.8) — the one persistent visual cue that Edit/Write/Bash are
+            // currently disabled, mirroring how Claude Code's own plan mode changes its prompt chrome.
+            Paint(ConsoleColor.Cyan, _planMode ? "\nplan› " : "\n› ");
             var line = Console.ReadLine();
             if (line is null) { Console.WriteLine(); break; }   // EOF / Ctrl+Z
             line = line.Trim();
@@ -182,7 +190,7 @@ internal static class Program
                 if (string.Equals(cmd, "/init", StringComparison.OrdinalIgnoreCase))
                 {
                     await MaybeAutoCompactAsync(root, working, model);
-                    await RunTimedInteractiveTurnAsync(root, working, model, always, InitPrompt, !noStream);
+                    await RunTimedInteractiveTurnAsync(root, working, model, always, InitPrompt, !noStream, _planMode);
                     SaveSession(root, sessionId, working, model);
                     continue;
                 }
@@ -206,7 +214,7 @@ internal static class Program
             // the message exactly as typed; Augment only ever returns extra text to APPEND after it.
             var augmented = line + CodeMentions.Augment(root, line);
             await MaybeAutoCompactAsync(root, working, model);
-            await RunTimedInteractiveTurnAsync(root, working, model, always, augmented, !noStream);
+            await RunTimedInteractiveTurnAsync(root, working, model, always, augmented, !noStream, _planMode);
             SaveSession(root, sessionId, working, model);
         }
         return 0;
@@ -248,11 +256,12 @@ internal static class Program
     // gates that window so the poller skips checking while a y/a/n prompt is up. A tiny race remains right at the
     // instant the flag flips (best-effort, as specified — not worth a bigger console-arbitration mechanism here).
     private static async Task<(bool Ok, string Text)> RunOneTurnInteractive(
-        string root, List<object> working, string model, HashSet<string> always, string userText, bool stream)
+        string root, List<object> working, string model, HashSet<string> always, string userText, bool stream,
+        bool planMode = false)
     {
         using var pollCts = new CancellationTokenSource();
         var poller = Task.Run(() => PollEscape(pollCts.Token));
-        try { return await RunOneTurn(root, working, model, always, userText, stream: stream); }
+        try { return await RunOneTurn(root, working, model, always, userText, stream: stream, planMode: planMode); }
         finally
         {
             pollCts.Cancel();
@@ -265,11 +274,12 @@ internal static class Program
     // zeros for itself rather than showing a stale carry-over from a previous turn's hop; times the turn's
     // wall-clock duration; accumulates both into the session totals (/usage); then prints the extended meter.
     private static async Task RunTimedInteractiveTurnAsync(
-        string root, List<object> working, string model, HashSet<string> always, string userText, bool stream)
+        string root, List<object> working, string model, HashSet<string> always, string userText, bool stream,
+        bool planMode = false)
     {
         LocalLlm.LastUsage = null;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await RunOneTurnInteractive(root, working, model, always, userText, stream);
+        await RunOneTurnInteractive(root, working, model, always, userText, stream, planMode);
         sw.Stop();
         var usage = LocalLlm.LastUsage;
         var wallSeconds = sw.Elapsed.TotalSeconds;
@@ -310,7 +320,7 @@ internal static class Program
     // (json mode wants machine output only, no token noise on stdout) and by `--no-stream`.
     private static async Task<(bool Ok, string Text)> RunOneTurn(
         string root, List<object> working, string model, HashSet<string> always, string userText,
-        bool quiet = false, bool stream = true)
+        bool quiet = false, bool stream = true, bool planMode = false)
     {
         working.Add(new { role = "user", content = userText });
         _turnCts = new CancellationTokenSource();
@@ -330,7 +340,7 @@ internal static class Program
 
         try
         {
-            var text = await CodeAgent.RunTurnAsync(root, working, model, ApproveGated, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token);
+            var text = await CodeAgent.RunTurnAsync(root, working, model, ApproveGated, always, showTool, showToolResult, showAssistantText, onToken, _turnCts.Token, planMode);
             var ok = !(text.StartsWith(ErrLlmReturned, StringComparison.Ordinal) || text.StartsWith(ErrLlmUnreachable, StringComparison.Ordinal));
             if (!quiet)
             {
@@ -641,7 +651,7 @@ internal static class Program
                 Paint(ConsoleColor.Gray,
                     "  Commands: /help  /model <name>  /diff  /undo  /init  /clear  /cwd  /compact [instructions]\n" +
                     "            /context  /resume [index]  /sessions  /export [file]  /permissions  /status\n" +
-                    "            /usage  /exit\n" +
+                    "            /usage  /plan [off]  /act  /exit\n" +
                     "  The agent uses Read, Grep, Edit, Write, Bash — you approve each change & command.\n" +
                     "  /diff shows this session's working-tree changes; /undo reverts the last file change.\n" +
                     "  /init explores the repo and writes/improves a DOKI.md orientation file at the workspace root.\n" +
@@ -662,6 +672,9 @@ internal static class Program
                     "  the session's model is among them.\n" +
                     "  /usage (aliases /cost, /stats) shows this session's totals: turns, prompt/completion tokens,\n" +
                     "  wall time, and average tok/s.\n" +
+                    "  /plan switches to read-only PLAN MODE: only Read/Grep are offered to the model, and any\n" +
+                    "  proposed edit is shown but NOT applied — the prompt becomes \"plan› \" while it's on. /act\n" +
+                    "  (or /plan off) restores normal editing.\n" +
                     "  @rel/path mentions a workspace file inline (up to 3 per message) — its first ~200 lines are\n" +
                     "  appended for the model to see; an unresolved path is noted instead.\n" +
                     "  !command runs a shell command DIRECTLY, no approval needed (you typed it yourself) — its\n" +
@@ -706,6 +719,22 @@ internal static class Program
             case "/cost":
             case "/stats":
                 ShowUsage();
+                return true;
+            case "/plan":
+                if (parts.Length > 1 && string.Equals(parts[1].Trim(), "off", StringComparison.OrdinalIgnoreCase))
+                {
+                    _planMode = false;
+                    Paint(ConsoleColor.Gray, "  plan mode off — Edit/Write/Bash restored.\n");
+                }
+                else
+                {
+                    _planMode = true;
+                    Paint(ConsoleColor.Yellow, "  plan mode on — read-only (Read/Grep); /act to apply changes.\n");
+                }
+                return true;
+            case "/act":
+                _planMode = false;
+                Paint(ConsoleColor.Gray, "  plan mode off — Edit/Write/Bash restored.\n");
                 return true;
             default:
                 Paint(ConsoleColor.DarkGray, $"  unknown command {parts[0]} — try /help\n");

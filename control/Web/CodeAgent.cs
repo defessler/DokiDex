@@ -93,6 +93,22 @@ public static class CodeAgent
 
     public static readonly object[] ToolsJson = { ReadSchema, GrepSchema, EditSchema, WriteSchema, BashSchema };
 
+    // Plan mode (1.8): SCHEMA-LEVEL tool filtering — only Read/Grep are ever sent to the model, so it literally
+    // cannot emit a tool_call for Edit/Write/Bash (the harness-research §2.3 pattern; Cline/Vibe-proven). This
+    // alone is NOT sufficient — see RunTurnAsync's plan-mode safety net below — because the model's PRIMARY edit
+    // path is a SEARCH/REPLACE block parsed out of plain content, never a tool call at all.
+    public static readonly object[] PlanToolsJson = { ReadSchema, GrepSchema };
+
+    // The ONE extra instruction plan mode adds, injected at the REQUEST layer only (see RunTurnAsync) — never
+    // appended to `working` itself, so it can't leak into a saved session (1.4) or survive past /act.
+    public const string PlanModeSystemLine =
+        "Plan mode: explore and propose a plan; do NOT change anything. File edits, Write, and Bash are disabled "
+        + "until the user runs /act.";
+
+    // Fed back to the model (and shown to the user) whenever a SEARCH/REPLACE block is skipped by the plan-mode
+    // safety net below, in place of ApplyTextEdits' normal "Edited x.txt." result.
+    public const string PlanModeEditNote = "[plan mode: proposed edits were NOT applied — run /act to enable changes]";
+
     // PURE: which tools change the machine (and so require approval). Case-insensitive, total.
     public static bool IsMutating(string? name)
         => (name ?? "").Trim().ToLowerInvariant() is "edit" or "write" or "bash";
@@ -193,19 +209,33 @@ public static class CodeAgent
     // suppressed there); this loop just forwards it. Everything downstream (edit-block parsing, ShouldContinue,
     // AppendToolRound) is unchanged — it operates on the returned ToolChatResult regardless of which path produced
     // it. Returns the final assistant text.
+    //
+    // `planMode` (1.8, default false — normal act-mode behavior is untouched): swaps in PlanToolsJson (Read/Grep
+    // only) and, per hop, injects ONE extra system message (PlanModeSystemLine) into the REQUEST sent to the LLM
+    // — built fresh each hop from `working` and never appended to `working` itself, so a mode toggle never
+    // pollutes the transcript, a saved session (1.4), or survives past /act. Tradeoff, accepted: while planMode is
+    // on this DOES shift the --cache-reuse prefix relative to an act-mode turn (working + one extra line vs.
+    // working alone) — fine, since plan mode is expected to be a short, low-volume detour, not steady-state
+    // traffic. Schema filtering alone can't stop a model from proposing a change though — SEARCH/REPLACE blocks
+    // are parsed out of plain CONTENT below, not tool calls — so planMode ALSO makes the edit-apply step below a
+    // no-op (SkipEditsForPlanMode) and guards ExecuteTool against a stray mutating tool_call arriving anyway.
     public static async Task<string> RunTurnAsync(
         string root, List<object> working, string? model,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed,
         Action<string> onTool, Action<string, string> onToolResult, Action<string> onAssistantText,
-        Action<string>? onToken, CancellationToken ct = default)
+        Action<string>? onToken, CancellationToken ct = default, bool planMode = false)
     {
         var finalText = "";
+        var tools = planMode ? PlanToolsJson : ToolsJson;
         for (var hop = 0; ; hop++)
         {
+            var callMessages = planMode
+                ? new List<object>(working) { new { role = "system", content = PlanModeSystemLine } }
+                : working;
             var turn = onToken is not null
-                ? await LocalLlm.ChatToolsStreamAsync(working, ToolsJson, ToolTemperature, MaxTokens, onToken, ct, model)
+                ? await LocalLlm.ChatToolsStreamAsync(callMessages, tools, ToolTemperature, MaxTokens, onToken, ct, model)
                     .ConfigureAwait(false)
-                : await LocalLlm.ChatToolsAsync(working, ToolsJson, ToolTemperature, MaxTokens, ct, model)
+                : await LocalLlm.ChatToolsAsync(callMessages, tools, ToolTemperature, MaxTokens, ct, model)
                     .ConfigureAwait(false);
             if (!turn.Ok) return turn.Error ?? "(the local model is not reachable — is agent mode up?)";
             finalText = (turn.Content ?? "").Trim();
@@ -242,7 +272,15 @@ public static class CodeAgent
             // so the model can verify or continue. Beats JSON edit-args for open coder models (Aider/Vibe protocol).
             if (editBlocks.Count > 0)
             {
-                var (_, editResult) = ApplyTextEdits(root, editBlocks, approve, alwaysAllowed, onTool, onToolResult);
+                // Plan mode's safety net — THE critical detail of 1.8: schema-level filtering (`tools` above) stops
+                // the model from ever seeing an Edit/Write/Bash TOOL, but SEARCH/REPLACE blocks are parsed out of
+                // plain CONTENT, not tool calls, so a model can still emit one with only Read/Grep in scope. Skip the
+                // apply entirely (no disk touch, no approval prompt) and tell the model via the same channel.
+                string editResult;
+                if (SkipEditsForPlanMode(planMode, editBlocks.Count))
+                    editResult = NotifyEditsSkippedForPlanMode(editBlocks, onTool, onToolResult);
+                else
+                    (_, editResult) = ApplyTextEdits(root, editBlocks, approve, alwaysAllowed, onTool, onToolResult);
                 working.Add(new { role = "assistant", content = finalText });
                 working.Add(new { role = "user", content = "[edit results]\n" + editResult });
                 continue;
@@ -253,7 +291,7 @@ public static class CodeAgent
             foreach (var tc in turn.ToolCalls)
             {
                 onTool(DisplayToolCall(tc.Name, tc.ArgumentsJson));
-                var result = ExecuteTool(root, tc.Name, tc.ArgumentsJson, approve, alwaysAllowed, ct);
+                var result = ExecuteTool(root, tc.Name, tc.ArgumentsJson, approve, alwaysAllowed, ct, planMode);
                 onToolResult(tc.Name, result);
                 results.Add(result);
             }
@@ -283,9 +321,40 @@ public static class CodeAgent
         return (applied, sb.ToString().TrimEnd());
     }
 
-    private static string ExecuteTool(string root, string name, string? json,
-        Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed, CancellationToken ct)
-        => (name ?? "").Trim().ToLowerInvariant() switch
+    // PURE decision seam for the plan-mode safety net above — factored out so it can be unit-tested with no model
+    // and no disk (RunTurnAsync itself needs a live LLM). internal (not private): CodeAgentTests exercises it
+    // directly.
+    internal static bool SkipEditsForPlanMode(bool planMode, int editBlockCount) => planMode && editBlockCount > 0;
+
+    // The plan-mode counterpart to ApplyTextEdits: same per-block onTool/onToolResult display (so the console still
+    // shows "here's what was proposed" per file) but NEVER calls Gate/RunEdit — no disk write, no approval prompt,
+    // no undo-journal entry. internal (not private): CodeAgentTests asserts directly that nothing reaches disk and
+    // the approval callback is never invoked.
+    internal static string NotifyEditsSkippedForPlanMode(
+        IReadOnlyList<CodeEdit.SearchReplaceBlock> blocks, Action<string> onTool, Action<string, string> onToolResult)
+    {
+        var sb = new StringBuilder();
+        foreach (var b in blocks)
+        {
+            var json = JsonSerializer.Serialize(new { path = b.Path, search = b.Search, replace = b.Replace });
+            onTool(DisplayToolCall("Edit", json));
+            onToolResult("Edit", PlanModeEditNote);
+            sb.Append(PlanModeEditNote).Append('\n');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    // internal (not private): lets CodeAgentTests exercise the plan-mode mutating-tool guard directly, with no
+    // network and no model — same InternalsVisibleTo pattern as RunBash below. `planMode` guards Edit/Write/Bash
+    // even though schema-level filtering (PlanToolsJson) should already keep the model from calling them at all —
+    // belt-and-suspenders for a stray tool_call arriving anyway (never executed, never prompted).
+    internal static string ExecuteTool(string root, string name, string? json,
+        Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed, CancellationToken ct,
+        bool planMode = false)
+    {
+        var n = (name ?? "").Trim();
+        if (planMode && IsMutating(n)) return $"plan mode: {n} is disabled — /act to enable";
+        return n.ToLowerInvariant() switch
         {
             "read" => CodeTools.RunReadFile(root, json),
             "grep" => CodeTools.RunGrep(root, json),
@@ -294,6 +363,7 @@ public static class CodeAgent
             "bash" => RunBash(root, json, approve, alwaysAllowed, ct),
             _ => $"unknown tool: '{name}'. Available: Read, Grep, Edit, Write, Bash.",
         };
+    }
 
     private static bool Gate(string tool, string title, string preview,
         Func<PendingAction, ApprovalDecision> approve, HashSet<string> alwaysAllowed)
